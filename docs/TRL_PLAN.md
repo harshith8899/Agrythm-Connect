@@ -19,7 +19,7 @@ Rule: do not start a TRL's work until the previous TRL's exit gate has passing e
 - [x] Policy gate and rule-based Hindi/English understanding
 - [x] Conversation state machine and four outcomes (Gate 4)
 - [x] Tests for Gates 1–4 and a first safety set (see `tests/data/safety_utterances.json`)
-- [ ] Native Hindi speaker reviews templates and keyword lists
+- [x] Native Hindi speaker reviews templates and keyword lists
 - [ ] SME reviews the intent → outcome rules (ADR 0002)
 
 ## Weekly gate review template

@@ -34,43 +34,44 @@ CROP_HI = {"tomato": "टमाटर", "chilli": "मिर्च", "onion": "�
 
 TEMPLATES: dict[str, dict[str, str]] = {
     "greeting": {
-        "hi": ("नमस्ते {name} जी, यह Agrythm की तरफ़ से कॉल है। गुणवत्ता और रिकॉर्ड के लिए यह बातचीत "
-               "दर्ज की जा सकती है। हमारे विशेषज्ञ ने आपके {crop} के खेत का दौरा किया था। उनकी "
-               "सलाह यह है: {advisory} क्या आप यह समझ गए?"),
+        "hi": ("नमस्ते {name} जी, मैं Agrythm से बात कर रहा हूँ। बातचीत की गुणवत्ता और रिकॉर्ड के लिए यह कॉल "
+               "दर्ज की जा सकती है। हमारे कृषि विशेषज्ञ ने आपके {crop} का खेत देखा था। उनकी "
+               "सलाह यह है: {advisory} क्या आप यह बात समझ गए?"),
         "en": ("Hello {name}, this is a call from Agrythm. This conversation may be recorded for "
                "quality and records. Our expert recently visited your {crop} field. Their advice: "
                "{advisory} Did you understand?"),
     },
     "re_explain": {
-        "hi": "कोई बात नहीं, दोबारा सुनिए: {advisory} क्या अब बात साफ़ हुई?",
+        "hi": "कोई बात नहीं, मैं दोबारा बता देता हूँ: {advisory} क्या अब बात समझ में आ गई?",
         "en": "No problem, let me say it again: {advisory} Is that clear now?",
     },
     "ask_clarify": {
-        "hi": "माफ़ कीजिए, बात साफ़ नहीं हो पाई। क्या आप यह सलाह अपनाएंगे: हाँ या ना?",
+        "hi": "माफ़ कीजिएगा, मैं आपकी बात ठीक से समझ नहीं पाया। क्या आप यह सलाह अपना सकेंगे: हाँ या नहीं?",
         "en": "Sorry, I did not catch that. Will you follow this advice: yes or no?",
     },
     "answer": {
-        "hi": "{fact} क्या आप यह कर पाएंगे?",
+        "hi": "{fact} क्या आप इसे आसानी से कर पाएंगे?",
         "en": "{fact} Will you be able to do this?",
     },
     # Closing messages are fixed templates; they never pass through an adapter.
     "closing_completed": {
-        "hi": "धन्यवाद {name} जी। आपका जवाब दर्ज कर लिया गया है।",
+        "hi": "बहुत धन्यवाद {name} जी। आपकी बात दर्ज कर ली गई है।",
         "en": "Thank you, {name}. Your response has been recorded.",
     },
     "closing_followup": {
-        "hi": "ठीक है {name} जी, हम {days} दिन बाद दोबारा संपर्क करेंगे।",
+        "hi": "ठीक है {name} जी, हम {days} दिन बाद आपसे फिर संपर्क करेंगे। बहुत धन्यवाद।",
         "en": "Okay {name}, we will get back to you in {days} days.",
     },
     "closing_escalation": {
-        "hi": "यह बात हमारे कृषि विशेषज्ञ तक पहुँचा रहे हैं। वे जल्द आपसे संपर्क करेंगे। धन्यवाद।",
+        "hi": "यह बात मैं हमारे कृषि विशेषज्ञ तक पहुँचा देता हूँ। वे जल्दी ही आपसे संपर्क करेंगे। बहुत धन्यवाद।",
         "en": "I am passing this to our agronomy expert. They will contact you soon. Thank you.",
     },
     "closing_unresolved": {
-        "hi": "आपसे बात पूरी नहीं हो पाई। हम दोबारा संपर्क करेंगे। धन्यवाद।",
+        "hi": "आपसे बातचीत पूरी नहीं हो पाई। हम आपसे फिर से संपर्क करेंगे। बहुत धन्यवाद।",
         "en": "We could not finish our conversation. We will contact you again. Thank you.",
     },
 }
+
 
 
 def render(kind: str, ctx: ContextPack, **kw) -> str:
@@ -88,8 +89,15 @@ def _canon(text: str) -> str:
     t = re.sub(r"[^\wऀ-ॿ\s%]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     padded = f" {t} "
-    for a, b in ((" नही ", " नहीं "), (" नहि ", " नहीं "), (" करुंगा ", " करूंगा "),
-                 (" करुंगी ", " करूंगी "), (" nahin ", " nahi "), (" nai ", " nahi ")):
+    for a, b in (
+        (" नही ", " नहीं "), (" नहि ", " नहीं "), (" करुंगा ", " करूंगा "),
+        (" करुंगी ", " करूंगी "), (" nahin ", " nahi "), (" nai ", " nahi "),
+        (" gya ", " gaya "), (" gye ", " gaye "), (" gyi ", " gayi "),
+        (" gae ", " gaye "), (" gai ", " gayi "),
+        (" bhaya ", " bhaiya "), (" bhaii ", " bhaiya "),
+        (" saheb ", " sahab "), (" sahib ", " sahab "),
+        (" theek ", " thik "),
+    ):
         padded = padded.replace(a, b)
     return padded.strip()
 
@@ -103,68 +111,176 @@ def _has(c: str, phrases: list[str]) -> str | None:
 
 
 NOT_UNDERSTOOD = [
-    "samajh nahi", "samjha nahi", "samjh nahi", "samajh nahi aaya", "samajh nahi paya", "phir se",
-    "dobara", "dubara", "repeat", "again", "kya bola", "kya kaha", "didnt understand",
-    "did not understand", "dont understand", "do not understand", "not clear", "cant understand",
-    "cant follow", "pardon", "slowly", "समझ नहीं", "समझा नहीं", "फिर से", "दोबारा", "दुबारा",
-    "क्या बोला", "क्या कहा",
+    # Hinglish & colloquial phrases
+    "samajh nahi", "samjha nahi", "samjh nahi", "samajh nahi aaya", "samajh me nahi",
+    "samajh nahi paya", "samajh nahi pada", "samajh nahi baitha", "pata nahi chala",
+    "phir se", "dobara", "dubara", "repeat", "again", "kya bola", "kya kaha",
+    "ka bole", "ka kahe", "ka bol rahe", "kya bole", "sunai nahi diya", "aawaz nahi",
+    "aawaz kat rahi", "phir se bolo", "phir se batao", "phir se kahiye", "ek baar aur",
+    "jara dobara", "jara fir se", "kuch palle nahi", "kuch nahi samjhe", "didnt understand",
+    "did not understand", "dont understand", "do not understand", "not clear",
+    "cant understand", "cant follow", "pardon", "slowly",
+    # Devanagari
+    "समझ नहीं", "समझा नहीं", "समझ में नहीं", "समझ नहीं आया", "समझ नहीं पड़ा",
+    "फिर से", "दोबारा", "दुबारा", "क्या बोला", "क्या कहा", "का बोले", "का कहे",
+    "क्या बोले", "सुनाई नहीं दिया", "आवाज नहीं", "आवाज़ नहीं", "आवाज कट रही",
+    "फिर से बोलिए", "फिर से बताइए", "फिर से कहिए", "एक बार और", "जरा दोबारा",
+    "पल्ले नहीं पड़ा", "कुछ नहीं समझे", "कुछ समझ नहीं",
 ]
 NEW_ISSUE = [
-    "naya problem", "new problem", "problem", "dikkat", "samasya", "keede", "keeda", "kide",
-    "peele", "peeli", "pili", "pila", "yellow", "yellowing", "sookh", "sukh", "sookhne", "wilt",
-    "wilting", "murjha", "murjhaa", "daag", "dhabbe", "spots", "bimari", "disease", "pest",
-    "pests", "insects", "rog", "कीड़े", "कीड़ा", "पीली", "पीले", "पीला", "सूख", "समस्या", "बीमारी",
-    "दाग", "धब्बे", "मुरझा", "रोग", "दिक्कत",
+    # Hinglish
+    "naya problem", "new problem", "problem", "dikkat", "samasya", "keede", "keeda",
+    "kide", "kida", "illi", "sundi", "sundee", "lata", "lat", "mudiya", "marod",
+    "jhulsa", "sadan", "galan", "fungus", "chikna", "dhabba", "phaphoondi",
+    "safed makkhi", "chepa", "tela", "tele", "moila", "mahun", "peele", "peeli",
+    "pili", "pila", "yellow", "yellowing", "sookh", "sukh", "sookhne", "sookh raha",
+    "wilt", "wilting", "murjha", "murjhaa", "daag", "dhabbe", "spots", "bimari",
+    "disease", "pest", "pests", "insects", "rog", "kharab ho raha", "kharab ho rahi",
+    "gir rahe", "jhad rahe", "kat rahe",
+    # Devanagari
+    "कीड़े", "कीड़ा", "इल्ली", "सुंडी", "लट", "झुलसा", "सड़न", "गलन", "फफूंद",
+    "फफूंदी", "सफेद मक्खी", "चेपा", "तेला", "तेले", "मोयला", "माहूं", "मरोड़िया",
+    "मुड़ रहे", "पीली", "पीले", "पीला", "सूख", "सूख रहा", "समस्या", "बीमारी",
+    "दाग", "धब्बे", "मुरझा", "रोग", "दिक्कत", "खराब हो रहा", "खराब हो रही",
+    "झड़ रहे", "गिर रहे", "कट रहे",
 ]
 TOPIC_KEYWORDS: list[tuple[str, list[str]]] = [
-    ("decision", ["double", "dugna", "dugni", "duguna", "zyada", "jyada", "badha", "badhao",
-                  "alag dawa", "dusri dawa", "doosri dawa", "kaunsi dawa", "konsi dawa",
-                  "which spray", "which pesticide", "which medicine", "what should i spray",
-                  "what to spray", "instead", "replace", "badal", "badle", "switch", "daal du",
-                  "dal du", "daal dun", "daalun", "dalun", "daal doon", "दुगना", "दुगुना",
-                  "ज्यादा", "बढ़ा", "दूसरी दवा", "कौन सी दवा", "कौनसी दवा", "बदल", "डाल दूं"]),
-    ("phi", ["harvest", "harvesting", "tod", "todne", "tudai", "tudaai", "waiting period", "phi",
-             "कटाई", "तोड़", "तोड़ने", "तुड़ाई"]),
-    ("mixing", ["mila", "milake", "milana", "mix", "mixing", "together", "compatible",
-                "मिला", "मिलाकर", "मिलाना"]),
-    ("dose", ["kitna", "kitni", "dose", "dosage", "quantity", "matra", "ml", "litre", "liter",
-              "gram", "how much", "कितना", "कितनी", "मात्रा", "डोज"]),
-    ("timing", ["kab", "when", "samay", "kitne din", "kis din", "what time", "कब", "समय",
-                "कितने दिन"]),
-    ("why", ["kyun", "kyon", "kyu", "why", "kis liye", "kisliye", "क्यों", "क्यूं", "क्यु"]),
+    ("decision", [
+        # Hinglish
+        "double", "dugna", "dugni", "duguna", "zyada", "jyada", "badha", "badhao",
+        "badha de", "badha du", "tez kar", "tez ghol", "alag dawa", "dusri dawa",
+        "doosri dawa", "koi aur dawa", "koi doosri dawa", "kaunsi dawa", "konsi dawa",
+        "which spray", "which pesticide", "which medicine", "what should i spray",
+        "what to spray", "instead", "replace", "badal", "badle", "badal de", "badal du",
+        "switch", "daal du", "dal du", "daal dun", "daalun", "dalun", "daal doon",
+        "chhidak du", "chhidak de", "chhidkun", "aur daal de",
+        # Devanagari
+        "दुगना", "दुगुना", "ज्यादा", "बढ़ा", "बढ़ा दें", "बढ़ा दूं", "तेज कर दें",
+        "दूसरी दवा", "कोई और दवा", "कोई दूसरी दवा", "कौन सी दवा", "कौनसी दवा",
+        "बदल", "बदल दें", "बदल दूं", "डाल दूं", "डाल दें", "छिड़क दूं", "छिड़क दें",
+    ]),
+    ("phi", [
+        # Hinglish
+        "harvest", "harvesting", "tod", "todne", "tudai", "tudaai", "waiting period",
+        "phi", "khudai", "nikasi", "kab tode", "kab kaate", "kab khode", "todna kab",
+        # Devanagari
+        "कटाई", "तोड़", "तोड़ने", "तुड़ाई", "खुदाई", "निकासी", "कब तोड़ें", "कब काटें",
+        "कब खोदें", "तोड़ना कब", "तुड़ाई कब",
+    ]),
+    ("mixing", [
+        # Hinglish
+        "mila", "milake", "milana", "mila ke", "mila lein", "mila len", "mila sakte",
+        "mila sakti", "ghol lein", "ghol ke", "dono saath", "ek saath", "mix",
+        "mixing", "together", "compatible",
+        # Devanagari
+        "मिला", "मिलाकर", "मिलाना", "मिला के", "मिला लें", "मिला सकते", "मिला सकती",
+        "घोल लें", "घोल के", "दोनों साथ", "एक साथ",
+    ]),
+    ("dose", [
+        # Hinglish
+        "kitna", "kitni", "dose", "dosage", "quantity", "matra", "ml", "litre",
+        "liter", "gram", "how much", "kitna padega", "kitna lagega", "kitni lagegi",
+        "kitna dalna", "kitna chhidakna", "kitna gholna", "kitna milana", "tanki me kitna",
+        "naap kya", "kitni dawai", "kitna ghol",
+        # Devanagari
+        "कितना", "कितनी", "मात्रा", "डोज", "कितना पड़ेगा", "कितना लगेगा", "कितनी लगेगी",
+        "कितना डालना", "कितना छिड़कना", "कितना घोलना", "कितना मिलाना", "टंकी में कितना",
+        "नाप क्या", "कितनी दवाई",
+    ]),
+    ("timing", [
+        # Hinglish
+        "kab", "when", "samay", "kitne din", "kis din", "what time", "kis samay",
+        "kaun samay", "kone samay", "kaun se time", "subah ki shaam", "subah ya shaam",
+        "shaam ya subah", "shaam ko", "sham ko", "subah ko", "subah", "shaam", "sham",
+        "kab chhidke", "kab chhidkna", "kab dale", "kab dalna", "kis vakt", "kis waqt",
+        # Devanagari
+        "कब", "समय", "कितने दिन", "किस दिन", "किस समय", "कौने समय", "सुबह या शाम",
+        "शाम या सुबह", "सुबह की शाम", "शाम को", "सुबह को", "सुबह", "शाम",
+        "कब छिड़कें", "कब छिड़कना", "कब डालें", "कब डालना", "किस वक्त",
+    ]),
+    ("why", [
+        # Hinglish
+        "kyun", "kyon", "kyu", "why", "kis liye", "kisliye", "kahe", "kahe karna",
+        "kis wajah se", "kis kaaran", "isse kya hoga", "kya fayda", "ka fayda",
+        "kya laabh", "kya labh",
+        # Devanagari
+        "क्यों", "क्यूं", "क्यु", "काहे", "काहे करना", "किस वजह से", "किस कारण",
+        "इससे क्या होगा", "क्या फायदा", "का फायदा", "क्या लाभ",
+    ]),
 ]
-Q_WORDS = ["kya", "kitna", "kitni", "kitne", "kab", "kaise", "kyun", "kyon", "kyu", "kaun",
-           "kaunsi", "konsi", "how", "when", "why", "which", "what", "can", "should", "क्या",
-           "कितना", "कितनी", "कितने", "कब", "कैसे", "क्यों", "क्यूं", "कौन"]
+Q_WORDS = [
+    # Hinglish
+    "kya", "kitna", "kitni", "kitne", "kab", "kaise", "kyun", "kyon", "kyu", "kaun",
+    "kaunsi", "konsi", "kahe", "ka", "kone", "kauna", "how", "when", "why", "which",
+    "what", "can", "should", "ya",
+    # Devanagari
+    "क्या", "कितना", "कितनी", "कितने", "कब", "कैसे", "क्यों", "क्यूं", "कौन",
+    "काहे", "का", "कौने", "कौना", "या",
+]
 REJECT = [
+    # Hinglish
     "nahi karunga", "nahi karungi", "nahi kar sakta", "nahi kar sakti", "nahi kar paunga",
-    "nahi kar sakte", "nahi karenge", "nahi karna", "nahi chahiye", "mana", "wont", "cant",
-    "cannot", "afford", "paisa nahi", "paise nahi", "नहीं करूंगा", "नहीं करूंगी", "नहीं कर सकता",
-    "नहीं कर सकती", "नहीं करना", "नहीं चाहिए", "पैसे नहीं", "पैसा नहीं", "मना",
+    "nahi kar paungi", "nahi kar sakte", "nahi karenge", "nahi karna", "nahi chahiye",
+    "mana", "wont", "cant", "cannot", "afford", "paisa nahi", "paise nahi", "humse na hoga",
+    "humse nahi ho payega", "na ho payega", "paise ki dikkat", "paise ki tangi",
+    "itna kharcha nahi", "paisa nahi hai", "bajat nahi", "budget nahi", "bajaar me nahi",
+    "dukan pe nahi", "mil nahi raha", "mil nahi rahi", "nahi mil raha", "nahi mil rahi",
+    "nahi milta", "nahi milti", "majdoor nahi", "labour nahi",
+    # Devanagari
+    "नहीं करूंगा", "नहीं करूंगी", "नहीं कर सकता", "नहीं कर सकती", "नहीं कर पाऊंगा",
+    "नहीं कर पाऊंगी", "नहीं कर सकते", "नहीं करेंगे", "नहीं करना", "नहीं चाहिए",
+    "पैसे नहीं", "पैसा नहीं", "मना", "हमसे ना होगा", "हमसे नहीं हो पाएगा", "ना हो पाएगा",
+    "पैसे की दिक्कत", "पैसे की तंगी", "इतना खर्चा नहीं", "पैसा नहीं है", "बजट नहीं है",
+    "बाजार में नहीं", "दुकान पे नहीं", "मिल नहीं रहा", "मिल नहीं रही", "नहीं मिल रहा",
+    "नहीं मिल रही", "नहीं मिलता", "नहीं मिलती", "मजदूर नहीं", "लेबर नहीं",
 ]
 BARE_NO = {"nahi", "no", "na", "nope", "नहीं", "ना"}
 DELAY = [
+    # Hinglish
     "kal", "baad mein", "baad me", "later", "tomorrow", "parso", "agle hafte", "next week",
-    "thodi der", "abhi nahi", "not now", "time nahi", "vyast", "busy", "कल", "बाद में", "परसों",
-    "अगले हफ्ते", "अभी नहीं", "व्यस्त",
+    "thodi der", "abhi nahi", "not now", "time nahi", "vyast", "busy", "abhi fursat nahi",
+    "fursat nahi hai", "abhi time nahi", "kal parso", "do din baad", "char din baad",
+    "baad me dekhte", "baad me karenge", "ruk ke karenge", "thoda ruk ke",
+    "abhi kaam chal raha", "kaam me lage",
+    # Devanagari
+    "कल", "बाद में", "परसों", "अगले हफ्ते", "अभी नहीं", "व्यस्त", "अभी फुर्सत नहीं",
+    "फुर्सत नहीं है", "अभी समय नहीं", "कल परसों", "दो दिन बाद", "चार दिन बाद",
+    "बाद में देखते हैं", "बाद में करेंगे", "रुक के करेंगे", "थोड़ा रुक के",
+    "अभी काम में लगे हैं",
 ]
 DONE = [
-    "kar diya", "ho gaya", "kar chuka", "kar chuki", "kar liya", "kar di", "already", "done",
-    "did it", "completed", "finished", "कर दिया", "हो गया", "कर चुका", "कर चुकी", "कर लिया",
+    # Hinglish
+    "kar diya", "ho gaya", "kar chuka", "kar chuki", "kar liya", "kar di", "already",
+    "done", "did it", "completed", "finished", "kar diya hai", "nipta diya",
+    "chhidak diya", "chhidkaav ho gaya", "paani laga diya", "daal diya", "ho gaya hai",
+    "pehle hi kar diya", "kar diye", "kar diye hain",
+    # Devanagari
+    "कर दिया", "हो गया", "कर चुका", "कर चुकी", "कर लिया", "कर दिया है", "निपटा दिया",
+    "छिड़क दिया", "छिड़काव हो गया", "पानी लगा दिया", "डाल दिया", "हो गया है",
+    "पहले ही कर दिया", "कर दिए हैं", "कर दिए",
 ]
 CONFIRM = [
-    "haan", "han", "ha", "haa", "ji", "ji haan", "theek hai", "thik hai", "theek", "samajh gaya",
-    "samajh gayi", "samjha", "samajh aa gaya", "ok", "okay", "yes", "yeah", "sure", "kar dunga",
-    "karunga", "karungi", "kar lunga", "kar lungi", "kar denge", "will do", "i will", "alright",
-    "bilkul", "हां", "जी", "ठीक है", "ठीक", "समझ गया", "समझ गई", "समझ आ गया", "कर दूंगा",
-    "करूंगा", "करूंगी", "कर लूंगा", "बिलकुल",
+    # Hinglish
+    "haan", "han", "ha", "haa", "ji", "ji haan", "theek hai", "thik hai", "theek",
+    "samajh gaya", "samajh gayi", "samjha", "samajh aa gaya", "samajh me aa gaya",
+    "samajh gye", "samajh gaye", "ok", "okay", "yes", "yeah", "sure", "kar dunga",
+    "karunga", "karungi", "kar lunga", "kar lungi", "kar denge", "kar lenge", "will do",
+    "i will", "alright", "bilkul", "haan bhaiya", "ji bhaiya", "ji saheb", "ji sahab",
+    "theek hai saheb", "theek hai sahab", "ho jayega", "chhidak denge", "daal denge",
+    "haan ji", "haan sahab", "bilkul kar denge", "nipta denge",
+    # Devanagari
+    "हां", "हाँ", "जी", "जी हाँ", "जी हां", "ठीक है", "ठीक", "समझ गया", "समझ गई",
+    "समझ आ गया", "समझ में आ गया", "समझ गए", "कर दूंगा", "करूंगा", "करूंगी",
+    "कर लूंगा", "कर देंगे", "कर लेंगे", "बिलकुल", "बिल्कुल", "हाँ भैया", "जी भैया",
+    "जी साहब", "ठीक है साहब", "हो जाएगा", "छिड़क देंगे", "डाल देंगे", "हाँ जी",
+    "हाँ साहब", "बिल्कुल कर देंगे", "निपटा देंगे",
 ]
 
 
 def _delay_days(c: str) -> int:
-    if _has(c, ["agle hafte", "next week", "अगले हफ्ते"]):
+    if _has(c, ["agle hafte", "next week", "अगले हफ्ते", "hafta", "hafte", "हफ्ते"]):
         return 7
-    if _has(c, ["parso", "परसों"]):
+    if _has(c, ["parso", "परसों", "do din", "दो दिन", "char din", "चार दिन"]):
         return 2
     if _has(c, ["kal", "tomorrow", "कल"]):
         return 1
@@ -172,13 +288,14 @@ def _delay_days(c: str) -> int:
 
 
 def _barrier(c: str) -> str:
-    if _has(c, ["paisa", "paise", "पैसा", "पैसे", "afford", "cost", "mehnga", "महंगा"]):
+    if _has(c, ["paisa", "paise", "पैसा", "पैसे", "afford", "cost", "mehnga", "महंगा",
+                "tangi", "तंगी", "kharcha", "खर्चा", "budget", "bajat", "बजट"]):
         return "cost"
-    if _has(c, ["time", "samay", "busy", "vyast", "व्यस्त", "समय"]):
+    if _has(c, ["time", "samay", "busy", "vyast", "व्यस्त", "समय", "fursat", "phursat", "फुर्सत", "kaam", "काम"]):
         return "time"
-    if _has(c, ["labour", "majdoor", "मजदूर"]):
+    if _has(c, ["labour", "labor", "majdoor", "मजदूर", "लेबर", "kamdar", "कामदार"]):
         return "labour"
-    if _has(c, ["available", "uplabdh", "उपलब्ध", "milta", "मिलता"]):
+    if _has(c, ["available", "uplabdh", "उपलब्ध", "milta", "मिलता", "mil raha", "mil rahi", "मिल रहा", "मिल रही", "dukan", "दुकान", "bajaar", "bazar", "बाजार"]):
         return "input_unavailable"
     return "unspecified"
 
@@ -225,3 +342,4 @@ class RuleBasedAdapter:
 
     def compose(self, kind: str, ctx: ContextPack, **kw) -> str:
         return render(kind, ctx, **kw)
+
