@@ -39,12 +39,17 @@ def transition(conn: sqlite3.Connection, conversation_id: int, to_state: State, 
 
 class ConversationSession:
     def __init__(self, conn: sqlite3.Connection, conversation_id: int,
-                 adapter: LLMAdapter | None = None, max_clarifications: int = 2):
+                 adapter: LLMAdapter | None = None, max_clarifications: int = 2,
+                 language: str | None = None):
         self.conn = conn
         self.conversation_id = conversation_id
         self.adapter = adapter or RuleBasedAdapter()
         self.max_clarifications = max_clarifications
         self.ctx: ContextPack = build_context(conn, conversation_id)  # Gate 2: before any call
+        if language is not None:  # per-call override of the farmer's stored preference
+            if language not in ("hi", "en"):
+                raise ValueError(f"unsupported language '{language}' (use 'hi' or 'en')")
+            self.ctx.language = language
         self.clarifications = 0
         self.facts_used: list[str] = []
         self.policy_blocks: list[str] = []
