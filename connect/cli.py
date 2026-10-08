@@ -15,6 +15,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Agrythm Connect text prototype (TRL 3)")
     p.add_argument("--db", default=":memory:", help="SQLite path (default: in-memory demo)")
     p.add_argument("--farmer", type=int, help="farmer id to call")
+    p.add_argument("--lang", choices=("hi", "en"),
+                   help="override the farmer's stored language for this call")
     p.add_argument("--list", action="store_true", help="list demo farmers and exit")
     args = p.parse_args(argv)
 
@@ -42,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ev = create_event(conn, "advisory_approved", args.farmer, row["cyc"], row["adv"],
                       dedupe_key=f"cli:{time.time()}")
-    session = ConversationSession(conn, ev.conversation_id)
+    session = ConversationSession(conn, ev.conversation_id, language=args.lang)
     print("AGENT:", session.open())
     try:
         while not session.closed:
