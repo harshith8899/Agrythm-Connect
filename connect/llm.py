@@ -234,7 +234,8 @@ REJECT = [
     "बाजार में नहीं", "दुकान पे नहीं", "मिल नहीं रहा", "मिल नहीं रही", "नहीं मिल रहा",
     "नहीं मिल रही", "नहीं मिलता", "नहीं मिलती", "मजदूर नहीं", "लेबर नहीं",
 ]
-BARE_NO = {"nahi", "no", "na", "nope", "नहीं", "ना"}
+BARE_NO = {"nahi", "no", "na", "nope", "n", "no thanks", "no sir", "nahi ji", "ji nahi",
+           "नहीं", "ना", "नहीं जी", "जी नहीं"}
 DELAY = [
     # Hinglish
     "kal", "baad mein", "baad me", "later", "tomorrow", "parso", "agle hafte", "next week",
@@ -263,7 +264,7 @@ CONFIRM = [
     # Hinglish
     "haan", "han", "ha", "haa", "ji", "ji haan", "theek hai", "thik hai", "theek",
     "samajh gaya", "samajh gayi", "samjha", "samajh aa gaya", "samajh me aa gaya",
-    "samajh gye", "samajh gaye", "ok", "okay", "yes", "yeah", "sure", "kar dunga",
+    "samajh gye", "samajh gaye", "ok", "okay", "yes", "y", "yep", "yeah", "sure", "kar dunga",
     "karunga", "karungi", "kar lunga", "kar lungi", "kar denge", "kar lenge", "will do",
     "i will", "alright", "bilkul", "haan bhaiya", "ji bhaiya", "ji saheb", "ji sahab",
     "theek hai saheb", "theek hai sahab", "ho jayega", "chhidak denge", "daal denge",
@@ -329,7 +330,8 @@ class RuleBasedAdapter:
             return Understanding("question", "other", 0.7, {"topic": "other"})
 
         if c in BARE_NO:
-            return Understanding("reject", None, 0.45, {"barrier": "unspecified"})
+            # Meaning depends on the question just asked; the orchestrator resolves it.
+            return Understanding("reject", None, 0.45, {"barrier": "unspecified", "bare_no": True})
         if _has(c, REJECT):
             return Understanding("reject", None, 0.9, {"barrier": _barrier(c)})
         if _has(c, DELAY):

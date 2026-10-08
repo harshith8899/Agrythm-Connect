@@ -54,6 +54,9 @@ class ConversationSession:
         self.facts_used: list[str] = []
         self.policy_blocks: list[str] = []
         self.last_route: str | None = None
+        # Last question the agent asked: "understood" (did you understand?) or
+        # "commit" (will you do it?). A bare "no" means different things after each.
+        self.pending_question = "understood"
         self.closed = False
 
     # ------------------------------------------------------------------ public API
@@ -97,6 +100,12 @@ class ConversationSession:
         inputs = mentioned_inputs(text)
         if inputs:
             u.entities["mentioned_inputs"] = inputs
+
+        if u.entities.pop("bare_no", False):
+            if self.pending_question == "understood":
+                u.intent, u.confidence = "not_understood", 0.9
+            else:
+                u.confidence = 0.9  # clear "no" to "will you do it?" -> reject
 
         if u.intent == "unclear" or u.confidence < CONFIDENCE_THRESHOLD:
             return self._clarify("ask_clarify", u)
@@ -178,6 +187,10 @@ class ConversationSession:
     # ------------------------------------------------------------------ helpers
     def _say(self, kind: str, **kw) -> str:
         text = self.adapter.compose(kind, self.ctx, **kw)
+        if kind in ("greeting", "re_explain"):
+            self.pending_question = "understood"
+        elif kind in ("ask_clarify", "answer"):
+            self.pending_question = "commit"
         result = check_reply(text, self.ctx.approved_corpus())
         if not result.allowed:
             raise PolicyBlocked(result.violations)
