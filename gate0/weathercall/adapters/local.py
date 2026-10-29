@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone
+from typing import Any
 
 from ..contracts import (
     CallAttempt, CallStatusView, FarmerContext, FarmerDayResult, FinalResult, Language, SkipReason,
@@ -43,6 +44,10 @@ CREATE TABLE IF NOT EXISTS attempts(
 CREATE TABLE IF NOT EXISTS day_results(
   farmer_id TEXT, call_date TEXT, result TEXT, attempts INT, skip_reason TEXT,
   PRIMARY KEY(farmer_id, call_date));
+CREATE TABLE IF NOT EXISTS weather(
+  place_name TEXT, lat REAL, lon REAL, forecast_date TEXT, summary TEXT, temp_min_c INT, temp_max_c INT,
+  rain_chance_pct INT, source TEXT, fetched_at TEXT,
+  PRIMARY KEY(place_name, forecast_date, fetched_at));
 """
 
 
@@ -50,6 +55,15 @@ class SQLiteLedger:
     def __init__(self, path: str = ":memory:"):
         self.db = sqlite3.connect(path)
         self.db.executescript(_SCHEMA)
+        try:
+            columns = [c[1] for c in self.db.execute("PRAGMA table_info(weather)").fetchall()]
+            if "forecast_date" not in columns:
+                self.db.execute("ALTER TABLE weather ADD COLUMN forecast_date TEXT")
+                self.db.commit()
+            self.db.execute("CREATE INDEX IF NOT EXISTS idx_weather_lookup ON weather(place_name, forecast_date)")
+            self.db.commit()
+        except Exception:
+            pass
 
     def record_attempt(self, a: CallAttempt) -> None:
         self.db.execute("INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?,?,?)", (
@@ -62,6 +76,61 @@ class SQLiteLedger:
             r.farmer_id, r.call_date.isoformat(), r.result.value, r.attempts,
             r.skip_reason.value if r.skip_reason else None))
         self.db.commit()
+
+    def record_weather(
+        self,
+        place_name: str,
+        lat: float,
+        lon: float,
+        summary: str,
+        temp_min_c: int,
+        temp_max_c: int,
+        rain_chance_pct: int,
+        source: str,
+        fetched_at: str | None = None,
+        forecast_date: str | date | None = None,
+    ) -> None:
+        ts = fetched_at or datetime.now(timezone.utc).isoformat()
+        fdate = (
+            forecast_date.isoformat()
+            if isinstance(forecast_date, date)
+            else (forecast_date or ts[:10])
+        )
+        self.db.execute(
+            "INSERT INTO weather VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (place_name, lat, lon, fdate, summary, temp_min_c, temp_max_c, rain_chance_pct, source, ts),
+        )
+        self.db.commit()
+
+    def get_latest_weather(self, place_name: str, forecast_date: str | date | None = None) -> dict[str, Any] | None:
+        if forecast_date:
+            fdate = forecast_date.isoformat() if isinstance(forecast_date, date) else forecast_date
+            row = self.db.execute(
+                "SELECT place_name, lat, lon, forecast_date, summary, temp_min_c, temp_max_c, rain_chance_pct, source, fetched_at "
+                "FROM weather WHERE place_name=? AND forecast_date=? ORDER BY fetched_at DESC LIMIT 1",
+                (place_name, fdate),
+            ).fetchone()
+        else:
+            row = self.db.execute(
+                "SELECT place_name, lat, lon, forecast_date, summary, temp_min_c, temp_max_c, rain_chance_pct, source, fetched_at "
+                "FROM weather WHERE place_name=? ORDER BY fetched_at DESC LIMIT 1",
+                (place_name,),
+            ).fetchone()
+
+        if not row:
+            return None
+        return {
+            "place_name": row[0],
+            "lat": row[1],
+            "lon": row[2],
+            "forecast_date": row[3],
+            "summary": row[4],
+            "temp_min_c": row[5],
+            "temp_max_c": row[6],
+            "rain_chance_pct": row[7],
+            "source": row[8],
+            "fetched_at": row[9],
+        }
 
     def has_final_result(self, farmer_id: str, call_date: date) -> bool:
         row = self.db.execute("SELECT 1 FROM day_results WHERE farmer_id=? AND call_date=?",

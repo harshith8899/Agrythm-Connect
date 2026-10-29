@@ -4,6 +4,7 @@ from weathercall import ports as P
 from weathercall.adapters import build_ports
 from weathercall.adapters.local import InMemoryFarmerSource, SQLiteLedger, demo_farmers
 from weathercall.adapters.mock import DEMO_WEATHER, MockTelephony, MockVoice, MockWeather
+from weathercall.adapters.open_meteo import OpenMeteoWeather
 from weathercall.adapters.trust_ai_stub import TrustAIFarmerSource, TrustAILedger
 from weathercall.config import Settings
 from weathercall.contracts import Language
@@ -24,6 +25,7 @@ def test_every_adapter_satisfies_its_port():
     assert isinstance(InMemoryFarmerSource([]), P.FarmerSource)
     assert isinstance(SQLiteLedger(), P.CallLedger)
     assert isinstance(MockWeather(), P.WeatherProvider)
+    assert isinstance(OpenMeteoWeather(), P.WeatherProvider)
     assert isinstance(MockVoice(), P.VoiceProvider)
     assert isinstance(MockTelephony(), P.TelephonyProvider)
     # the Trust AI placeholders must already fit the same sockets
@@ -37,8 +39,23 @@ def test_registry_rejects_unknown_adapter(monkeypatch):
         build_ports()
 
 
+def test_registry_accepts_open_meteo_aliases(monkeypatch):
+    monkeypatch.setenv("GATE0_WEATHER", "open-meteo")
+    ports = build_ports()
+    assert isinstance(ports.weather, OpenMeteoWeather)
+
+    monkeypatch.setenv("GATE0_WEATHER", "open_meteo")
+    ports = build_ports()
+    assert isinstance(ports.weather, OpenMeteoWeather)
+
+    monkeypatch.delenv("GATE0_WEATHER", raising=False)
+    monkeypatch.setenv("GATEO_WEATHER", "open_meteo")
+    ports = build_ports()
+    assert isinstance(ports.weather, OpenMeteoWeather)
+
+
 def test_core_never_imports_adapters():
     import pathlib
     root = pathlib.Path(__file__).parent.parent / "weathercall"
     for name in ("engine.py", "ports.py", "contracts.py", "script.py", "config.py"):
-        assert "import adapters" not in (root / name).read_text() and "from .adapters" not in (root / name).read_text(), name
+        assert "import adapters" not in (root / name).read_text(encoding="utf-8") and "from .adapters" not in (root / name).read_text(encoding="utf-8"), name

@@ -11,6 +11,9 @@ venv/
 !.env.example
 *.db
 *.sqlite3
+gate0/data/
+*.xlsx
+*.csv
 
 # IDE
 .vscode/

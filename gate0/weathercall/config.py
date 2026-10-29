@@ -2,7 +2,37 @@
 from __future__ import annotations
 
 import os
+import pathlib
 from dataclasses import dataclass
+
+
+def load_env(env_path: str | os.PathLike[str] | None = None) -> None:
+    """Load key-value pairs from .env into os.environ if not already set."""
+    if env_path is None:
+        candidates = [
+            pathlib.Path.cwd() / ".env",
+            pathlib.Path(__file__).resolve().parent.parent / ".env",
+            pathlib.Path(__file__).resolve().parent.parent.parent / ".env",
+        ]
+    else:
+        candidates = [pathlib.Path(env_path)]
+
+    for p in candidates:
+        if p.is_file():
+            try:
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip()
+                    if len(v) >= 2 and ((v[0] == '"' and v[-1] == '"') or (v[0] == "'" and v[-1] == "'")):
+                        v = v[1:-1]
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+                break
+            except Exception:
+                pass
 
 
 @dataclass(frozen=True)
@@ -16,6 +46,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        load_env()
         g = os.environ.get
         return cls(
             max_attempts=int(g("GATE0_MAX_ATTEMPTS", cls.max_attempts)),

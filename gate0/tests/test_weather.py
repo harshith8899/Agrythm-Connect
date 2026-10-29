@@ -2,11 +2,12 @@
 
 Verifies URL construction, contract compliance, coordinate guards,
 WMO code mapping, payload boundary validation, and network error handling
-without making real HTTP calls.
+without making real HTTP calls, plus live network cross-checks.
 """
 
 import io
 import json
+import socket
 from datetime import date
 from unittest.mock import patch
 from urllib.error import URLError
@@ -75,7 +76,7 @@ def test_valid_response_returns_bidar_weather_report():
     assert "longitude=77.5199" in request.full_url
     assert "timezone=Asia%2FKolkata" in request.full_url
     assert "start_date=2026-11-05" in request.full_url
-    assert "end_date=2026-11-05" in request.full_url
+    assert "end_date=2026-11-11" in request.full_url
     assert (
         "daily=weather_code%2Ctemperature_2m_max%2Ctemperature_2m_min%2C"
         "precipitation_probability_max"
@@ -189,27 +190,29 @@ def test_malformed_payload_returns_none(invalid_payload):
         URLError("service unavailable"),
     ],
 )
-def test_network_errors_return_none(error):
-    """Verify socket timeouts and network errors gracefully yield None."""
+def test_network_errors_return_none(error, tmp_path):
+    """Verify socket timeouts and network errors gracefully yield None when no cached forecast exists."""
+    empty_db = str(tmp_path / "empty.db")
     with patch(
         "weathercall.adapters.open_meteo.urllib.request.urlopen",
         side_effect=error,
     ):
-        report = OpenMeteoWeather().get_weather(
+        report = OpenMeteoWeather(db_path=empty_db).get_weather(
             "Bidar", LATITUDE, LONGITUDE, CALL_DATE
         )
 
     assert report is None
 
 
-def test_invalid_json_returns_none():
-    """Verify corrupted JSON responses gracefully yield None."""
+def test_invalid_json_returns_none(tmp_path):
+    """Verify corrupted JSON responses gracefully yield None when no cached forecast exists."""
+    empty_db = str(tmp_path / "empty.db")
     response = io.BytesIO(b"{not valid json")
     with patch(
         "weathercall.adapters.open_meteo.urllib.request.urlopen",
         return_value=response,
     ):
-        report = OpenMeteoWeather().get_weather(
+        report = OpenMeteoWeather(db_path=empty_db).get_weather(
             "Bidar", LATITUDE, LONGITUDE, CALL_DATE
         )
 
@@ -242,3 +245,122 @@ def test_boolean_values_in_payload_rejected():
     bad_data["daily"]["temperature_2m_max"][0] = True
     report = OpenMeteoWeather._report_from_payload("Bidar", CALL_DATE, bad_data)
     assert report is None
+
+
+def test_real_open_meteo_json_structure_compatibility():
+    """Verify parser compatibility with the exact multi-field response returned by api.open-meteo.com."""
+    real_api_response = {
+        "latitude": 17.891035,
+        "longitude": 77.50486,
+        "generationtime_ms": 0.156,
+        "utc_offset_seconds": 19800,
+        "timezone": "Asia/Kolkata",
+        "timezone_abbreviation": "GMT+5:30",
+        "elevation": 673.0,
+        "daily_units": {
+            "time": "iso8601",
+            "weather_code": "wmo code",
+            "temperature_2m_max": "\u00b0C",
+            "temperature_2m_min": "\u00b0C",
+            "precipitation_probability_max": "%",
+        },
+        "daily": {
+            "time": ["2026-11-05"],
+            "weather_code": [3],
+            "temperature_2m_max": [29.7],
+            "temperature_2m_min": [21.5],
+            "precipitation_probability_max": [2],
+        },
+    }
+    report = OpenMeteoWeather._report_from_payload("Bidar", CALL_DATE, real_api_response)
+    assert report is not None
+    assert report.place_name == "Bidar"
+    assert report.summary == "overcast"
+    assert report.temp_min_c == 22
+    assert report.temp_max_c == 30
+    assert report.rain_chance_pct == 2
+    assert report.source == "open-meteo"
+
+
+def test_live_open_meteo_bidar_report():
+    """Cross-check that the live Open-Meteo endpoint responds with valid data for today's forecast."""
+    try:
+        socket.create_connection(("api.open-meteo.com", 443), timeout=3)
+    except OSError:
+        pytest.skip("api.open-meteo.com is currently unreachable")
+
+    today = date.today()
+    report = OpenMeteoWeather().get_weather("Bidar", LATITUDE, LONGITUDE, today)
+    assert report is not None
+    assert report.place_name == "Bidar"
+    assert isinstance(report.summary, str) and len(report.summary) > 0
+    assert -10 <= report.temp_min_c <= 55
+    assert -10 <= report.temp_max_c <= 55
+    assert report.temp_min_c <= report.temp_max_c
+    assert 0 <= report.rain_chance_pct <= 100
+    assert report.source == "open-meteo"
+
+
+def test_custom_weather_api_url_and_key_from_env(monkeypatch):
+    """Ensure adapter respects WEATHER_API_URL and WEATHER_API_KEY from environment."""
+    monkeypatch.setenv("WEATHER_API_URL", "https://custom-proxy.internal/v1/forecast")
+    monkeypatch.setenv("WEATHER_API_KEY", "secret-test-key")
+
+    with patch(
+        "weathercall.adapters.open_meteo.urllib.request.urlopen",
+        return_value=mocked_response(payload()),
+    ) as urlopen:
+        OpenMeteoWeather().get_weather("Bidar", LATITUDE, LONGITUDE, CALL_DATE)
+
+    request = urlopen.call_args.args[0]
+    assert request.full_url.startswith("https://custom-proxy.internal/v1/forecast?")
+    assert "apikey=secret-test-key" in request.full_url
+
+
+def test_open_meteo_maintenance_fallback_uses_previous_day_cached_forecast(tmp_path):
+    """If Open-Meteo goes under maintenance, adapter accesses previous day forecast stored in DB."""
+    db_file = str(tmp_path / "test_weather.db")
+    adapter = OpenMeteoWeather(db_path=db_file, forecast_days=7)
+
+    day1 = date(2026, 11, 5)
+    day2 = date(2026, 11, 6)
+
+    # 1. On Day 1, Open-Meteo is healthy and returns multi-day forecasts (covering Day 1 & upcoming Day 2)
+    multi_day_payload = {
+        "daily": {
+            "time": ["2026-11-05", "2026-11-06"],
+            "weather_code": [2, 3],
+            "temperature_2m_max": [32.0, 30.0],
+            "temperature_2m_min": [21.0, 20.0],
+            "precipitation_probability_max": [10, 45],
+        }
+    }
+
+    with patch(
+        "weathercall.adapters.open_meteo.urllib.request.urlopen",
+        return_value=mocked_response(multi_day_payload),
+    ):
+        day1_report = adapter.get_weather("Bidar", LATITUDE, LONGITUDE, day1)
+
+    assert day1_report is not None
+    assert day1_report.place_name == "Bidar"
+    assert day1_report.temp_max_c == 32
+    assert day1_report.source == "open-meteo"
+
+    # 2. On Day 2, Open-Meteo goes under maintenance (HTTP 503 Service Unavailable / Timeout)
+    with patch(
+        "weathercall.adapters.open_meteo.urllib.request.urlopen",
+        side_effect=URLError("503 Service Unavailable (Maintenance)"),
+    ):
+        day2_report = adapter.get_weather("Bidar", LATITUDE, LONGITUDE, day2)
+
+    # 3. Verify that Day 2 accessed the forecast stored in SQLite from Day 1's fetch!
+    assert day2_report is not None
+    assert day2_report.place_name == "Bidar"
+    assert day2_report.summary == "overcast"
+    assert day2_report.temp_min_c == 20
+    assert day2_report.temp_max_c == 30
+    assert day2_report.rain_chance_pct == 45
+    assert day2_report.source == "open-meteo (cached)"
+
+
