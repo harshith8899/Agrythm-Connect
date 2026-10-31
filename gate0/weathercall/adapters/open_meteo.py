@@ -2,9 +2,9 @@
 
 This adapter implements the WeatherProvider port interface defined in
 `weathercall.ports`. It queries the Open-Meteo forecast API for daily weather
-metrics (WMO weather code, high/low temperatures, and maximum precipitation
-probability) for current and upcoming days, validates the results, and stores
-the forecasts in SQLite.
+metrics (WMO weather code, high/low temperatures, precipitation probability,
+wind speed, and relative humidity) for current and upcoming days, validates the results,
+and stores the forecasts in SQLite.
 
 If Open-Meteo goes under maintenance or encounters a network outage, the adapter
 automatically accesses upcoming day forecasts stored during previous days' runs.
@@ -30,7 +30,7 @@ _DEFAULT_BASE_URL = "https://api.open-meteo.com/v1/forecast"
 _TIMEZONE = "Asia/Kolkata"
 _DAILY_FIELDS = (
     "weather_code,temperature_2m_max,temperature_2m_min,"
-    "precipitation_probability_max"
+    "precipitation_probability_max,wind_speed_10m_max,relative_humidity_2m_mean"
 )
 
 
@@ -137,10 +137,22 @@ class OpenMeteoWeather:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS weather(
           place_name TEXT, lat REAL, lon REAL, forecast_date TEXT, summary TEXT, temp_min_c INT, temp_max_c INT,
-          rain_chance_pct INT, source TEXT, fetched_at TEXT,
+          rain_chance_pct INT, wind_speed_kmh REAL, humidity_pct INT, source TEXT, fetched_at TEXT,
           PRIMARY KEY(place_name, forecast_date, fetched_at));
         CREATE INDEX IF NOT EXISTS idx_weather_lookup ON weather(place_name, forecast_date);
         """)
+        try:
+            columns = [c[1] for c in conn.execute("PRAGMA table_info(weather)").fetchall()]
+            if "forecast_date" not in columns:
+                conn.execute("ALTER TABLE weather ADD COLUMN forecast_date TEXT")
+            if "wind_speed_kmh" not in columns:
+                conn.execute("ALTER TABLE weather ADD COLUMN wind_speed_kmh REAL DEFAULT 0.0")
+            if "humidity_pct" not in columns:
+                conn.execute("ALTER TABLE weather ADD COLUMN humidity_pct INT DEFAULT 0")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_weather_lookup ON weather(place_name, forecast_date)")
+            conn.commit()
+        except Exception:
+            pass
 
     def _store_reports_in_db(
         self,
@@ -159,7 +171,9 @@ class OpenMeteoWeather:
                 self._ensure_db_schema(conn)
                 for fdate, rep in reports_by_date.items():
                     conn.execute(
-                        "INSERT OR REPLACE INTO weather VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT OR REPLACE INTO weather(place_name, lat, lon, forecast_date, summary, "
+                        "temp_min_c, temp_max_c, rain_chance_pct, wind_speed_kmh, humidity_pct, source, fetched_at) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             place_name,
                             lat,
@@ -169,6 +183,8 @@ class OpenMeteoWeather:
                             rep.temp_min_c,
                             rep.temp_max_c,
                             rep.rain_chance_pct,
+                            rep.wind_speed_kmh,
+                            rep.humidity_pct,
                             rep.source,
                             ts,
                         ),
@@ -186,12 +202,12 @@ class OpenMeteoWeather:
             with sqlite3.connect(db_path) as conn:
                 self._ensure_db_schema(conn)
                 row = conn.execute(
-                    "SELECT place_name, summary, temp_min_c, temp_max_c, rain_chance_pct, source, fetched_at "
+                    "SELECT place_name, summary, temp_min_c, temp_max_c, rain_chance_pct, wind_speed_kmh, humidity_pct, source, fetched_at "
                     "FROM weather WHERE place_name=? AND forecast_date=? ORDER BY fetched_at DESC LIMIT 1",
                     (place_name, fdate),
                 ).fetchone()
                 if row:
-                    src = row[5]
+                    src = row[7]
                     if not src.endswith("(cached)"):
                         src = f"{src} (cached)"
                     return WeatherReport(
@@ -200,6 +216,8 @@ class OpenMeteoWeather:
                         temp_min_c=row[2],
                         temp_max_c=row[3],
                         rain_chance_pct=row[4],
+                        wind_speed_kmh=row[5] if row[5] is not None else 0.0,
+                        humidity_pct=row[6] if row[6] is not None else 0,
                         source=src,
                     )
         except Exception:
@@ -302,15 +320,27 @@ class OpenMeteoWeather:
             temp_min = daily["temperature_2m_min"][i]
             rain_chance = daily["precipitation_probability_max"][i]
 
+            # Extract wind speed (km/h) safely
+            wind_list = daily.get("wind_speed_10m_max")
+            wind_speed = wind_list[i] if (isinstance(wind_list, list) and i < len(wind_list)) else 0.0
+
+            # Extract humidity (%) safely - mean or max
+            hum_list = daily.get("relative_humidity_2m_mean") or daily.get("relative_humidity_2m_max")
+            humidity = hum_list[i] if (isinstance(hum_list, list) and i < len(hum_list)) else 0
+
             if (
                 not _finite_number(code)
                 or int(code) != code
                 or not _finite_number(temp_min)
                 or not _finite_number(temp_max)
                 or not _finite_number(rain_chance)
+                or not _finite_number(wind_speed)
+                or not _finite_number(humidity)
                 or not -10 <= temp_min <= 55
                 or not -10 <= temp_max <= 55
                 or not 0 <= rain_chance <= 100
+                or not 0 <= wind_speed <= 300
+                or not 0 <= humidity <= 100
                 or temp_min > temp_max
             ):
                 continue
@@ -326,6 +356,8 @@ class OpenMeteoWeather:
                 temp_max_c=round(temp_max),
                 rain_chance_pct=round(rain_chance),
                 source="open-meteo",
+                wind_speed_kmh=round(float(wind_speed), 1),
+                humidity_pct=round(humidity),
             )
         return results
 

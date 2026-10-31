@@ -17,6 +17,7 @@ from enum import Enum
 class Language(str, Enum):
     HI = "hi"
     EN = "en"
+    KN = "kn"
 
 
 class AttemptStatus(str, Enum):
@@ -70,6 +71,8 @@ class WeatherReport:
     temp_max_c: int
     rain_chance_pct: int
     source: str             # which provider produced it (kept for accuracy checks)
+    wind_speed_kmh: float = 0.0
+    humidity_pct: int = 0
 
 
 @dataclass(frozen=True)

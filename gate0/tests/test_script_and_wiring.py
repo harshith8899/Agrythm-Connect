@@ -7,7 +7,7 @@ from weathercall.adapters.mock import DEMO_WEATHER, MockTelephony, MockVoice, Mo
 from weathercall.adapters.open_meteo import OpenMeteoWeather
 from weathercall.adapters.trust_ai_stub import TrustAIFarmerSource, TrustAILedger
 from weathercall.config import Settings
-from weathercall.contracts import Language
+from weathercall.contracts import FarmerContext, Language
 from weathercall.script import build_message, estimate_seconds
 
 
@@ -19,6 +19,41 @@ def test_message_says_ai_and_fits_target_length(farmer_idx):
     assert s.target_seconds_min <= estimate_seconds(text) <= s.target_seconds_max, estimate_seconds(text)
     assert farmer.display_name in text
     assert ("AI" in text) if farmer.language is Language.EN else ("एआई" in text)
+
+
+def test_kannada_message_says_ai_and_fits_target_length():
+    farmer = FarmerContext("F005", "Manjunath", Language.KN, "Mandya", 12.5, 76.9, True, True, "FAKE-0005")
+    text = build_message(farmer, DEMO_WEATHER["Mandya"])
+    s = Settings()
+    assert s.target_seconds_min <= estimate_seconds(text) <= s.target_seconds_max, estimate_seconds(text)
+    assert "Manjunath" in text
+    assert "ಎಐ" in text
+    assert "ಚೇತನ್ ಸರ್" in text
+    assert "ಗಾಳಿಯ ವೇಗ" in text
+    assert "ತೇವಾಂಶ" in text
+
+
+def test_script_message_intro_matches_chethan_sir_assistant():
+    farmer_en = FarmerContext("F100", "Sir", Language.EN, "Bidar", 17.9, 77.5, True, True, "")
+    text_en = build_message(farmer_en, DEMO_WEATHER["Mandya"])
+    assert text_en.startswith("Hello Sir, I am calling as Chethan Sir's assistant from Agrythm Connect.")
+    assert "wind speed" in text_en
+    assert "humidity" in text_en
+    assert "rainfall probability" in text_en
+
+    farmer_hi = FarmerContext("F101", "सर", Language.HI, "Bidar", 17.9, 77.5, True, True, "")
+    text_hi = build_message(farmer_hi, DEMO_WEATHER["Mandya"])
+    assert text_hi.startswith("नमस्ते सर, मैं एग्रिदम कनेक्ट से चेतन सर के असिस्टेंट के रूप में बोल रही एआई आवाज़ हूँ।")
+    assert "हवा की गति" in text_hi
+    assert "नमी" in text_hi
+    assert "बारिश की संभावना" in text_hi
+
+    farmer_kn = FarmerContext("F102", "ಸರ್", Language.KN, "Bidar", 17.9, 77.5, True, True, "")
+    text_kn = build_message(farmer_kn, DEMO_WEATHER["Mandya"])
+    assert text_kn.startswith("ನಮಸ್ಕಾರ ಸರ್, ನಾನು ಅಗ್ರಿಥಮ್ ಕನೆಕ್ಟ್‌ನಿಂದ ಚೇತನ್ ಸರ್ ಅವರ ಅಸಿಸ್ಟೆಂಟ್ ಆಗಿ ಕರೆ ಮಾಡುತ್ತಿರುವ ಎಐ ಧ್ವನಿ ಸಹಾಯಕ.")
+    assert "ಗಾಳಿಯ ವೇಗ" in text_kn
+    assert "ತೇವಾಂಶ" in text_kn
+    assert "ಮಳೆಯ ಸಾಧ್ಯತೆ" in text_kn
 
 
 def test_every_adapter_satisfies_its_port():

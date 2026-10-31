@@ -55,29 +55,36 @@ def run_weather_check(
     print(f"  Summary:      {report.summary}")
     print(f"  Temp Min:     {report.temp_min_c}\u00b0C")
     print(f"  Temp Max:     {report.temp_max_c}\u00b0C")
+    print(f"  Wind Speed:   {report.wind_speed_kmh} km/h")
     print(f"  Rain Chance:  {report.rain_chance_pct}%")
+    print(f"  Humidity:     {report.humidity_pct}%")
 
-    # 2. Spoken voice preview in English & Hindi
-    dummy_en = FarmerContext("PREVIEW_EN", "Farmer", Language.EN, place, lat, lon, True, True, "")
-    dummy_hi = FarmerContext("PREVIEW_HI", "किसान भाई", Language.HI, place, lat, lon, True, True, "")
+    # 2. Spoken voice preview in English, Hindi & Kannada
+    dummy_en = FarmerContext("PREVIEW_EN", "Sir", Language.EN, place, lat, lon, True, True, "")
+    dummy_hi = FarmerContext("PREVIEW_HI", "सर", Language.HI, place, lat, lon, True, True, "")
+    dummy_kn = FarmerContext("PREVIEW_KN", "ಸರ್", Language.KN, place, lat, lon, True, True, "")
     print("\nSpoken Message Previews:")
     print(f"  [EN] {build_message(dummy_en, report)}")
     try:
         print(f"  [HI] {build_message(dummy_hi, report)}")
     except UnicodeEncodeError:
-        print("  [HI] (Devanagari text omitted to preserve cp1252 console encoding)")
+        print("  [HI] (Hindi Devanagari text omitted to preserve cp1252 console encoding)")
+    try:
+        print(f"  [KN] {build_message(dummy_kn, report)}")
+    except UnicodeEncodeError:
+        print("  [KN] (Kannada text omitted to preserve cp1252 console encoding)")
 
     # 3. Read back and verify cached forecast rows stored in DB (including upcoming days)
     print(f"\n[VERIFIED] Stored Forecast Records in SQLite 'weather' table ({db_path}):")
     try:
         with sqlite3.connect(db_path) as conn:
             rows = conn.execute(
-                "SELECT forecast_date, summary, temp_min_c, temp_max_c, rain_chance_pct, source, fetched_at "
+                "SELECT forecast_date, summary, temp_min_c, temp_max_c, rain_chance_pct, wind_speed_kmh, humidity_pct, source, fetched_at "
                 "FROM weather WHERE place_name=? ORDER BY forecast_date ASC",
                 (place,),
             ).fetchall()
             for r in rows:
-                print(f"  Date: {r[0]} | {r[1]:<14} | Min: {r[2]}°C | Max: {r[3]}°C | Rain: {r[4]}% | Source: {r[5]}")
+                print(f"  Date: {r[0]} | {r[1]:<14} | Min: {r[2]}°C | Max: {r[3]}°C | Wind: {r[5]}km/h | Rain: {r[4]}% | Hum: {r[6]}% | Source: {r[7]}")
     except Exception as exc:
         print(f"  [WARNING] Could not query database rows: {exc}")
 

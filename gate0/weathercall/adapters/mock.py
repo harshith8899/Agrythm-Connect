@@ -38,8 +38,8 @@ class MockTelephony:
 
 
 DEMO_WEATHER = {
-    "Mandya": WeatherReport("Mandya", "partly cloudy", 21, 32, 20, "mock"),
-    "Hassan": WeatherReport("Hassan", "light rain", 19, 27, 70, "mock"),
-    "Mysuru": WeatherReport("Mysuru", "clear", 20, 33, 5, "mock"),
+    "Mandya": WeatherReport("Mandya", "partly cloudy", 21, 32, 20, "mock", wind_speed_kmh=12.0, humidity_pct=65),
+    "Hassan": WeatherReport("Hassan", "light rain", 19, 27, 70, "mock", wind_speed_kmh=15.5, humidity_pct=80),
+    "Mysuru": WeatherReport("Mysuru", "clear", 20, 33, 5, "mock", wind_speed_kmh=8.0, humidity_pct=50),
     # "Nowhere" is intentionally absent: exercises the weather-missing path
 }

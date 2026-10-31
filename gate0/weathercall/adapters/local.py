@@ -28,11 +28,11 @@ def demo_farmers() -> list[FarmerContext]:
     return [
         f(1, "Ramesh", Language.HI, "Mandya"), f(2, "Lakshmi", Language.EN, "Mysuru"),
         f(3, "Suresh", Language.HI, "Hassan"), f(4, "Anita", Language.HI, "Mandya"),
-        f(5, "Manjunath", Language.HI, "Hassan"), f(6, "Geeta", Language.EN, "Mysuru"),
+        f(5, "Manjunath", Language.KN, "Hassan"), f(6, "Geeta", Language.EN, "Mysuru"),
         f(7, "Prakash", Language.HI, "Nowhere"),           # weather missing
         f(8, "Savitha", Language.HI, "Mandya", consent=False),
         f(9, "Basavaraj", Language.HI, "Mysuru", active=False),
-        f(10, "Kavya", Language.EN, "Hassan"),
+        f(10, "Kavya", Language.KN, "Hassan"),
     ]
 
 
@@ -46,8 +46,9 @@ CREATE TABLE IF NOT EXISTS day_results(
   PRIMARY KEY(farmer_id, call_date));
 CREATE TABLE IF NOT EXISTS weather(
   place_name TEXT, lat REAL, lon REAL, forecast_date TEXT, summary TEXT, temp_min_c INT, temp_max_c INT,
-  rain_chance_pct INT, source TEXT, fetched_at TEXT,
+  rain_chance_pct INT, wind_speed_kmh REAL, humidity_pct INT, source TEXT, fetched_at TEXT,
   PRIMARY KEY(place_name, forecast_date, fetched_at));
+CREATE INDEX IF NOT EXISTS idx_weather_lookup ON weather(place_name, forecast_date);
 """
 
 
@@ -59,7 +60,10 @@ class SQLiteLedger:
             columns = [c[1] for c in self.db.execute("PRAGMA table_info(weather)").fetchall()]
             if "forecast_date" not in columns:
                 self.db.execute("ALTER TABLE weather ADD COLUMN forecast_date TEXT")
-                self.db.commit()
+            if "wind_speed_kmh" not in columns:
+                self.db.execute("ALTER TABLE weather ADD COLUMN wind_speed_kmh REAL DEFAULT 0.0")
+            if "humidity_pct" not in columns:
+                self.db.execute("ALTER TABLE weather ADD COLUMN humidity_pct INT DEFAULT 0")
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_weather_lookup ON weather(place_name, forecast_date)")
             self.db.commit()
         except Exception:
@@ -89,6 +93,8 @@ class SQLiteLedger:
         source: str,
         fetched_at: str | None = None,
         forecast_date: str | date | None = None,
+        wind_speed_kmh: float = 0.0,
+        humidity_pct: int = 0,
     ) -> None:
         ts = fetched_at or datetime.now(timezone.utc).isoformat()
         fdate = (
@@ -97,25 +103,25 @@ class SQLiteLedger:
             else (forecast_date or ts[:10])
         )
         self.db.execute(
-            "INSERT INTO weather VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (place_name, lat, lon, fdate, summary, temp_min_c, temp_max_c, rain_chance_pct, source, ts),
+            "INSERT INTO weather(place_name, lat, lon, forecast_date, summary, temp_min_c, temp_max_c, "
+            "rain_chance_pct, wind_speed_kmh, humidity_pct, source, fetched_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (place_name, lat, lon, fdate, summary, temp_min_c, temp_max_c, rain_chance_pct, wind_speed_kmh, humidity_pct, source, ts),
         )
         self.db.commit()
 
     def get_latest_weather(self, place_name: str, forecast_date: str | date | None = None) -> dict[str, Any] | None:
+        query = (
+            "SELECT place_name, lat, lon, forecast_date, summary, temp_min_c, temp_max_c, rain_chance_pct, wind_speed_kmh, humidity_pct, source, fetched_at "
+            "FROM weather WHERE place_name=?"
+        )
+        params: list[Any] = [place_name]
         if forecast_date:
             fdate = forecast_date.isoformat() if isinstance(forecast_date, date) else forecast_date
-            row = self.db.execute(
-                "SELECT place_name, lat, lon, forecast_date, summary, temp_min_c, temp_max_c, rain_chance_pct, source, fetched_at "
-                "FROM weather WHERE place_name=? AND forecast_date=? ORDER BY fetched_at DESC LIMIT 1",
-                (place_name, fdate),
-            ).fetchone()
-        else:
-            row = self.db.execute(
-                "SELECT place_name, lat, lon, forecast_date, summary, temp_min_c, temp_max_c, rain_chance_pct, source, fetched_at "
-                "FROM weather WHERE place_name=? ORDER BY fetched_at DESC LIMIT 1",
-                (place_name,),
-            ).fetchone()
+            query += " AND forecast_date=?"
+            params.append(fdate)
+        query += " ORDER BY fetched_at DESC LIMIT 1"
+        row = self.db.execute(query, tuple(params)).fetchone()
 
         if not row:
             return None
@@ -128,8 +134,10 @@ class SQLiteLedger:
             "temp_min_c": row[5],
             "temp_max_c": row[6],
             "rain_chance_pct": row[7],
-            "source": row[8],
-            "fetched_at": row[9],
+            "wind_speed_kmh": row[8],
+            "humidity_pct": row[9],
+            "source": row[10],
+            "fetched_at": row[11],
         }
 
     def has_final_result(self, farmer_id: str, call_date: date) -> bool:

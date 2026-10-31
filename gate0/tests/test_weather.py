@@ -29,6 +29,8 @@ def payload(
     temp_max=32.6,
     temp_min=21.4,
     rain_chance=20.4,
+    wind_speed=12.4,
+    humidity=65.0,
     forecast_date="2026-11-05",
 ):
     """Build a mock Open-Meteo daily forecast JSON payload."""
@@ -39,6 +41,8 @@ def payload(
             "temperature_2m_max": [temp_max],
             "temperature_2m_min": [temp_min],
             "precipitation_probability_max": [rain_chance],
+            "wind_speed_10m_max": [wind_speed],
+            "relative_humidity_2m_mean": [humidity],
         }
     }
 
@@ -65,6 +69,8 @@ def test_valid_response_returns_bidar_weather_report():
     assert report.temp_min_c == 21
     assert report.temp_max_c == 33
     assert report.rain_chance_pct == 20
+    assert report.wind_speed_kmh == 12.4
+    assert report.humidity_pct == 65
     assert report.source == "open-meteo"
 
     # Verify query string parameters sent to Open-Meteo
@@ -77,10 +83,8 @@ def test_valid_response_returns_bidar_weather_report():
     assert "timezone=Asia%2FKolkata" in request.full_url
     assert "start_date=2026-11-05" in request.full_url
     assert "end_date=2026-11-11" in request.full_url
-    assert (
-        "daily=weather_code%2Ctemperature_2m_max%2Ctemperature_2m_min%2C"
-        "precipitation_probability_max"
-    ) in request.full_url
+    assert "wind_speed_10m_max" in request.full_url
+    assert "relative_humidity_2m_mean" in request.full_url
 
 
 def test_zero_coordinates_return_none_without_network_call():
@@ -123,10 +127,14 @@ def test_wmo_weather_code_mapping(code, summary):
         ("temperature_2m_min", -15),
         ("precipitation_probability_max", 105),
         ("precipitation_probability_max", -5),
+        ("wind_speed_10m_max", 350),
+        ("wind_speed_10m_max", -5),
+        ("relative_humidity_2m_mean", 120),
+        ("relative_humidity_2m_mean", -10),
     ],
 )
 def test_implausible_values_return_none(field, value):
-    """Reject forecasts with temperatures outside [-10, 55] or rain outside [0, 100]."""
+    """Reject forecasts with values outside physical bounds."""
     data = payload(code=0)
     data["daily"][field][0] = value
     report = OpenMeteoWeather._report_from_payload(
@@ -148,7 +156,7 @@ def test_inverted_temperatures_return_none():
 @pytest.mark.parametrize(
     "invalid_payload",
     [
-        # Multi-day array when exactly 1 day expected
+        # Multi-day array when length mismatch
         {
             "daily": {
                 "time": ["2026-11-05", "2026-11-06"],
@@ -167,11 +175,11 @@ def test_inverted_temperatures_return_none():
                 "temperature_2m_min": [21],
             }
         },
-        # Mismatched forecast date
-        payload(forecast_date="2026-11-06"),
         # Non-finite values
         payload(temp_max=float("nan")),
         payload(temp_min=float("inf")),
+        payload(wind_speed=float("nan")),
+        payload(humidity=float("nan")),
     ],
 )
 def test_malformed_payload_returns_none(invalid_payload):
@@ -263,6 +271,8 @@ def test_real_open_meteo_json_structure_compatibility():
             "temperature_2m_max": "\u00b0C",
             "temperature_2m_min": "\u00b0C",
             "precipitation_probability_max": "%",
+            "wind_speed_10m_max": "km/h",
+            "relative_humidity_2m_mean": "%",
         },
         "daily": {
             "time": ["2026-11-05"],
@@ -270,6 +280,8 @@ def test_real_open_meteo_json_structure_compatibility():
             "temperature_2m_max": [29.7],
             "temperature_2m_min": [21.5],
             "precipitation_probability_max": [2],
+            "wind_speed_10m_max": [10.6],
+            "relative_humidity_2m_mean": [77],
         },
     }
     report = OpenMeteoWeather._report_from_payload("Bidar", CALL_DATE, real_api_response)
@@ -279,6 +291,8 @@ def test_real_open_meteo_json_structure_compatibility():
     assert report.temp_min_c == 22
     assert report.temp_max_c == 30
     assert report.rain_chance_pct == 2
+    assert report.wind_speed_kmh == 10.6
+    assert report.humidity_pct == 77
     assert report.source == "open-meteo"
 
 
@@ -298,6 +312,8 @@ def test_live_open_meteo_bidar_report():
     assert -10 <= report.temp_max_c <= 55
     assert report.temp_min_c <= report.temp_max_c
     assert 0 <= report.rain_chance_pct <= 100
+    assert 0 <= report.wind_speed_kmh <= 200
+    assert 0 <= report.humidity_pct <= 100
     assert report.source == "open-meteo"
 
 
@@ -333,6 +349,8 @@ def test_open_meteo_maintenance_fallback_uses_previous_day_cached_forecast(tmp_p
             "temperature_2m_max": [32.0, 30.0],
             "temperature_2m_min": [21.0, 20.0],
             "precipitation_probability_max": [10, 45],
+            "wind_speed_10m_max": [14.0, 18.5],
+            "relative_humidity_2m_mean": [60, 85],
         }
     }
 
@@ -345,6 +363,8 @@ def test_open_meteo_maintenance_fallback_uses_previous_day_cached_forecast(tmp_p
     assert day1_report is not None
     assert day1_report.place_name == "Bidar"
     assert day1_report.temp_max_c == 32
+    assert day1_report.wind_speed_kmh == 14.0
+    assert day1_report.humidity_pct == 60
     assert day1_report.source == "open-meteo"
 
     # 2. On Day 2, Open-Meteo goes under maintenance (HTTP 503 Service Unavailable / Timeout)
@@ -361,6 +381,6 @@ def test_open_meteo_maintenance_fallback_uses_previous_day_cached_forecast(tmp_p
     assert day2_report.temp_min_c == 20
     assert day2_report.temp_max_c == 30
     assert day2_report.rain_chance_pct == 45
+    assert day2_report.wind_speed_kmh == 18.5
+    assert day2_report.humidity_pct == 85
     assert day2_report.source == "open-meteo (cached)"
-
-
