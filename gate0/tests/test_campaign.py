@@ -26,12 +26,17 @@ def farmer(i, place="Mandya", consent=True, lang=Language.HI):
 
 
 class FakeSarvam:
-    def __init__(self, attempts=None):
-        self.requests, self.attempt_items = [], attempts or []
+    def __init__(self, attempts=None, transcripts=None):
+        self.requests, self.attempt_items, self.transcripts = [], attempts or [], transcripts or {}
 
     def __call__(self, req, timeout):
         self.requests.append(req)
         path = urllib.parse.urlparse(req.full_url).path
+        if "/transcripts/" in path:
+            iid = urllib.parse.unquote(path.split("/transcripts/", 1)[1])
+            if self.transcripts.get(iid) == "boom":
+                raise urllib.error.HTTPError(req.full_url, 500, "err", {}, io.BytesIO(b"{}"))
+            return io.BytesIO(json.dumps({"interaction_id": iid, "messages": self.transcripts.get(iid, [])}).encode())
         if path.endswith("/campaigns"):
             return io.BytesIO(json.dumps({"campaign_id": "camp-1", "status": "scheduled"}).encode())
         if path.endswith("/cohorts/stream"):
@@ -42,8 +47,8 @@ class FakeSarvam:
         return [json.loads(r.data) for r in self.requests if urllib.parse.urlparse(r.full_url).path.endswith(suffix)]
 
 
-def setup(farmers, attempts=None):
-    http = FakeSarvam(attempts)
+def setup(farmers, attempts=None, transcripts=None):
+    http = FakeSarvam(attempts, transcripts)
     api = SarvamCampaigns(env=ENV, opener=http)
     store = CampaignStore()
     store.save_campaign("camp-1", D, 4, "09:00", "11:00")
@@ -71,8 +76,8 @@ def test_push_sends_only_eligible_farmers_with_their_message_once():
     users = http.bodies("/cohorts/stream")[0]["users"]
     assert [u["user_identifier"] for u in users] == ["F1", "F2"]
     assert users[0]["user_phone_number"] == "+919876543201"
-    assert users[0]["app_overrides"]["initial_language_name"] == "Hindi" and "एआई" in users[0]["app_overrides"]["initial_bot_message"]
-    assert users[1]["app_overrides"]["initial_language_name"] == "English" and "AI" in users[1]["app_overrides"]["initial_bot_message"]
+    assert users[0]["app_overrides"]["initial_language_name"] == "Hindi" and "Mandya" in users[0]["app_overrides"]["initial_bot_message"]
+    assert users[1]["app_overrides"]["initial_language_name"] == "English" and "Mysuru" in users[1]["app_overrides"]["initial_bot_message"]
     rows = {r.farmer_id: r for r in ports.ledger.status(D).rows}
     assert rows["F3"].skip_reason is SkipReason.NO_CONSENT and rows["F4"].skip_reason is SkipReason.NO_WEATHER
     assert "pushed 2" in out[0]
@@ -113,6 +118,80 @@ def test_sync_records_final_results_and_leaves_retries_pending():
     rows = {r.farmer_id: r for r in ports.ledger.status(D).rows}
     assert rows["F4"].result is FinalResult.FAILED and "F3" not in rows
     assert ports.ledger.db.execute("SELECT COUNT(*) FROM attempts WHERE farmer_id='F1'").fetchone()[0] == 2
+
+
+AFTER = datetime(2026, 10, 27, 13, 0, tzinfo=IST)
+
+
+def detail_attempt(fid, status, n, iid=None, ended="NO_END_REASON", reason="NO_FAILURE_REASON", summary=None):
+    a = attempt(fid, status, n)
+    a.update({"interaction_id": iid, "ended_by": ended, "failure_reason": reason,
+              "agent_variables": {"call_summary": summary, "weather_message": "Hello Name1"} if summary else None})
+    return a
+
+
+def details(store):
+    rows = store.db.execute("SELECT farmer_id, call_date, attempt_id, interaction_id, ended_by, failure_reason, "
+                            "summary, transcript, fetched_at FROM call_details ORDER BY farmer_id, attempt_id")
+    return [dict(zip(("farmer_id", "call_date", "attempt_id", "interaction_id", "ended_by", "failure_reason",
+                      "summary", "transcript", "fetched_at"), r)) for r in rows]
+
+
+def test_sync_saves_call_details_with_transcript_and_summary():
+    turns = [{"turn_id": 1, "role": "assistant", "content": "Namaste, main AI hoon. Aaj Mandya mein badal.",
+              "language_name": "Hindi"},
+             {"turn_id": 2, "role": "user", "content": "Theek hai, dhanyavaad", "language_name": "Hindi"}]
+    items = [detail_attempt("F1", "no_answer", 1, reason="exotel: callee did not pick up within 45 seconds"),
+             detail_attempt("F1", "connected", 2, iid="20261027/abc-1", ended="AGENT_ENDS",
+                            summary="Farmer heard the weather and thanked the agent."),
+             detail_attempt("F2", "failed", 1, reason="vobiz: number unreachable after network timeout")]
+    ports, store, api, http = setup([farmer(1), farmer(2)], items, {"20261027/abc-1": turns})
+    push(D, ports, Settings(), store, api)
+    out = sync(D, ports, store, api, now=AFTER)
+    rows = details(store)
+    assert [(r["farmer_id"], r["attempt_id"]) for r in rows] == [("F1", "a-F1-1"), ("F1", "a-F1-2"), ("F2", "a-F2-1")]
+    no_answer, answered, failed = rows
+    assert no_answer["failure_reason"] == "exotel: callee did not pick up within 45 seconds"   # full, not cut
+    assert no_answer["transcript"] is None and no_answer["interaction_id"] is None
+    assert answered["interaction_id"] == "20261027/abc-1" and answered["ended_by"] == "AGENT_ENDS"
+    assert answered["summary"] == "Farmer heard the weather and thanked the agent."
+    assert [t["role"] for t in json.loads(answered["transcript"])] == ["assistant", "user"]
+    assert answered["call_date"] == "2026-10-27" and answered["fetched_at"]
+    assert failed["failure_reason"] == "vobiz: number unreachable after network timeout"
+    assert any("/transcripts/20261027" in r.full_url for r in http.requests)
+    assert "details 3" in out[0]
+
+
+def test_call_details_never_hold_phone_numbers():
+    turns = [{"turn_id": 1, "role": "user", "content": "call me on 98765 43210 or +91-9123456789",
+              "language_name": "English"}]
+    items = [detail_attempt("F1", "connected", 1, iid="20261027/abc-2", ended="USER_ENDS",
+                            summary="Farmer asked for a callback on 9876543210",
+                            reason="NO_FAILURE_REASON"),
+             detail_attempt("F2", "failed", 1, reason="provider rejected +919876543202 as invalid")]
+    ports, store, api, _ = setup([farmer(1), farmer(2)], items, {"20261027/abc-2": turns})
+    push(D, ports, Settings(), store, api)
+    lines = sync(D, ports, store, api, now=AFTER)
+    stored = repr(store.db.execute("SELECT * FROM call_details").fetchall())
+    for digits in ("9876543210", "9123456789", "9876543202", "+919999999999", "98765 43210"):
+        assert digits not in stored and digits not in "\n".join(lines)
+    assert "[number removed]" in stored
+
+
+def test_transcript_failure_keeps_the_rest_and_sync_is_idempotent():
+    items = [detail_attempt("F1", "connected", 1, iid="20261027/bad", ended="USER_ENDS", summary="ok"),
+             detail_attempt("F2", "connected", 1, iid="20261027/good", ended="AGENT_ENDS")]
+    ports, store, api, http = setup([farmer(1), farmer(2)], items,
+                                    {"20261027/bad": "boom", "20261027/good": [{"turn_id": 1, "role": "assistant",
+                                                                              "content": "hi", "language_name": "English"}]})
+    push(D, ports, Settings(), store, api)
+    out = sync(D, ports, store, api, now=AFTER)
+    rows = {r["farmer_id"]: r for r in details(store)}
+    assert rows["F1"]["transcript"] is None and rows["F1"]["summary"] == "ok"
+    assert json.loads(rows["F2"]["transcript"])[0]["content"] == "hi" and rows["F2"]["summary"] is None
+    assert "transcript errors 1" in out[0]
+    sync(D, ports, store, api, now=AFTER)
+    assert len(details(store)) == 2
 
 
 def test_api_errors_keep_only_the_code():

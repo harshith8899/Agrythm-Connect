@@ -28,7 +28,8 @@ _ALIASES = {
 }
 _REQUIRED = ("farmer_id", "name", "phone", "language", "consent")
 _LANG = {"hindi": Language.HI, "hi": Language.HI, "hiin": Language.HI, "हिंदी": Language.HI, "हिन्दी": Language.HI,
-         "english": Language.EN, "en": Language.EN, "enin": Language.EN}
+         "english": Language.EN, "en": Language.EN, "enin": Language.EN,
+         "kannada": Language.KN, "kn": Language.KN, "knin": Language.KN, "ಕನ್ನಡ": Language.KN}
 _YES = {"yes", "y", "true", "1", "agreed", "consented", "given"}
 _NO = {"no", "n", "false", "0", "inactive"}
 
@@ -94,7 +95,7 @@ def load_farmers(path: str | Path, geocoder=None, matches: dict[str, str] | None
         lang = _LANG.get(_key(get("language")))
         if lang is None:
             raise ValueError(f"{path.name} row {n} (farmer {fid}): language {get('language')!r} not supported; "
-                             "use Hindi or English")
+                             "use Hindi, Kannada or English")
         try:
             lat, lon = float(get("latitude") or 0), float(get("longitude") or 0)
         except ValueError:
