@@ -10,6 +10,10 @@ Gate Zero calls through a Sarvam Voice Agent. Our code builds the weather messag
      > You are Agrythm's automated weather voice. You are an AI, not a person. Your first message already gives the full weather update. Do not repeat it unless asked once. If the farmer asks anything else, say politely that you can only share the weather and that their Agrythm contact person can help, then end the call. Never give farming, financial or medical advice. If asked whether you are a human, say clearly that you are an AI. End the call as soon as the update is delivered and the farmer has nothing more about the weather.
    - Tools: keep **End call** on. Turn on **Voicemail detection** if it is offered.
    - Call settings: maximum call length 90 seconds. Languages: Hindi and English.
+   - Variables tab → **Output variables** → **Add**: name `call_summary`, data type **String**, extraction prompt (paste):
+     > In one or two plain English sentences, say whether the farmer heard the weather update and anything they asked or said. Do not include phone numbers, names of other people or any advice.
+
+     Sarvam fills it after each connected call, and `campaign sync` saves it with the call details. Without it, the summary column stays empty and nothing else changes.
    - Commit the version and note the **version number**.
 3. **IDs and key.**
    - Org ID and workspace ID: from the dashboard URL or Settings.
@@ -42,6 +46,7 @@ python -m weathercall.schedule activate --start 2026-10-27 --days 4 --mode campa
 - The scheduled task runs `campaign daily` at 08:30. It pulls yesterday's results into our ledger, checks today's farmers (consent, weather saved) and pushes only the eligible ones. Each farmer's message goes as the agent's opening line, in their language. A farmer is never pushed twice for the same day.
 - The task runs one extra morning, so the last day's results are pulled in too.
 - Manual control: `campaign push`, `campaign sync --date D`, `campaign status`.
+- `campaign sync` also saves every attempt's details in the `call_details` table for the monitoring UI: Sarvam's `interaction_id`, who ended the call (`ended_by`), the full failure reason, the `call_summary` output variable and, for connected calls, the transcript as JSON (`role`, `content`, `language_name` per turn). Anything that looks like a phone number (10 or more digits) is replaced with `[number removed]` before it is stored. Sarvam's `user_contact` field is never read.
 - Keep the window long enough for every retry (3 tries x 30 min fits in 09:00 to 11:00). Otherwise a retry could spill into the next morning.
 
 ## 4. Test plan on the 85 free credits (cheapest first)

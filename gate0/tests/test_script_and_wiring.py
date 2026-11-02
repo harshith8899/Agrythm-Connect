@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 from weathercall import ports as P
@@ -11,13 +13,29 @@ from weathercall.script import build_message, estimate_seconds
 
 
 @pytest.mark.parametrize("farmer_idx", [0, 1])  # one Hindi, one English
-def test_message_says_ai_and_fits_target_length(farmer_idx):
+def test_message_fits_target_length(farmer_idx):
     farmer = demo_farmers()[farmer_idx]
     text = build_message(farmer, DEMO_WEATHER["Mandya"])
     s = Settings()
     assert s.target_seconds_min <= estimate_seconds(text) <= s.target_seconds_max, estimate_seconds(text)
     assert farmer.display_name in text
-    assert ("AI" in text) if farmer.language is Language.EN else ("एआई" in text)
+
+
+_ASKS = {Language.EN: "Did you understand", Language.HI: "समझ आई", Language.KN: "ಅರ್ಥವಾಯಿತೇ"}
+
+
+@pytest.mark.parametrize("lang", list(Language))
+def test_every_language_greets_by_name_and_gives_only_the_four_weather_facts(lang):
+    farmer = dataclasses.replace(demo_farmers()[0], language=lang)
+    text = build_message(farmer, DEMO_WEATHER["Hassan"])      # 19-27 C, wind 18, rain 70, humidity 84
+    s = Settings()
+    # Kannada words are long and few, so the word-count estimate reads low; measure the real length after TTS is on
+    low = 20 if lang is Language.KN else s.target_seconds_min
+    assert low <= estimate_seconds(text) <= s.target_seconds_max, estimate_seconds(text)
+    assert farmer.display_name in text and "Hassan" in text and _ASKS[lang] in text
+    for number in ("19", "27", "18", "70", "84"):
+        assert number in text
+    assert "{" not in text and "light rain" not in text        # no condition words, no unfilled slots
 
 
 def test_every_adapter_satisfies_its_port():

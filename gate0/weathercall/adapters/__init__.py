@@ -24,7 +24,9 @@ def _sheet():
 def _open_meteo():
     from .open_meteo import OpenMeteoWeather
     from .weather_store import StoredWeather
-    return StoredWeather(OpenMeteoWeather(), os.environ.get("GATE0_DB", ":memory:"))
+    # waits between weather retries after a provider failure: 15 min, then 30 more, then 60 more (client rule)
+    waits = tuple(int(x) for x in os.environ.get("GATE0_WEATHER_RETRY_MINUTES", "15,30,60").split(",") if x.strip())
+    return StoredWeather(OpenMeteoWeather(), os.environ.get("GATE0_DB", ":memory:"), waits)
 
 
 def _sarvam():

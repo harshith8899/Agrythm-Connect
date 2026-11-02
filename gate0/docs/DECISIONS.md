@@ -12,18 +12,39 @@
 | 26 Oct 2026 | Weather comes from Open-Meteo (`GATE0_WEATHER=open_meteo`): free, no key, a full daily forecast including the morning low. OpenWeather was tried and dropped: its free plan only gives 3-hour slots from the next slot onward and needed a key. Each day's forecast is saved in SQLite before use. A farmer is called only when complete weather is saved for their place; otherwise skipped as `weather_unavailable`. |
 | 26 Oct 2026 | Places are matched by Village, then District, always inside the sheet's State and District, because names repeat (a Mandya exists in Haryana too). No confident match means no weather and no call. Latitude/Longitude in the sheet override the lookup. |
 | 26 Oct 2026 | Scheduling and dialling move to Sarvam Campaigns (`GATE0_CALL_MODE=campaign`). One campaign covers the trial (09:00 to 11:00 IST, retries in Sarvam). Each morning at 08:30 our job pushes that day's eligible farmers with fresh weather and syncs yesterday's results. Chosen over pre-loading 4 days (stale forecasts, consent changes missed) and over the agent fetching weather itself (no control of wording, no 'no weather, no call'). |
+| 28 Oct 2026 | `campaign sync` stores call details for the monitoring UI in `call_details` (one row per Sarvam attempt): interaction id, ended by, full failure reason, the agent's `call_summary` output variable, and the transcript for connected calls. Phone-like digit runs are masked in every stored text, because farmers may say numbers aloud and provider errors can quote them. A failed transcript fetch keeps the other details and is counted, not fatal. |
 | 26 Oct 2026 | A voice provider failure marks that farmer `failed` for the day and the run continues (engine change for hard rule 5). |
+| 1 Nov 2026 | Client (Chetan Sir): 3 attempts per farmer, with gradual waits: 30 min before attempt 2, then 1 hour before attempt 3. No third wait. Morning call starts at 09:00. |
+| 1 Nov 2026 | Client: five call outcome flags drive what happens next. (1) Network drop: retry, attempt count does not go up. (2) Farmer asks for a specific time: call again at the requested time. (3) Farmer hangs up mid-call: retry, attempt count goes up by one. (4) Farmer refuses the information during the call: no retry, close the farmer for the day. (5) Successful call: done. |
+| 1 Nov 2026 | Retry gaps (30 min, then 1 hour) are handled by Sarvam Campaigns if it supports them; our code does not drive retries. |
+| 1 Nov 2026 | Requested-time callback: if the farmer asks for a call at a set time, give one attempt at that time only. If not picked, end the callback (no further retries). |
+| 1 Nov 2026 | Client confirmed the weather-missing retry as cumulative from the first failed check: check at +15 min, then +45 min, then +1 h 45 min; if still missing, skip with `weather_unavailable`. |
+| 1 Nov 2026 | Client: if weather is missing, do not call. Retry the weather fetch 15 min later; if still missing, retry 30 min after that; if still missing, retry 1 hour after that; then skip the farmer and record `weather_unavailable`. |
+| 1 Nov 2026 | Client: farmer data comes with consent, preferred language and details in the sheet. Only consent = Yes farmers are called. |
+| 1 Nov 2026 | Calling and retries are done by Sarvam Campaigns (campaign mode is the production path). |
+| 1 Nov 2026 | Sarvam account: a new Sarvam account is being created and configured from scratch (dashboard setup, phone number and telephony are not done yet). Testing starts after setup is complete. |
+| 1 Nov 2026 | Work is tracked in the Jira project ACK (agrythm.atlassian.net, board 3), not the SCRUM project named earlier. |
+| 2 Nov 2026 | Team: the call no longer announces that the voice is an AI. The agent never claims to be human and answers honestly if a farmer sincerely asks. Calls are in local Hindi, local Kannada or English (Hindi first, then Kannada, then English), greet the farmer by name, give the weather for their village or district in the farmer's own language, ask if it was understood, and refuse everything outside the weather. Hindi and Kannada wording is a draft for native-speaker review. |
+| 2 Nov 2026 | Weather facts spoken: temperature (low and high), wind speed, chance of rain and relative humidity, nothing else and no advice. Open-Meteo is asked for the 7-day forecast and every day is saved. If the provider fails or returns incomplete weather, retry after 15 min, then 30 min more, then 60 min more (`GATE0_WEATHER_RETRY_MINUTES`); if it still fails, the forecast saved on an earlier day for that date is used (ledger source ends in `-saved`). Only with nothing saved is the farmer skipped as `weather_unavailable`. The village/district lookup stays; the `weather-api` branch is not merged as a whole. During an outage the first place waits up to 1 h 45 min, other places in that run try once then use saved forecasts, so start the daily push early enough. |
 
 ## Open with the client (Chetan Sir)
 | Item | Placeholder now |
 |---|---|
-| Number of attempts | 3 |
-| Wait between attempts | 30 minutes |
-| Morning call time | 09:00 (team trial choice) |
-| Behaviour when weather is missing | skip the farmer and record why |
-| Telephony and weather providers and budget | mocks only (voice: Sarvam) |
+| Number of attempts | Confirmed 3 (1 Nov) |
+| Wait between attempts | Confirmed 30 min, then 1 hour (1 Nov) |
+| Call window end | Decided: 09:00 to 12:00. The window end must be derived from the retry schedule, so if retries get longer later, the window grows with them. |
+| Follow-up message | Out of scope for the code: the team sends the call-info message manually. |
+| Requested-time callback limit | Decided: a requested-time callback gets one attempt at that time. It is not counted in the three regular attempts. |
+| Requested-time callback outcome | Decided: if the farmer does not pick up the requested-time call, the system sends once an SMS saying we called and they did not pick up, plus the weather info SMS. All messages are sent automatically. The team only edits the message wording in the script. (This replaces the earlier "team sends manually" note.) |
+| Requested-time outside the window | Decided: a callback can be at any time, with no latest hour (e.g. 12:56 pm). The earliest hour is 09:00. A callback rescheduled past midnight uses the latest weather and starts a new retry cycle. Open: a callback requested for 00:30 — call at 00:30 or wait until 09:00? |
+| Callback engine | Decided: callbacks outside 09:00 to 12:00 cannot use the fixed Sarvam campaign window, so they need a separate one-off call path. |
+| Callback hours | Decided: callbacks are accepted between 06:00 and 23:00. A request outside that range is not called; the farmer is told the callback window is 6 am to 11 pm. This replaces the earlier 09:00 earliest hour and the open question about 00:30. Open: how the farmer is told (automatic SMS or voice) and what happens to a rescheduled call that falls past 23:00. |
+| Morning call time | Confirmed 09:00 start (1 Nov); confirm the end of the window (it must cover all retries) |
+| Behaviour when weather is missing | Confirmed: retry at +15 min, +45 min, +1 h 45 min (cumulative); then skip and record why (1 Nov) |
+| Telephony and weather providers and budget | Telephony not connected yet; weather is Open-Meteo; Sarvam account being set up |
 
 ## Open internally
+- Transcripts and summaries may contain farmer names and what they said: decide retention and who can view them on the monitoring page.
 - Campaign mode still needs a small daily job (08:30) on our side; move it from the laptop to an always-on machine or a cloud scheduler before the real pilot.
 - Weather words ("cloudy", "light rain") are English inside the Hindi message. Hindi weather words are needed, with native review.
 - The Sarvam agent can hear and answer the farmer, not just play a message. Its instruction limits it to weather only; check transcripts during testing.

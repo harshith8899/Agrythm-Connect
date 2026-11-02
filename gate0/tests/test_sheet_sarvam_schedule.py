@@ -56,7 +56,7 @@ def test_excel_sheet_reads_numeric_phone(tmp_path):
 
 
 @pytest.mark.parametrize("body, needle", [
-    ("F1,A,1,X,X,X,Kannada,yes\n", "language"),
+    ("F1,A,1,X,X,X,Tamil,yes\n", "language"),
     ("F1,A,1,X,X,X,Hindi,yes\nF1,B,2,X,X,X,Hindi,yes\n", "twice"),
     (",A,1,X,X,X,Hindi,yes\n", "empty"),
 ])

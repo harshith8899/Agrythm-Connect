@@ -36,10 +36,11 @@ def main(argv: list[str] | None = None, env_file=ENV_FILE) -> int:
             print(f"  {fid}  {f.place_name:<14} {where}\n        NO WEATHER -> will not be called")
             continue
         ready += 1
-        print(f"  {fid}  {f.place_name:<14} {where}\n        {w.summary}, {w.temp_min_c}-{w.temp_max_c} C, "
-              f"rain {w.rain_chance_pct}%  [{w.source}]")
+        print(f"  {fid}  {f.place_name:<14} {where}\n        {w.temp_min_c}-{w.temp_max_c} C, wind {w.wind_kmh} km/h, "
+              f"rain {w.rain_chance_pct}%, humidity {w.humidity_pct}%  [{w.source}]")
     errors = getattr(ports.weather, "provider_errors", 0)
-    print(f"{ready} of {len(ids)} farmers have weather" + (f"; {errors} provider error(s)" if errors else ""))
+    print(f"{ready} of {len(ids)} farmers have weather" + (f"; {errors} provider error(s)" if errors else "")
+          + (f"; {fb} from a saved earlier forecast" if (fb := getattr(ports.weather, "fallbacks", 0)) else ""))
     return 0 if ready else 1
 
 

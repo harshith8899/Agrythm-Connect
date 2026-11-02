@@ -1,6 +1,10 @@
 """Builds the spoken message. Pure function: weather + farmer in, text out. No provider calls.
 
-The voice always says it is an AI. Hindi wording is a DRAFT and needs native-speaker review (see docs/DECISIONS.md).
+The message greets the farmer by name, gives today's temperature, wind, chance of rain and humidity (nothing
+else) for their village or district, and asks whether it was understood. It does not announce that the voice is an
+AI (team decision, 2 Nov 2026); the agent answers honestly if asked. Hindi and Kannada are plain spoken language,
+because the farmers understand only their local language.
+Hindi and Kannada wording is a DRAFT and needs native-speaker review (see docs/DECISIONS.md).
 """
 from __future__ import annotations
 
@@ -9,33 +13,48 @@ from .contracts import FarmerContext, Language, WeatherReport
 WORDS_PER_SECOND = 2.4  # rough speaking pace; replaced by real measured length once TTS is connected
 
 _EN = (
-    "Hello {name}. This is an automated voice assistant from Agrythm. I am an AI, not a person. "
-    "Here is today's weather for {place}. It will be {summary}. "
+    "Hello {name}. This is an automated weather call from Agrythm. "
+    "Here is today's weather for {place}. "
     "The temperature will be between {tmin} and {tmax} degrees Celsius. "
+    "The wind speed will be up to {wind} kilometres per hour. "
     "The chance of rain is {rain} percent. "
-    "Please plan your farm work for today with this in mind. "
+    "The humidity in the air will be {humidity} percent. "
     "I will call every morning like this with the weather. "
     "If you do not want these calls, please tell your Agrythm contact person. "
-    "Thank you for listening. Have a good day."
+    "Did you understand this weather information? Please say yes or no."
 )
 
 _HI = (
-    "नमस्ते {name}। मैं एग्रिदम की ओर से बोल रही एआई आवाज़ हूँ, कोई इंसान नहीं हूँ। "
-    "यह {place} का आज का मौसम है। आज मौसम {summary} रहेगा। "
-    "तापमान {tmin} से {tmax} डिग्री सेल्सियस के बीच रहेगा। "
-    "बारिश की संभावना {rain} प्रतिशत है। "
-    "कृपया आज के खेत के काम इसी हिसाब से तय करें। "
-    "मैं हर सुबह इसी तरह मौसम की जानकारी देने के लिए फ़ोन करूँगी। "
-    "अगर आप ये कॉल नहीं चाहते, तो कृपया अपने एग्रिदम संपर्क व्यक्ति को बता दें। "
-    "सुनने के लिए धन्यवाद। आपका दिन शुभ हो।"
+    "नमस्ते {name} जी। मैं एग्रिदम की ओर से मौसम बताने के लिए फ़ोन कर रही हूँ। "
+    "आज {place} इलाके के मौसम की जानकारी यह है। "
+    "तापमान {tmin} से {tmax} डिग्री के बीच रहेगा। "
+    "हवा की रफ़्तार {wind} किलोमीटर प्रति घंटा तक रहेगी। "
+    "बारिश होने की संभावना {rain} प्रतिशत है। "
+    "हवा में नमी {humidity} प्रतिशत रहेगी। "
+    "मैं हर सुबह इसी तरह मौसम बताने के लिए फ़ोन करूँगी। "
+    "अगर आप ये फ़ोन नहीं चाहते, तो कृपया अपने एग्रिदम संपर्क व्यक्ति को बता दीजिए। "
+    "क्या आपको यह मौसम की जानकारी समझ आई? कृपया हाँ या ना बताइए।"
 )
+
+_KN = (
+    "ನಮಸ್ಕಾರ {name} ಅವರೇ. ನಾನು ಅಗ್ರಿದಮ್‌ನಿಂದ ಹವಾಮಾನ ತಿಳಿಸಲು ಕರೆ ಮಾಡುತ್ತಿದ್ದೇನೆ. "
+    "ಇಂದು {place} ಪ್ರದೇಶದ ಹವಾಮಾನ ಮಾಹಿತಿ ಇದು. "
+    "ತಾಪಮಾನ {tmin} ರಿಂದ {tmax} ಡಿಗ್ರಿ ನಡುವೆ ಇರುತ್ತದೆ. "
+    "ಗಾಳಿಯ ವೇಗ ಗಂಟೆಗೆ {wind} ಕಿಲೋಮೀಟರ್ ವರೆಗೆ ಇರುತ್ತದೆ. "
+    "ಮಳೆ ಬರುವ ಸಾಧ್ಯತೆ ಶೇಕಡಾ {rain} ಇದೆ. "
+    "ಗಾಳಿಯಲ್ಲಿ ತೇವಾಂಶ ಶೇಕಡಾ {humidity} ಇರುತ್ತದೆ. "
+    "ನಾನು ಪ್ರತಿ ಬೆಳಿಗ್ಗೆ ಹೀಗೆ ಹವಾಮಾನ ತಿಳಿಸಲು ಕರೆ ಮಾಡುತ್ತೇನೆ. "
+    "ಈ ಕರೆಗಳು ಬೇಡವಾದರೆ, ದಯವಿಟ್ಟು ನಿಮ್ಮ ಅಗ್ರಿದಮ್ ಸಂಪರ್ಕ ವ್ಯಕ್ತಿಗೆ ತಿಳಿಸಿ. "
+    "ಈ ಹವಾಮಾನ ಮಾಹಿತಿ ನಿಮಗೆ ಅರ್ಥವಾಯಿತೇ? ದಯವಿಟ್ಟು ಹೌದು ಅಥವಾ ಇಲ್ಲ ಎಂದು ಹೇಳಿ."
+)
+
+_TEMPLATES = {Language.HI: _HI, Language.KN: _KN, Language.EN: _EN}
 
 
 def build_message(farmer: FarmerContext, weather: WeatherReport) -> str:
-    template = _HI if farmer.language is Language.HI else _EN
-    return template.format(
-        name=farmer.display_name, place=weather.place_name, summary=weather.summary,
-        tmin=weather.temp_min_c, tmax=weather.temp_max_c, rain=weather.rain_chance_pct,
+    return _TEMPLATES[farmer.language].format(
+        name=farmer.display_name, place=weather.place_name, tmin=weather.temp_min_c, tmax=weather.temp_max_c,
+        wind=weather.wind_kmh, rain=weather.rain_chance_pct, humidity=weather.humidity_pct,
     )
 
 
