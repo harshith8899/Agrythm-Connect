@@ -23,6 +23,7 @@ from .cli import ENV_FILE, load_env_file
 from .config import Settings
 from .contracts import AttemptStatus, CallAttempt, CallRequest, FarmerDayResult, FinalResult, Language
 from .engine import Ports, final_result, prepare_call
+from .script import weather_variables
 
 
 def push(day: date, ports: Ports, settings: Settings, store: CampaignStore, api: SarvamCampaigns) -> list[str]:
@@ -39,7 +40,8 @@ def push(day: date, ports: Ports, settings: Settings, store: CampaignStore, api:
             skipped += 1
             continue
         f = prepared.farmer
-        calls.append(QueuedCall(f.farmer_id, f.phone, _LANG_NAMES[f.language], prepared.message))
+        calls.append(QueuedCall(f.farmer_id, f.phone, _LANG_NAMES[f.language], prepared.message,
+                                weather_variables(f, prepared.weather)))
         rows.append((f.farmer_id, f.language.value, prepared.message, prepared.weather.source))
     if calls:
         cohort_ids = api.stream_cohort(camp["campaign_id"], f"gate0-{day.isoformat()}-{datetime.now():%H%M}", calls)
