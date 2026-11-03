@@ -5,6 +5,7 @@ from weathercall.adapters import build_ports
 from weathercall.adapters.local import InMemoryFarmerSource, SQLiteLedger, demo_farmers
 from weathercall.adapters.mock import DEMO_WEATHER, MockTelephony, MockVoice, MockWeather
 from weathercall.adapters.open_meteo import OpenMeteoWeather
+from weathercall.adapters.sarvam import SarvamTelephony, SarvamVoice
 from weathercall.adapters.trust_ai_stub import TrustAIFarmerSource, TrustAILedger
 from weathercall.config import Settings
 from weathercall.contracts import FarmerContext, Language
@@ -63,6 +64,8 @@ def test_every_adapter_satisfies_its_port():
     assert isinstance(OpenMeteoWeather(), P.WeatherProvider)
     assert isinstance(MockVoice(), P.VoiceProvider)
     assert isinstance(MockTelephony(), P.TelephonyProvider)
+    assert isinstance(SarvamVoice(), P.VoiceProvider)
+    assert isinstance(SarvamTelephony(), P.TelephonyProvider)
     # the Trust AI placeholders must already fit the same sockets
     assert isinstance(TrustAIFarmerSource(), P.FarmerSource)
     assert isinstance(TrustAILedger(), P.CallLedger)

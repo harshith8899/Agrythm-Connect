@@ -8,6 +8,7 @@ from ..engine import Ports
 from .local import InMemoryFarmerSource, SQLiteLedger, demo_farmers
 from .mock import MockTelephony, MockVoice, MockWeather
 from .open_meteo import OpenMeteoWeather
+from .sarvam import SarvamTelephony, SarvamVoice
 from .trust_ai_stub import TrustAIFarmerSource, TrustAILedger
 
 _FARMERS = {"local": lambda: InMemoryFarmerSource(demo_farmers()), "trust_ai": TrustAIFarmerSource}
@@ -17,8 +18,14 @@ _WEATHER = {
     "open-meteo": OpenMeteoWeather,
     "open_meteo": OpenMeteoWeather,
 }
-_VOICE = {"mock": MockVoice}
-_TELEPHONY = {"mock": MockTelephony}
+_VOICE = {
+    "mock": MockVoice,
+    "sarvam": SarvamVoice,
+}
+_TELEPHONY = {
+    "mock": MockTelephony,
+    "sarvam": SarvamTelephony,
+}
 
 
 def build_ports() -> Ports:

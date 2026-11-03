@@ -49,6 +49,23 @@ CREATE TABLE IF NOT EXISTS weather(
   rain_chance_pct INT, wind_speed_kmh REAL, humidity_pct INT, source TEXT, fetched_at TEXT,
   PRIMARY KEY(place_name, forecast_date, fetched_at));
 CREATE INDEX IF NOT EXISTS idx_weather_lookup ON weather(place_name, forecast_date);
+CREATE TABLE IF NOT EXISTS daily_dispatches(
+  dispatch_id TEXT PRIMARY KEY,
+  farmer_id TEXT NOT NULL,
+  dispatch_date TEXT NOT NULL,
+  status TEXT NOT NULL,
+  provider_call_id TEXT DEFAULT '',
+  error TEXT DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(farmer_id, dispatch_date)
+);
+CREATE INDEX IF NOT EXISTS idx_dispatch_date ON daily_dispatches(dispatch_date);
+CREATE TABLE IF NOT EXISTS dispatch_locks(
+  lock_name TEXT PRIMARY KEY,
+  acquired_at TEXT NOT NULL,
+  instance_id TEXT NOT NULL
+);
 """
 
 
@@ -76,7 +93,7 @@ class SQLiteLedger:
         self.db.commit()
 
     def record_day_result(self, r: FarmerDayResult) -> None:
-        self.db.execute("INSERT INTO day_results VALUES(?,?,?,?,?)", (
+        self.db.execute("INSERT OR REPLACE INTO day_results VALUES(?,?,?,?,?)", (
             r.farmer_id, r.call_date.isoformat(), r.result.value, r.attempts,
             r.skip_reason.value if r.skip_reason else None))
         self.db.commit()
@@ -154,3 +171,104 @@ class SQLiteLedger:
         count = lambda r: sum(1 for x in rows if x.result is r)  # noqa: E731
         return CallStatusView(call_date, len(rows), count(FinalResult.ANSWERED), count(FinalResult.UNANSWERED),
                               count(FinalResult.FAILED), count(FinalResult.SKIPPED), rows)
+
+    def has_daily_dispatch(self, farmer_id: str, dispatch_date: date) -> bool:
+        row = self.db.execute(
+            "SELECT 1 FROM daily_dispatches WHERE farmer_id=? AND dispatch_date=?",
+            (farmer_id, dispatch_date.isoformat()),
+        ).fetchone()
+        return row is not None
+
+    def create_daily_dispatch(
+        self,
+        farmer_id: str,
+        dispatch_date: date,
+        status: str,
+        provider_call_id: str = "",
+        error: str = "",
+    ) -> str:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        dispatch_id = f"disp-{farmer_id}-{dispatch_date.isoformat()}"
+        self.db.execute(
+            "INSERT INTO daily_dispatches(dispatch_id, farmer_id, dispatch_date, status, provider_call_id, error, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (dispatch_id, farmer_id, dispatch_date.isoformat(), status, provider_call_id, error, now_iso, now_iso),
+        )
+        self.db.commit()
+        return dispatch_id
+
+    def update_daily_dispatch(
+        self,
+        farmer_id: str,
+        dispatch_date: date,
+        status: str,
+        provider_call_id: str = "",
+        error: str = "",
+    ) -> None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        self.db.execute(
+            "UPDATE daily_dispatches SET status=?, "
+            "provider_call_id=CASE WHEN ? != '' THEN ? ELSE provider_call_id END, "
+            "error=CASE WHEN ? != '' THEN ? ELSE error END, "
+            "updated_at=? WHERE farmer_id=? AND dispatch_date=?",
+            (status, provider_call_id, provider_call_id, error, error, now_iso, farmer_id, dispatch_date.isoformat()),
+        )
+        self.db.commit()
+
+    def get_daily_dispatch(self, farmer_id: str, dispatch_date: date) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT dispatch_id, farmer_id, dispatch_date, status, provider_call_id, error, created_at, updated_at "
+            "FROM daily_dispatches WHERE farmer_id=? AND dispatch_date=?",
+            (farmer_id, dispatch_date.isoformat()),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "dispatch_id": row[0],
+            "farmer_id": row[1],
+            "dispatch_date": row[2],
+            "status": row[3],
+            "provider_call_id": row[4],
+            "error": row[5],
+            "created_at": row[6],
+            "updated_at": row[7],
+        }
+
+    def acquire_lock(self, lock_name: str, instance_id: str, timeout_seconds: int = 3600) -> bool:
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        try:
+            self.db.execute(
+                "INSERT INTO dispatch_locks(lock_name, acquired_at, instance_id) VALUES(?,?,?)",
+                (lock_name, now_iso, instance_id),
+            )
+            self.db.commit()
+            return True
+        except sqlite3.IntegrityError:
+            row = self.db.execute(
+                "SELECT acquired_at, instance_id FROM dispatch_locks WHERE lock_name=?",
+                (lock_name,),
+            ).fetchone()
+            if not row:
+                return False
+            try:
+                acquired_dt = datetime.fromisoformat(row[0])
+                age_seconds = (now - acquired_dt).total_seconds()
+            except Exception:
+                age_seconds = timeout_seconds + 1
+            if row[1] == instance_id or age_seconds > timeout_seconds:
+                self.db.execute(
+                    "UPDATE dispatch_locks SET acquired_at=?, instance_id=? WHERE lock_name=?",
+                    (now_iso, instance_id, lock_name),
+                )
+                self.db.commit()
+                return True
+            return False
+
+    def release_lock(self, lock_name: str, instance_id: str) -> bool:
+        cursor = self.db.execute(
+            "DELETE FROM dispatch_locks WHERE lock_name=? AND instance_id=?",
+            (lock_name, instance_id),
+        )
+        self.db.commit()
+        return cursor.rowcount > 0

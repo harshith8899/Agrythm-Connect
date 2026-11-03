@@ -213,11 +213,11 @@ class OpenMeteoWeather:
                     return WeatherReport(
                         place_name=row[0],
                         summary=row[1],
-                        temp_min_c=row[2],
-                        temp_max_c=row[3],
-                        rain_chance_pct=row[4],
-                        wind_speed_kmh=row[5] if row[5] is not None else 0.0,
-                        humidity_pct=row[6] if row[6] is not None else 0,
+                        temp_min_c=int(row[2]),
+                        temp_max_c=int(row[3]),
+                        rain_chance_pct=int(row[4]),
+                        wind_speed_kmh=float(row[5]) if row[5] is not None else 0.0,
+                        humidity_pct=int(row[6]) if row[6] is not None else 0,
                         source=src,
                     )
         except Exception:

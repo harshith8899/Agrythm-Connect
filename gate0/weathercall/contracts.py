@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
+from typing import Any
 
 
 class Language(str, Enum):
@@ -40,6 +41,16 @@ class SkipReason(str, Enum):
     ALREADY_CALLED = "already_called_today"
     NO_WEATHER = "weather_unavailable"
     NO_PHONE = "no_phone"
+
+
+class DispatchStatus(str, Enum):
+    ACCEPTED = "accepted"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    UNANSWERED = "unanswered"
+    FAILED = "failed"
+    RETRY_SCHEDULED = "retry_scheduled"
+    SKIPPED = "skipped"
 
 
 @dataclass(frozen=True)
@@ -115,3 +126,20 @@ class CallStatusView:                   # contract 4 (no phone numbers, ever)
     failed: int
     skipped: int
     rows: tuple[FarmerDayResult, ...] = ()
+
+
+@dataclass(frozen=True)
+class DispatchSummary:
+    dispatch_date: date
+    start_time: str
+    end_time: str
+    duration_s: float
+    status: str                         # "completed" | "aborted" | "partial" | "locked_by_another_instance"
+    weather_fetched: bool
+    total_eligible: int
+    submitted: int
+    failed: int
+    skipped_duplicates: int
+    skipped_ineligible: int
+    details: list[dict[str, Any]] = field(default_factory=list)
+    weather_report: WeatherReport | None = None
