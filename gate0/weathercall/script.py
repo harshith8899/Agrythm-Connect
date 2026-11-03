@@ -58,5 +58,16 @@ def build_message(farmer: FarmerContext, weather: WeatherReport) -> str:
     )
 
 
+def weather_variables(farmer: FarmerContext, weather: WeatherReport) -> dict[str, str]:
+    """The per-farmer values the Sarvam agent speaks from. The names are the agent's declared variables
+    (Sarvam rejects any name the agent does not declare), and every value is text."""
+    return {
+        "farmer_name": farmer.display_name, "place_name": weather.place_name,
+        "temp_min_c": str(weather.temp_min_c), "temp_max_c": str(weather.temp_max_c),
+        "wind_kmh": str(weather.wind_kmh), "rain_chance_pct": str(weather.rain_chance_pct),
+        "humidity_pct": str(weather.humidity_pct),
+    }
+
+
 def estimate_seconds(text: str) -> float:
     return len(text.split()) / WORDS_PER_SECOND

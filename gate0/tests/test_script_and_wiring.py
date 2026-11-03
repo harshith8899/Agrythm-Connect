@@ -9,7 +9,7 @@ from weathercall.adapters.mock import DEMO_WEATHER, MockTelephony, MockVoice, Mo
 from weathercall.adapters.trust_ai_stub import TrustAIFarmerSource, TrustAILedger
 from weathercall.config import Settings
 from weathercall.contracts import Language
-from weathercall.script import build_message, estimate_seconds
+from weathercall.script import build_message, estimate_seconds, weather_variables
 
 
 @pytest.mark.parametrize("farmer_idx", [0, 1])  # one Hindi, one English
@@ -36,6 +36,13 @@ def test_every_language_greets_by_name_and_gives_only_the_four_weather_facts(lan
     for number in ("19", "27", "18", "70", "84"):
         assert number in text
     assert "{" not in text and "light rain" not in text        # no condition words, no unfilled slots
+
+
+def test_weather_variables_use_the_names_the_agent_declares():
+    farmer = demo_farmers()[0]
+    assert weather_variables(farmer, DEMO_WEATHER["Hassan"]) == {
+        "farmer_name": farmer.display_name, "place_name": "Hassan", "temp_min_c": "19", "temp_max_c": "27",
+        "wind_kmh": "18", "rain_chance_pct": "70", "humidity_pct": "84"}
 
 
 def test_every_adapter_satisfies_its_port():

@@ -2,8 +2,9 @@
 
 Pair them in .env:  GATE0_VOICE=sarvam_agent  GATE0_TELEPHONY=sarvam_agent
 - SarvamAgentVoice does no synthesis; it packs the message and language into the audio reference.
-- SarvamAgentTelephony places an instant outbound call with that message as the agent's first line, then polls
-  the Analytics API until the attempt has an outcome. Setup of the agent itself: docs/SARVAM_SETUP.md.
+- SarvamAgentTelephony places an instant outbound call in the farmer's language, then polls the Analytics API
+  until the attempt has an outcome. The agent opens with its own intro and speaks the weather from variables, which
+  only campaign mode (campaign.py) sends; this one-farmer path sends none. Setup of the agent: docs/SARVAM_SETUP.md.
 
 API: POST https://apps.sarvam.ai/api/outbounds/v1/orgs/{org}/workspaces/{ws}/outbounds  (header X-API-Key)
      GET  https://apps.sarvam.ai/api/analytics/v1/{org}/{ws}/{app}/attempts?filter_conditions=[attempt_id]
@@ -77,8 +78,10 @@ class SarvamAgentTelephony:
             "app_config": {
                 "app_id": self.app, "app_version": self.app_version,
                 "connection_config": {"connection_id": self.connection_id, "agent_phone_number": self.agent_phone},
-                "agent_variables": {"weather_message": msg["text"]},
-                "app_overrides": {"initial_bot_message": msg["text"], "initial_language_name": msg["language"]},
+                # The agent opens with its own intro and gives the weather from per-farmer variables, which this
+                # one-farmer path cannot carry yet (the engine hands over only the text). Campaign mode sends them.
+                # Sarvam rejects a variable the agent does not declare, so none is sent here.
+                "app_overrides": {"initial_language_name": msg["language"]},
             },
             "user_config": {"user_phone_number": to_e164(phone)},
         })

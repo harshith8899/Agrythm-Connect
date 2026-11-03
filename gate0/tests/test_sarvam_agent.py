@@ -55,8 +55,9 @@ def test_call_sends_script_as_first_line_and_maps_answered():
     assert create.full_url.endswith("/outbounds/v1/orgs/org1/workspaces/ws1/outbounds")
     assert create.get_header("X-api-key") == "sk-agent"
     assert body["user_config"]["user_phone_number"] == "+919876543210"
-    assert body["app_config"]["app_overrides"] == {"initial_bot_message": "नमस्ते, मैं एआई हूँ",
-                                                   "initial_language_name": "Hindi"}
+    # the agent's own intro opens the call; Sarvam returns 422 for a variable the agent does not declare
+    assert body["app_config"]["app_overrides"] == {"initial_language_name": "Hindi"}
+    assert "agent_variables" not in body["app_config"]
     assert body["app_config"]["connection_config"] == {"connection_id": "conn1", "agent_phone_number": "+918000000000"}
     poll = urllib.parse.urlparse(http.requests[1].full_url)
     assert poll.path == "/api/analytics/v1/org1/ws1/app1/attempts"
