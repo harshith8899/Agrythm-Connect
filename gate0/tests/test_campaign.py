@@ -76,8 +76,14 @@ def test_push_sends_only_eligible_farmers_with_their_message_once():
     users = http.bodies("/cohorts/stream")[0]["users"]
     assert [u["user_identifier"] for u in users] == ["F1", "F2"]
     assert users[0]["user_phone_number"] == "+919876543201"
-    assert users[0]["app_overrides"]["initial_language_name"] == "Hindi" and "Mandya" in users[0]["app_overrides"]["initial_bot_message"]
-    assert users[1]["app_overrides"]["initial_language_name"] == "English" and "Mysuru" in users[1]["app_overrides"]["initial_bot_message"]
+    # the agent greets and gives the weather itself, from these per-farmer variables (names must match the agent's)
+    assert users[0]["app_overrides"] == {"initial_language_name": "Hindi"}
+    assert users[1]["app_overrides"] == {"initial_language_name": "English"}
+    assert users[0]["app_variables"] == {"farmer_name": "Name1", "place_name": "Mandya", "temp_min_c": "21",
+                                         "temp_max_c": "32", "wind_kmh": "14", "rain_chance_pct": "20",
+                                         "humidity_pct": "62"}
+    assert users[1]["app_variables"]["place_name"] == "Mysuru" and users[1]["app_variables"]["humidity_pct"] == "48"
+    assert "98765432" not in json.dumps([u["app_variables"] for u in users])        # no phone number inside variables
     rows = {r.farmer_id: r for r in ports.ledger.status(D).rows}
     assert rows["F3"].skip_reason is SkipReason.NO_CONSENT and rows["F4"].skip_reason is SkipReason.NO_WEATHER
     assert "pushed 2" in out[0]

@@ -18,7 +18,7 @@ import sqlite3
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 
 from .sarvam_agent import BASE, _STATUS, to_e164
@@ -31,8 +31,9 @@ _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Su
 class QueuedCall:
     farmer_id: str
     phone: str          # sent to Sarvam only, never stored
-    language_name: str  # Hindi | English
-    message: str
+    language_name: str  # Hindi | Kannada | English
+    message: str        # the script text, kept in the ledger as the record of what the farmer should hear
+    variables: dict[str, str] = field(default_factory=dict)   # what the agent speaks from (see script.weather_variables)
 
 
 class SarvamCampaigns:
@@ -93,7 +94,7 @@ class SarvamCampaigns:
         ids = []
         for i in range(0, len(calls), 1000):
             users = [{"user_phone_number": to_e164(c.phone), "user_identifier": c.farmer_id,
-                      "app_overrides": {"initial_bot_message": c.message, "initial_language_name": c.language_name}}
+                      "app_variables": c.variables, "app_overrides": {"initial_language_name": c.language_name}}
                      for c in calls[i:i + 1000]]
             part = name if i == 0 else f"{name}-{i // 1000 + 1}"
             ids.append(self._request(f"{BASE}/scheduling/v1/orgs/{self.org}/workspaces/{self.ws}/campaigns/"
