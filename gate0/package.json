@@ -1,0 +1,14 @@
+{
+  "name": "agrythm-connect-gate0",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "node server/index.js",
+    "dashboard:dev": "npm --prefix dashboard run dev",
+    "dashboard:build": "npm --prefix dashboard run build",
+    "test:e2e": "node server/test_e2e.js",
+    "start": "node server/index.js"
+  }
+}
+

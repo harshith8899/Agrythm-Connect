@@ -59,12 +59,14 @@ export const Sidebar = ({
         className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-white border-r border-slate-200/80 flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:z-auto ${isOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
       >
-        {/* Brand Header */}
+        {/* Brand Header with Agrythm Logo */}
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-trust-navy flex items-center justify-center text-white font-bold text-lg shadow-sm">
-              A
-            </div>
+            <img
+              src="/agrythm-logo.png"
+              alt="Agrythm Logo"
+              className="w-10 h-10 object-contain rounded-xl p-0.5 bg-slate-50 border border-slate-200/80 shadow-xs"
+            />
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-extrabold text-slate-900 text-base tracking-tight">

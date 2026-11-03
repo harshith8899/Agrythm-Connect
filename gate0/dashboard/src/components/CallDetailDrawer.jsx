@@ -8,7 +8,14 @@ import {
   Phone, 
   MapPin, 
   MessageSquare,
-  Clock
+  Clock,
+  Calendar,
+  ShieldAlert,
+  AlertCircle,
+  CheckCircle2,
+  RefreshCw,
+  User,
+  Bot
 } from 'lucide-react';
 
 import { maskPhoneNumber } from '../utils';
@@ -26,6 +33,28 @@ export const CallDetailDrawer = ({ call, onClose }) => {
     if (mins > 0) return `${mins}m ${secs}s`;
     return `${secs}s`;
   };
+
+  const isCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested';
+  const isEscalated = call.status === 'Escalated' || call.disposition === 'Non-Weather Inquiry';
+  const attempts = Array.isArray(call.attempts_log) ? call.attempts_log : [];
+
+  // Parse transcript array or text
+  let transcriptItems = [];
+  if (Array.isArray(call.transcript)) {
+    transcriptItems = call.transcript;
+  } else if (typeof call.transcript === 'string') {
+    try {
+      const parsed = JSON.parse(call.transcript);
+      if (Array.isArray(parsed)) transcriptItems = parsed;
+    } catch {
+      // plain string
+    }
+  }
+
+  const tempDisplay = call.weather_temp != null ? `${call.weather_temp}°C` : (call.temperature || 'N/A');
+  const windDisplay = call.weather_windspeed != null ? `${call.weather_windspeed} km/h` : (call.wind || 'N/A');
+  const rainDisplay = call.weather_rainfall != null ? `${call.weather_rainfall}%` : (call.rainfall_chance || 'N/A');
+  const humidityDisplay = call.weather_humidity != null ? `${call.weather_humidity}%` : (call.humidity || 'N/A');
 
   return (
     <>
@@ -49,7 +78,7 @@ export const CallDetailDrawer = ({ call, onClose }) => {
               </span>
             </div>
             <p className="text-[11px] font-bold tracking-wider text-slate-500 uppercase mt-0.5">
-              Call Inspection & Post-Call Telemetry
+              Call Inspection & SQLite Persistence Telemetry
             </p>
           </div>
 
@@ -66,7 +95,7 @@ export const CallDetailDrawer = ({ call, onClose }) => {
           {/* Farmer Profile Card */}
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
             <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-              Farmer Profile
+              Farmer Profile & Contact
             </span>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-2">
               <div className="flex items-center gap-3">
@@ -85,7 +114,7 @@ export const CallDetailDrawer = ({ call, onClose }) => {
                     <span>•</span>
                     <span className="flex items-center gap-1">
                       <MapPin className="w-3 h-3 text-slate-400" />
-                      {call.village || 'N/A'}, {call.district || 'N/A'}
+                      {call.village || 'N/A'}, {call.district || 'Mandya'}
                     </span>
                   </div>
                 </div>
@@ -96,92 +125,210 @@ export const CallDetailDrawer = ({ call, onClose }) => {
                   className={`px-2.5 py-1 rounded-xl text-xs font-bold border ${
                     call.primary_language === 'English'
                       ? 'bg-blue-50 text-blue-700 border-blue-200'
+                      : call.primary_language === 'Kannada'
+                      ? 'bg-purple-50 text-purple-700 border-purple-200'
                       : 'bg-amber-50 text-amber-700 border-amber-200'
                   }`}
                 >
-                  {call.primary_language === 'English' ? 'English' : 'Hindi'}
+                  {call.primary_language || 'Hindi'}
                 </span>
-                <span className="px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-trust-green">
+                <span className="px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-trust-green font-mono">
                   {call.farmer_id || 'N/A'}
                 </span>
-                {call.duration_sec ? (
-                  <span className="px-2.5 py-1 rounded-xl bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1 font-mono">
-                    <Clock className="w-3 h-3 text-slate-400" />
-                    {formatDuration(call.duration_sec)}
-                  </span>
-                ) : null}
+                <span className="px-2.5 py-1 rounded-xl bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1 font-mono">
+                  <Clock className="w-3 h-3 text-slate-400" />
+                  {formatDuration(call.duration_seconds || call.duration_sec)}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Weather Advisory Delivered */}
+          {/* Callback Requested Highlight (if present) */}
+          {isCallback && (
+            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-1.5">
+              <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wider">
+                <Calendar className="w-4 h-4 text-amber-700" />
+                <span>Specific Reschedule / Callback Requested</span>
+              </div>
+              <div className="flex items-center justify-between text-xs pt-1">
+                <span className="text-amber-800">Scheduled Callback Slot:</span>
+                <span className="font-bold font-mono text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded-lg border border-amber-300">
+                  {call.scheduled_callback_time || 'Today, 5:00 PM'}
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-700 leading-relaxed pt-0.5">
+                The farmer indicated unavailability during the morning run. An automated callback is queued in the SQLite orchestrator.
+              </p>
+            </div>
+          )}
+
+          {/* Agronomic Boundary Escalation Highlight (if present) */}
+          {isEscalated && (
+            <div className="p-4 rounded-2xl bg-purple-50 border border-purple-200 space-y-1.5">
+              <div className="flex items-center gap-2 text-purple-900 font-bold text-xs uppercase tracking-wider">
+                <ShieldAlert className="w-4 h-4 text-purple-700" />
+                <span>Agronomic Boundary Guardrail Enforced</span>
+              </div>
+              <p className="text-xs text-purple-800 leading-relaxed">
+                Disposition: <strong>Non-Weather Inquiry</strong>. The farmer requested chemical/pesticide dosage advice.
+                Agrythm Connect strictly limits dialogue to meteorology; advice was declined and the case has been routed to field agronomists.
+              </p>
+            </div>
+          )}
+
+          {/* 4-Parameter Weather Delivered */}
           <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                Weather Advisory Grounding
+                4-Parameter Open-Meteo Grounding
               </span>
-              {call.call_status === 'skipped' ? (
-                <span className="text-xs font-semibold text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                  <CloudRain className="w-3.5 h-3.5 text-slate-400" />
-                  Skipped
-                </span>
-              ) : (
-                <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                  <CloudRain className="w-3.5 h-3.5 text-emerald-600" />
-                  Live Grounded ({call.weather_source || 'Open-Meteo'})
-                </span>
-              )}
+              <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                <CloudRain className="w-3.5 h-3.5 text-emerald-600" />
+                Open-Meteo Ingestion
+              </span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                  <Thermometer className="w-3 h-3 text-amber-500" />
-                  Temperature
+              {/* 1. Temperature */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold">
+                  <Thermometer className="w-3.5 h-3.5 text-amber-500" />
+                  1. Temperature
                 </span>
-                <div className="font-bold text-slate-900 mt-1">{call.temperature || 'N/A'}</div>
+                <div className="font-bold text-base text-slate-900 mt-1">{tempDisplay}</div>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                  <CloudRain className="w-3 h-3 text-blue-500" />
-                  Rain Chance
+              {/* 2. Wind Speed */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold">
+                  <Wind className="w-3.5 h-3.5 text-slate-500" />
+                  2. Wind Speed
                 </span>
-                <div className="font-bold text-slate-900 mt-1">{call.rainfall_chance || 'N/A'}</div>
+                <div className="font-bold text-base text-slate-900 mt-1">{windDisplay}</div>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                  <Droplets className="w-3 h-3 text-cyan-500" />
-                  Humidity
+              {/* 3. Rainfall Probability */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold">
+                  <CloudRain className="w-3.5 h-3.5 text-blue-500" />
+                  3. Rain Chance
                 </span>
-                <div className="font-bold text-slate-900 mt-1">{call.humidity || 'N/A'}</div>
+                <div className="font-bold text-base text-slate-900 mt-1">{rainDisplay}</div>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                  <Wind className="w-3 h-3 text-slate-500" />
-                  Wind Speed
+              {/* 4. Relative Humidity */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold">
+                  <Droplets className="w-3.5 h-3.5 text-cyan-500" />
+                  4. Humidity
                 </span>
-                <div className="font-bold text-slate-900 mt-1">{call.wind || 'N/A'}</div>
+                <div className="font-bold text-base text-slate-900 mt-1">{humidityDisplay}</div>
               </div>
             </div>
 
             <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-100 text-xs text-slate-700 leading-relaxed">
-              <strong className="text-trust-navy block mb-1">Forecast: {call.weather_forecast || 'General Weather'}</strong>
-              {call?.message_text || call?.advisory_summary || 'No spoken message recorded'}
+              <strong className="text-trust-navy block mb-0.5">Forecast Summary:</strong>
+              {call.advisory_summary || call.message_text || 'Routine meteorological forecast delivered to farmer.'}
             </div>
           </div>
 
-          {/* Dialog Transcript from Sheet */}
+          {/* Auditability: 2-Retry Cycle Attempt History */}
+          {attempts.length > 0 && (
+            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                  Telephony Audit Log (2-Retry Cycle History)
+                </span>
+                <span className="text-xs text-slate-500 font-mono">
+                  {attempts.length} Attempt{attempts.length > 1 ? 's' : ''} Recorded
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {attempts.map((att, idx) => (
+                  <div 
+                    key={att.id || idx} 
+                    className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 text-xs flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center font-bold text-[10px] text-slate-700 font-mono">
+                        {att.attempt_number || idx + 1}
+                      </span>
+                      <div>
+                        <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                          <span>Attempt {att.attempt_number || idx + 1}:</span>
+                          <span className={`px-2 py-0.2 rounded text-[10px] ${
+                            att.status === 'Answered' 
+                              ? 'bg-emerald-100 text-emerald-800' 
+                              : (att.status === 'Busy' ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800')
+                          }`}>
+                            {att.status}
+                          </span>
+                        </div>
+                        {att.error_message && (
+                          <p className="text-[10px] text-slate-500 mt-0.5">{att.error_message}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right font-mono text-[11px] text-slate-500">
+                      {att.duration_seconds}s
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Full Conversation Transcript */}
           <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                Dialog Transcript ({call.primary_language === 'English' ? 'English' : 'Hindi'})
+                Dialogue Transcript ({call.primary_language || 'Kannada'})
+              </span>
+              <span className="text-[10px] font-semibold text-slate-400">
+                Grounding & Intent Resolution
               </span>
             </div>
 
-            {rawTranscript ? (
+            {transcriptItems.length > 0 ? (
+              <div className="space-y-3 pt-1">
+                {transcriptItems.map((turn, idx) => {
+                  const isAgent = turn.speaker === 'Agent';
+                  const isSystem = turn.speaker === 'System';
+
+                  if (isSystem) {
+                    return (
+                      <div key={idx} className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
+                        <strong>System Notice:</strong> {turn.text}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div 
+                      key={idx} 
+                      className={`flex gap-2.5 ${isAgent ? 'items-start' : 'items-start flex-row-reverse'}`}
+                    >
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                        isAgent ? 'bg-trust-navy text-white' : 'bg-emerald-600 text-white'
+                      }`}>
+                        {isAgent ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                      </div>
+                      <div className={`p-3 rounded-2xl max-w-[85%] text-xs leading-relaxed ${
+                        isAgent 
+                          ? 'bg-slate-100 text-slate-800 rounded-tl-xs' 
+                          : 'bg-emerald-50 text-emerald-950 border border-emerald-200 rounded-tr-xs'
+                      }`}>
+                        <div className="font-bold text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+                          {turn.speaker}
+                        </div>
+                        {turn.text}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : rawTranscript ? (
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed font-sans">
                 {rawTranscript}
               </div>

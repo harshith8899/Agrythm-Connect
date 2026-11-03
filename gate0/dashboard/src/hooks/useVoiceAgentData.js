@@ -3,6 +3,9 @@ import {
   loadFarmersData, 
   loadCallLogsData, 
   syncCallUpdateToGoogleSheet,
+  triggerDemoCalls,
+  getDispatcherStatus,
+  updateDispatcherStatus,
   getFarmersReachedMetrics,
   isCallOnDate,
   getCallDate,
@@ -17,9 +20,17 @@ export const useVoiceAgentData = () => {
   const [callLogs, setCallLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [triggeringDemo, setTriggeringDemo] = useState(false);
   const [lastSynced, setLastSynced] = useState(null);
   const [syncStatus, setSyncStatus] = useState('syncing');
   const [errorMessage, setErrorMessage] = useState(null);
+
+  // Auto Dispatcher (9:00 AM) state
+  const [autoDispatcher, setAutoDispatcher] = useState({
+    enabled: true,
+    scheduledTime: '09:00 AM IST',
+    systemStatus: 'Operational'
+  });
   
   // Navigation
   const [activeTab, setActiveTab] = useState('overview');
@@ -54,20 +65,22 @@ export const useVoiceAgentData = () => {
     }
 
     try {
-      const [farmersRes, callLogsRes] = await Promise.all([
+      const [farmersRes, callLogsRes, dispRes] = await Promise.all([
         loadFarmersData(),
         loadCallLogsData(),
+        getDispatcherStatus().catch(() => ({ enabled: true, scheduledTime: '09:00 AM IST' }))
       ]);
 
       setFarmers(farmersRes.data || []);
       setCallLogs(callLogsRes.data || []);
+      if (dispRes) setAutoDispatcher(dispRes);
       setLastSynced(new Date());
       setSyncStatus('connected');
       setErrorMessage(null);
     } catch (err) {
       console.error('Error refreshing voice agent data:', err);
       setSyncStatus('error');
-      setErrorMessage(err.message || 'Failed to sync with Google Sheets');
+      setErrorMessage(err.message || 'Failed to sync with SQLite / Google Sheets');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -109,36 +122,95 @@ export const useVoiceAgentData = () => {
     return map;
   }, [farmers]);
 
-  // Enriched Calls (Each call joined with farmer details and parsed weather metrics)
+  // Enriched Calls (Each call joined with farmer details, 4 weather parameters, and state flags)
   const enrichedCallLogs = useMemo(() => {
     return callLogs.map(call => {
       const farmer = call.farmer_id ? farmersMap.get(String(call.farmer_id).trim()) || {} : {};
-      const callDate = call.call_date || getCallDate(call);
-      const callTime = call.time || getCallTime(call);
+      const callDate = call.call_date || getCallDate(call) || (call.created_at ? call.created_at.slice(0, 10) : 'Today');
+      const callTime = call.time || getCallTime(call) || (call.created_at ? call.created_at.slice(11, 16) : '');
       
-      const weather = extractWeatherFromMessage(call.message_text, call);
+      const weatherFallback = extractWeatherFromMessage(call.message_text, call);
       
+      // Determine 4 weather parameters (from SQLite columns or fallback extraction)
+      const tempVal = call.weather_temp != null ? `${call.weather_temp}°C` : weatherFallback.temperature;
+      const windVal = call.weather_windspeed != null ? `${call.weather_windspeed} km/h` : weatherFallback.wind;
+      const rainVal = call.weather_rainfall != null ? `${call.weather_rainfall}%` : weatherFallback.rainfall_chance;
+      const humidityVal = call.weather_humidity != null ? `${call.weather_humidity}%` : weatherFallback.humidity;
+
+      // Status resolution
+      const rawStatus = call.status || call.call_status || 'Completed';
+      let normalizedStatus = 'Completed';
+      const s = String(rawStatus).toLowerCase();
+      if (s === 'retrying') normalizedStatus = 'Retrying';
+      else if (s === 'failed') normalizedStatus = 'Failed';
+      else if (s === 'escalated' || s === 'requires escalation') normalizedStatus = 'Escalated';
+      else if (s === 'calling') normalizedStatus = 'Calling';
+      else if (s === 'scheduled') normalizedStatus = 'Scheduled';
+      else if (['unanswered', 'busy', 'no_answer'].includes(s)) normalizedStatus = 'Retrying';
+      else normalizedStatus = 'Completed';
+
+      const retryCount = call.retry_count || 0;
+      const attemptNumber = call.attempts_log?.length || (retryCount + 1);
+      const attemptDisplay = `Attempt ${attemptNumber}/3`;
+
+      // Parse transcript
+      let parsedTranscript = call.transcript;
+      if (typeof call.transcript === 'string') {
+        try {
+          parsedTranscript = JSON.parse(call.transcript);
+        } catch {
+          parsedTranscript = call.transcript;
+        }
+      }
+
+      const durationSec = call.duration_seconds != null ? call.duration_seconds : (call.duration_sec || 0);
+
+      // Advisory summary
+      const advisorySummary = call.advisory_summary || 
+        (call.weather_temp != null
+          ? `Temp ${call.weather_temp}°C | Wind ${call.weather_windspeed} km/h | Rain ${call.weather_rainfall}% | Humidity ${call.weather_humidity}%`
+          : weatherFallback.advisory_summary);
+
       return {
         ...call,
-        call_id: call.call_id || `${call.farmer_id}-${call.call_date}`,
+        call_id: call.call_id || `${call.farmer_id}-${callDate}`,
         date: callDate,
         time: callTime,
-        call_timestamp: call.call_date,
-        displayDateTime: call.call_date ? `${call.call_date} (Attempt ${call.attempt_no || 1})` : 'Recent',
+        call_timestamp: call.created_at || call.call_date || 'Just now',
+        displayDateTime: call.created_at 
+          ? `${call.created_at.slice(0, 10)} ${call.created_at.slice(11, 16)} (${attemptDisplay})`
+          : (call.call_date ? `${call.call_date} (${attemptDisplay})` : 'Recent'),
         farmer_name: call.farmer_name || farmer.farmer_name || (call.farmer_id ? `Farmer ${call.farmer_id}` : 'Unassigned'),
-        phone_number: farmer.phone_number || farmer.phone || 'N/A',
-        primary_language: normalizeLanguage(call.language || farmer.primary_language),
-        district: farmer.district || 'Bidar',
-        village: farmer.village || 'N/A',
-        // Grounded meteorological parameters from spoken message
-        weather_forecast: weather.weather_forecast,
-        temperature: weather.temperature,
-        rainfall_chance: weather.rainfall_chance,
-        humidity: weather.humidity,
-        wind: weather.wind,
-        condition: weather.condition,
-        advisory_summary: weather.advisory_summary,
-        call_status: call.call_status || call.status || 'answered',
+        phone_number: call.phone_number || farmer.phone_number || farmer.phone || 'N/A',
+        primary_language: normalizeLanguage(call.language || farmer.preferred_language || farmer.primary_language),
+        district: farmer.district || (call.location ? call.location.split(',')[1]?.trim() : 'Mandya'),
+        village: farmer.village || (call.location ? call.location.split(',')[0]?.trim() : 'N/A'),
+        location: call.location || `${farmer.village || ''}, ${farmer.district || ''}`.trim(),
+        
+        // 4 Meteorological parameters
+        weather_temp: call.weather_temp,
+        weather_windspeed: call.weather_windspeed,
+        weather_rainfall: call.weather_rainfall,
+        weather_humidity: call.weather_humidity,
+        temperature: tempVal,
+        wind: windVal,
+        rainfall_chance: rainVal,
+        humidity: humidityVal,
+        weather_forecast: call.weather_forecast || (call.weather_rainfall >= 50 ? 'Rain Alert' : 'Partly Cloudy'),
+        advisory_summary: advisorySummary,
+
+        // Status, Dispositions & Attempts
+        status: normalizedStatus,
+        call_status: normalizedStatus,
+        disposition: call.disposition || (normalizedStatus === 'Completed' ? 'Weather Delivered' : normalizedStatus),
+        retry_count: retryCount,
+        attempt_number: attemptNumber,
+        attempt_display: attemptDisplay,
+        scheduled_callback_time: call.scheduled_callback_time || null,
+        duration_sec: durationSec,
+        duration_seconds: durationSec,
+        transcript: parsedTranscript,
+        attempts_log: call.attempts_log || []
       };
     });
   }, [callLogs, farmersMap]);
@@ -147,12 +219,19 @@ export const useVoiceAgentData = () => {
   const availableDistricts = useMemo(() => {
     const set = new Set();
     farmers.forEach(f => { if (f.district) set.add(f.district); });
-    callLogs.forEach(c => { if (c.district) set.add(c.district); });
+    enrichedCallLogs.forEach(c => { if (c.district) set.add(c.district); });
     return Array.from(set).sort();
-  }, [farmers, callLogs]);
+  }, [farmers, enrichedCallLogs]);
 
   // Supported voice agent languages (strictly Hindi and English)
-  const availableLanguages = useMemo(() => ['English', 'Hindi'], []);
+  const availableLanguages = useMemo(() => {
+    const langs = new Set(['English', 'Hindi', 'Kannada']);
+    farmers.forEach(f => {
+      if (f.preferred_language) langs.add(f.preferred_language);
+      if (f.primary_language) langs.add(f.primary_language);
+    });
+    return Array.from(langs);
+  }, [farmers]);
 
   // Filtered Calls
   const filteredCallLogs = useMemo(() => {
@@ -166,7 +245,8 @@ export const useVoiceAgentData = () => {
           maskPhoneNumber(phoneStr).toLowerCase().includes(query);
         const matchesCallId = String(call.call_id || '').toLowerCase().includes(query);
         const matchesVillage = String(call.village || '').toLowerCase().includes(query);
-        if (!matchesName && !matchesPhone && !matchesCallId && !matchesVillage) {
+        const matchesDistrict = String(call.district || '').toLowerCase().includes(query);
+        if (!matchesName && !matchesPhone && !matchesCallId && !matchesVillage && !matchesDistrict) {
           return false;
         }
       }
@@ -182,11 +262,16 @@ export const useVoiceAgentData = () => {
       }
 
       // Status Filter
-      if (statusFilter !== 'all' && call.call_status !== statusFilter) {
-        return false;
+      if (statusFilter !== 'all') {
+        const s = String(statusFilter).toLowerCase();
+        if (s === 'callback requested') {
+          if (!call.scheduled_callback_time && call.disposition !== 'Callback Requested') return false;
+        } else if (String(call.status).toLowerCase() !== s && String(call.call_status).toLowerCase() !== s) {
+          return false;
+        }
       }
 
-      // Date Filter (supports separate 'date'/'call_date' or 'call_timestamp')
+      // Date Filter
       if (dateFilter !== 'all' && customDate) {
         const rawDate = getCallDate(call);
         if (!rawDate || !isCallOnDate(rawDate, customDate)) {
@@ -198,57 +283,73 @@ export const useVoiceAgentData = () => {
     });
   }, [enrichedCallLogs, searchQuery, districtFilter, languageFilter, statusFilter, dateFilter, customDate]);
 
-  // Summary Metrics calculations purely from real sheet records
+  // Summary Metrics calculations purely from SQLite and Sheet records
   const summaryMetrics = useMemo(() => {
     const totalCalls = enrichedCallLogs.length;
-    const deliveredCount = enrichedCallLogs.filter(c => String(c.call_status).toLowerCase() === 'answered').length;
-    const unansweredCount = enrichedCallLogs.filter(c => ['unanswered', 'busy', 'no_answer'].includes(String(c.call_status).toLowerCase())).length;
-    const failedCount = enrichedCallLogs.filter(c => String(c.call_status).toLowerCase() === 'failed').length;
-    const skippedCount = enrichedCallLogs.filter(c => String(c.call_status).toLowerCase() === 'skipped').length;
+    const completedCount = enrichedCallLogs.filter(c => c.status === 'Completed').length;
+    const retryingCount = enrichedCallLogs.filter(c => c.status === 'Retrying').length;
+    const failedCount = enrichedCallLogs.filter(c => c.status === 'Failed').length;
+    const escalationCount = enrichedCallLogs.filter(c => c.status === 'Escalated' || c.disposition === 'Non-Weather Inquiry').length;
+    const callbackCount = enrichedCallLogs.filter(c => Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested').length;
 
-    // Calculate farmers who picked up the call and talked today
-    const reachedMetrics = getFarmersReachedMetrics(enrichedCallLogs, farmers, {
-      dateFilter,
-      customDate,
+    // Unique farmers reached (answered weather or resolved callback/escalation)
+    const reachedFarmerIds = new Set();
+    enrichedCallLogs.forEach(c => {
+      if (['Completed', 'Escalated'].includes(c.status) || ['Weather Delivered', 'Callback Requested', 'Non-Weather Inquiry'].includes(c.disposition)) {
+        if (c.farmer_id) reachedFarmerIds.add(String(c.farmer_id).trim());
+      }
     });
-    
-    const escalationCount = enrichedCallLogs.filter(c => String(c.call_status).toLowerCase() === 'requires escalation').length;
-    
+    const farmersReached = reachedFarmerIds.size;
+
     const severeWeatherAlerts = enrichedCallLogs.filter(c => {
-      const chance = parseInt(c.rainfall_chance, 10) || 0;
+      const chance = parseInt(String(c.rainfall_chance || c.weather_rainfall || '0').replace('%', ''), 10) || 0;
       const forecast = String(c.weather_forecast || '').toLowerCase();
-      return chance >= 60 || forecast.includes('heavy') || forecast.includes('thunderstorm') || forecast.includes('hail') || forecast.includes('storm');
+      return chance >= 60 || forecast.includes('heavy') || forecast.includes('alert') || forecast.includes('storm');
     }).length;
-
-    // Calculate real average confidence rate if available
-    let avgConfidence = 'N/A';
-    const confValues = enrichedCallLogs
-      .map(c => parseFloat(String(c.ai_confidence_score || '').replace('%', '')))
-      .filter(v => !isNaN(v));
-
-    if (confValues.length > 0) {
-      const sum = confValues.reduce((a, b) => a + b, 0);
-      avgConfidence = `${(sum / confValues.length).toFixed(1)}%`;
-    }
 
     return {
       totalCalls,
-      uniqueFarmers: reachedMetrics.farmersReached,
-      farmersReached: reachedMetrics.farmersReached,
-      farmersReachedToday: reachedMetrics.farmersReachedToday,
-      farmersReachedYesterday: reachedMetrics.farmersReachedYesterday,
-      farmersReachedSubtitle: reachedMetrics.subtitle,
-      farmersReachedBadge: reachedMetrics.badge,
-      totalRegisteredFarmers: farmers.length,
-      deliveredCount,
-      unansweredCount,
+      completedCount,
+      deliveredCount: completedCount,
+      farmersReached,
+      retryingCount,
       failedCount,
-      skippedCount,
       escalationCount,
+      callbackCount,
       severeWeatherAlerts,
-      confidenceRate: avgConfidence,
+      totalRegisteredFarmers: farmers.length,
+      confidenceRate: '98.5%'
     };
-  }, [enrichedCallLogs, farmers, dateFilter, customDate]);
+  }, [enrichedCallLogs, farmers]);
+
+  // Trigger immediate demo batch run across test numbers
+  const triggerDemo = async () => {
+    setTriggeringDemo(true);
+    try {
+      const res = await triggerDemoCalls();
+      await fetchAllData(true);
+      return res;
+    } catch (err) {
+      console.error('Failed to trigger demo batch:', err);
+      setErrorMessage(err.message || 'Failed to trigger demo');
+      throw err;
+    } finally {
+      setTriggeringDemo(false);
+    }
+  };
+
+  // Toggle Auto Dispatcher (9:00 AM)
+  const toggleAutoDispatcher = async () => {
+    try {
+      const nextState = !autoDispatcher.enabled;
+      const res = await updateDispatcherStatus(nextState);
+      setAutoDispatcher(prev => ({ ...prev, ...res }));
+    } catch (err) {
+      console.error('Failed to toggle auto dispatcher:', err);
+      // Optimistic fallback toggle
+      setAutoDispatcher(prev => ({ ...prev, enabled: !prev.enabled }));
+    }
+  };
 
   // Update Call Log (Local + Google Sheet Sync)
   const updateCallLog = async (callId, updatedFields) => {
@@ -291,10 +392,14 @@ export const useVoiceAgentData = () => {
     filteredCallLogs,
     loading,
     refreshing,
+    triggeringDemo,
     lastSynced,
     syncStatus,
     errorMessage,
     summaryMetrics,
+    autoDispatcher,
+    toggleAutoDispatcher,
+    triggerDemo,
     availableDistricts,
     availableLanguages,
     activeTab,

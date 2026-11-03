@@ -54,6 +54,9 @@ export const normalizeLanguage = (lang) => {
   if (l.startsWith('en')) {
     return 'English';
   }
+  if (l.startsWith('kan') || l.startsWith('kn') || l === 'ಕನ್ನಡ') {
+    return 'Kannada';
+  }
   return 'Hindi';
 };
 

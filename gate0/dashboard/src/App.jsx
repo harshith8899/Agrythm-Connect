@@ -21,9 +21,13 @@ function App() {
     callLogs,
     filteredCallLogs,
     refreshing,
+    triggeringDemo,
     lastSynced,
     syncStatus,
     summaryMetrics,
+    autoDispatcher,
+    toggleAutoDispatcher,
+    triggerDemo,
     availableDistricts,
     availableLanguages,
     activeTab,
@@ -74,13 +78,17 @@ function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Sticky Header */}
+        {/* Top Sticky Header with Triggers */}
         <Header
           onToggleSidebar={() => setSidebarOpen(true)}
           onRefresh={() => fetchAllData(false)}
           refreshing={refreshing}
           syncStatus={syncStatus}
           activeTab={activeTab}
+          onTriggerDemo={triggerDemo}
+          triggeringDemo={triggeringDemo}
+          autoDispatcher={autoDispatcher}
+          onToggleAutoDispatcher={toggleAutoDispatcher}
         />
 
         {/* Tab Content */}

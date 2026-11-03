@@ -95,6 +95,58 @@ export const loadCallLogsData = async (customUrl = null) => {
     return { data: [], source: 'offline', error: err.message };
   }
 };
+
+/**
+ * Trigger manual demo run across test numbers in SQLite Orchestrator
+ */
+export const triggerDemoCalls = async () => {
+  const url = 'http://localhost:8000/api/calls/trigger-demo';
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`Demo trigger failed: HTTP ${response.status}`);
+  }
+  return await response.json();
+};
+
+/**
+ * Get 9:00 AM Auto Dispatcher status
+ */
+export const getDispatcherStatus = async () => {
+  try {
+    const response = await fetch('http://localhost:8000/api/orchestrator/status');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch {
+    return { enabled: true, scheduledTime: '09:00 AM IST', systemStatus: 'Operational' };
+  }
+};
+
+/**
+ * Toggle or update Auto Dispatcher
+ */
+export const updateDispatcherStatus = async (enabled) => {
+  const response = await fetch('http://localhost:8000/api/orchestrator/auto-dispatch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return await response.json();
+};
+
+/**
+ * Fetch 4 meteorological parameters from Open-Meteo endpoint
+ */
+export const getWeatherParameters = async (lat, lon) => {
+  const url = `http://localhost:8000/api/weather?lat=${lat}&lon=${lon}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return await response.json();
+};
+
 /**
  * Push an updated or new call log to a Google Apps Script Web App endpoint
  */

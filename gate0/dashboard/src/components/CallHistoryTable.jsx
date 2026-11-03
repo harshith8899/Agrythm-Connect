@@ -8,56 +8,77 @@ import {
   AlertCircle, 
   PhoneOutgoing,
   Database,
-  ExternalLink
+  ExternalLink,
+  ShieldAlert,
+  Calendar,
+  RefreshCw,
+  PhoneCall
 } from 'lucide-react';
 import { GOOGLE_SHEETS_CONFIG } from '../utils/constants';
 import { maskPhoneNumber } from '../utils';
 
 export const CallHistoryTable = ({ callLogs, onSelectCall, selectedCallId, onResetFilters, isFiltered }) => {
-  const getStatusBadge = (status, skipReason) => {
+  const getStatusBadge = (status, disposition, skipReason) => {
     const s = String(status || '').toLowerCase();
     switch (s) {
+      case 'completed':
       case 'answered':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-trust-green border border-emerald-200">
-            <CheckCircle2 className="w-3 h-3" />
-            Answered
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+            <span>Completed</span>
           </span>
         );
+      case 'retrying':
       case 'unanswered':
       case 'busy':
       case 'no_answer':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-            <Clock className="w-3 h-3" />
-            Unanswered
+            <RefreshCw className="w-3 h-3 text-amber-600 animate-spin" />
+            <span>Retrying</span>
+          </span>
+        );
+      case 'escalated':
+      case 'requires escalation':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+            <ShieldAlert className="w-3 h-3 text-purple-600" />
+            <span>Escalated</span>
           </span>
         );
       case 'failed':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-            <AlertCircle className="w-3 h-3" />
-            Failed
+            <AlertCircle className="w-3 h-3 text-rose-600" />
+            <span>Failed</span>
+          </span>
+        );
+      case 'calling':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+            <PhoneCall className="w-3 h-3 text-blue-600 animate-pulse" />
+            <span>Calling</span>
           </span>
         );
       case 'skipped':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-            <AlertCircle className="w-3 h-3" />
-            Skipped {skipReason ? `(${skipReason})` : ''}
+            <AlertCircle className="w-3 h-3 text-slate-500" />
+            <span>Skipped {skipReason ? `(${skipReason})` : ''}</span>
           </span>
         );
       default:
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-200">
-            {status || 'Recorded'}
+            {status || 'Scheduled'}
           </span>
         );
     }
   };
 
   const formatDuration = (seconds) => {
-    if (!seconds && seconds !== 0) return 'N/A';
+    if (!seconds && seconds !== 0) return '0s';
     const num = parseInt(seconds, 10);
     if (isNaN(num)) return String(seconds);
     const mins = Math.floor(num / 60);
@@ -75,12 +96,12 @@ export const CallHistoryTable = ({ callLogs, onSelectCall, selectedCallId, onRes
         
         <div>
           <h3 className="text-base font-bold text-slate-900">
-            {isFiltered ? 'No Matching Call Records' : 'No Call Records in SQLite API Yet'}
+            {isFiltered ? 'No Matching Call Records' : 'No Call Records in SQLite Persistence Layer Yet'}
           </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
             {isFiltered 
               ? 'No voice call logs match the selected search or filter criteria. Try adjusting your filters.'
-              : 'The dashboard is connected live to Gate Zero SQLite API (http://localhost:8000/api/calls). As the voice agent executes calls, they will appear here automatically.'}
+              : 'Click "Start Demo" in the header to execute an immediate test batch across test numbers, or wait for the automated 9:00 AM dispatcher.'}
           </p>
         </div>
 
@@ -96,12 +117,12 @@ export const CallHistoryTable = ({ callLogs, onSelectCall, selectedCallId, onRes
         ) : (
           <div className="pt-2">
             <a
-              href={GOOGLE_SHEETS_CONFIG.callLogsApiUrl || `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEETS_CONFIG.callLogsSheetId}`}
+              href={GOOGLE_SHEETS_CONFIG.callLogsApiUrl}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition-colors"
             >
-              <span>View Live Telemetry API</span>
+              <span>View Live SQLite API (/api/calls)</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           </div>
@@ -116,14 +137,15 @@ export const CallHistoryTable = ({ callLogs, onSelectCall, selectedCallId, onRes
       <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-            Live Call History
+            Live Call History & Telemetry Logs
           </span>
           <h3 className="text-base font-bold text-slate-900">
-            Voice Agent Weather Advisories & Farmer Telemetry
+            Voice Agent 4-Parameter Weather Advisories & Retries
           </h3>
         </div>
-        <div className="text-xs text-slate-500">
-          Showing real-time records from Gate Zero SQLite API
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span>Showing real-time records from SQLite Persistence</span>
         </div>
       </div>
 
@@ -136,15 +158,21 @@ export const CallHistoryTable = ({ callLogs, onSelectCall, selectedCallId, onRes
               <th className="px-4 py-3.5">Farmer & Contact</th>
               <th className="px-4 py-3.5">District / Village</th>
               <th className="px-4 py-3.5">Language</th>
-              <th className="px-4 py-3.5 min-w-[240px]">Weather Advisory Summary</th>
+              <th className="px-4 py-3.5 min-w-[200px]">4-Parameter Weather</th>
+              <th className="px-4 py-3.5">Attempts</th>
               <th className="px-4 py-3.5">Duration</th>
-              <th className="px-4 py-3.5">Status</th>
+              <th className="px-4 py-3.5">Status & Disposition</th>
+              <th className="px-4 py-3.5">Callback Requested</th>
               <th className="px-4 py-3.5 text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {callLogs.map((call) => {
               const isSelected = selectedCallId === call.call_id;
+              const hasCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested';
+              const attemptNumber = call.attempts_log?.length || (call.retry_count ? call.retry_count + 1 : 1);
+              const attemptLabel = `Attempt ${attemptNumber}/3`;
+
               return (
                 <tr
                   key={call.call_id}
@@ -157,7 +185,7 @@ export const CallHistoryTable = ({ callLogs, onSelectCall, selectedCallId, onRes
                 >
                   {/* Call ID & Timestamp */}
                   <td className="px-4 py-3.5 whitespace-nowrap">
-                    <div className="font-bold text-slate-900">{call.call_id}</div>
+                    <div className="font-bold text-slate-900 font-mono">{call.call_id}</div>
                     <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
                       <Clock className="w-3 h-3 text-slate-400" />
                       {call.displayDateTime || call.call_timestamp || 'Just now'}
@@ -174,49 +202,82 @@ export const CallHistoryTable = ({ callLogs, onSelectCall, selectedCallId, onRes
 
                   {/* District & Village */}
                   <td className="px-4 py-3.5 whitespace-nowrap">
-                    <div className="font-medium text-slate-800">{call.district}</div>
+                    <div className="font-medium text-slate-800">{call.district || 'Mandya'}</div>
                     <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
                       <MapPin className="w-3 h-3 text-slate-400" />
-                      {call.village}
+                      {call.village || 'N/A'}
                     </div>
                   </td>
 
                   {/* Primary Language */}
                   <td className="px-4 py-3.5 whitespace-nowrap">
                     <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full font-bold text-[11px] border ${
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold text-[11px] border ${
                         call.primary_language === 'English'
                           ? 'bg-blue-50 text-blue-700 border-blue-200'
                           : 'bg-amber-50 text-amber-700 border-amber-200'
                       }`}
                     >
-                      {call.primary_language === 'English' ? 'English' : 'Hindi'}
+                      {call.primary_language || 'Hindi'}
                     </span>
                   </td>
 
-                  {/* Weather Advisory Summary */}
+                  {/* 4-Parameter Weather Advisory */}
                   <td className="px-4 py-3.5">
                     <div className="flex items-start gap-1.5">
                       <CloudRain className="w-3.5 h-3.5 text-trust-navy mt-0.5 shrink-0" />
                       <div>
-                        <div className="font-semibold text-slate-800 text-[11px] line-clamp-1">
-                          {call.weather_forecast || 'Weather Report'}
+                        <div className="font-semibold text-slate-800 text-[11px] flex items-center gap-1.5">
+                          <span>{call.weather_forecast || 'Weather Report'}</span>
+                          {call.weather_temp != null && (
+                            <span className="font-mono text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded text-[10px]">
+                              {call.weather_temp}°C
+                            </span>
+                          )}
                         </div>
-                        <p className="text-[11px] text-slate-500 line-clamp-2 mt-0.5 leading-relaxed">
-                          {call.advisory_summary || 'No advisory summary provided'}
+                        <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
+                          {call.advisory_summary || `Temp ${call.temperature || 'N/A'} | Rain ${call.rainfall_chance || 'N/A'}`}
                         </p>
                       </div>
                     </div>
                   </td>
 
-                  {/* Duration */}
-                  <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 font-mono text-[11px]">
-                    {formatDuration(call.duration_sec)}
+                  {/* Attempts (1/3, 2/3, 3/3) */}
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    <span className={`inline-flex items-center gap-1 font-mono text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                      attemptNumber > 1 ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {attemptLabel}
+                    </span>
                   </td>
 
-                  {/* Status Badge */}
+                  {/* Duration */}
+                  <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 font-mono text-[11px]">
+                    {formatDuration(call.duration_seconds || call.duration_sec)}
+                  </td>
+
+                  {/* Status & Disposition */}
                   <td className="px-4 py-3.5 whitespace-nowrap">
-                    {getStatusBadge(call.call_status, call.skip_reason)}
+                    <div className="flex flex-col gap-1 items-start">
+                      {getStatusBadge(call.status, call.disposition, call.skip_reason)}
+                      {call.disposition && (
+                        <span className="text-[10px] text-slate-500 font-medium">
+                          {call.disposition}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* Dedicated Callback Requested Indicator */}
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    {hasCallback ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                        <Calendar className="w-3 h-3 text-amber-600 shrink-0" />
+                        <span>{call.scheduled_callback_time || 'Callback Pending'}</span>
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 font-mono text-[11px]">-</span>
+                    )}
                   </td>
 
                   {/* Action / Inspect */}
