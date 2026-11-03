@@ -2,8 +2,9 @@
 
 - geocode() turns Village + District + State into coordinates. Names repeat across India (there is a Mandya in
   Haryana too), so a match must sit in the farmer's state and district; otherwise there is no match and no call.
-- OpenMeteoWeather returns today's forecast, or None when any field is missing or implausible, so a farmer is
-  only called when real weather is in hand.
+- OpenMeteoWeather asks for the next 7 days at once (get_forecast) and returns the requested day, or None when any
+  field is missing or implausible, so a farmer is only called when real weather is in hand. StoredWeather keeps all
+  7 days, so a later outage can fall back on a saved forecast.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import json
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from ..contracts import WeatherReport
 
@@ -25,6 +26,11 @@ _WMO = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "cloudy", 45: "fog
         71: "light snow", 73: "snowy", 75: "heavy snow", 77: "snowy",
         80: "light showers", 81: "showers", 82: "heavy showers", 85: "snow showers", 86: "snow showers",
         95: "thunderstorms", 96: "thunderstorms with hail", 99: "thunderstorms with hail"}
+
+
+FORECAST_DAYS = 7
+DAILY_FIELDS = ("weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
+                "wind_speed_10m_max,relative_humidity_2m_mean")
 
 
 def _get(url: str, params: dict, opener=urllib.request.urlopen) -> dict:
@@ -67,23 +73,32 @@ class OpenMeteoWeather:
     def __init__(self, opener=urllib.request.urlopen):
         self._open = opener
 
-    def get_weather(self, place_name: str, latitude: float, longitude: float, call_date: date) -> WeatherReport | None:
+    def get_forecast(self, place_name: str, latitude: float, longitude: float, start: date) -> dict[date, WeatherReport]:
+        """The next 7 days from `start`. Days with a missing or implausible field are left out."""
         if not latitude and not longitude:
-            return None                     # no coordinates: never guess a place by name alone
-        d = call_date.isoformat()
+            return {}                       # no coordinates: never guess a place by name alone
         daily = _get(FORECAST_URL, {
-            "latitude": latitude, "longitude": longitude, "timezone": "Asia/Kolkata", "start_date": d, "end_date": d,
-            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+            "latitude": latitude, "longitude": longitude, "timezone": "Asia/Kolkata", "start_date": start.isoformat(),
+            "end_date": (start + timedelta(days=FORECAST_DAYS - 1)).isoformat(), "daily": DAILY_FIELDS,
+            "wind_speed_unit": "kmh",
         }, self._open).get("daily") or {}
-        try:
-            code = daily["weather_code"][0]
-            tmax, tmin = daily["temperature_2m_max"][0], daily["temperature_2m_min"][0]
-            rain = daily["precipitation_probability_max"][0]
-            if daily["time"][0] != d or None in (code, tmax, tmin, rain):
-                return None
-        except (KeyError, IndexError, TypeError):
-            return None
-        summary = _WMO.get(int(code))
-        if summary is None or not (-10 <= tmin <= tmax <= 55) or not (0 <= rain <= 100):
-            return None
-        return WeatherReport(place_name, summary, round(tmin), round(tmax), round(rain), "open-meteo")
+        out: dict[date, WeatherReport] = {}
+        for n, day in enumerate(daily.get("time") or []):
+            try:
+                code, tmax, tmin = daily["weather_code"][n], daily["temperature_2m_max"][n], daily["temperature_2m_min"][n]
+                rain, wind = daily["precipitation_probability_max"][n], daily["wind_speed_10m_max"][n]
+                humidity = daily["relative_humidity_2m_mean"][n]
+                if None in (code, tmax, tmin, rain, wind, humidity):
+                    continue
+                words = _WMO.get(int(code))
+                if (words is None or not (-10 <= tmin <= tmax <= 55) or not (0 <= rain <= 100)
+                        or not (0 <= wind <= 250) or not (0 <= humidity <= 100)):
+                    continue
+                out[date.fromisoformat(day)] = WeatherReport(place_name, words, round(tmin), round(tmax), round(rain),
+                                                             "open-meteo", round(wind), round(humidity))
+            except (KeyError, IndexError, TypeError, ValueError):
+                continue
+        return out
+
+    def get_weather(self, place_name: str, latitude: float, longitude: float, call_date: date) -> WeatherReport | None:
+        return self.get_forecast(place_name, latitude, longitude, call_date).get(call_date)

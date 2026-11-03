@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import urllib.error
 import urllib.parse
@@ -110,13 +111,34 @@ class SarvamCampaigns:
                                         "filter_conditions": filters, "limit": 1000, "offset": offset,
                                         "sort_by": "attempted_at"})
             page = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}")
-            for i in page.get("items", []):
-                out.append({k: i.get(k) for k in ("attempt_id", "user_identifier", "connectivity_status",
-                                                  "duration_in_seconds", "failure_reason", "next_action_status",
-                                                  "retry_attempt")})
+            for i in page.get("items", []):        # user_contact (the full number) is never copied
+                slim = {k: i.get(k) for k in ("attempt_id", "user_identifier", "connectivity_status",
+                                              "duration_in_seconds", "failure_reason", "next_action_status",
+                                              "retry_attempt", "interaction_id", "ended_by")}
+                slim["call_summary"] = (i.get("agent_variables") or {}).get("call_summary")
+                out.append(slim)
             if not page.get("next_page_uri"):
                 return out
             offset += 1000
+
+    def transcript(self, interaction_id: str) -> list[dict]:
+        """Turn-by-turn transcript of one connected call, with phone-like numbers masked."""
+        iid = urllib.parse.quote(interaction_id, safe="")
+        data = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/transcripts/{iid}")
+        return [{"turn_id": m.get("turn_id"), "role": m.get("role"), "content": scrub(m.get("content") or ""),
+                 "language_name": m.get("language_name")} for m in data.get("messages") or []]
+
+
+_PHONE_LIKE = re.compile(r"\+?\d[\d \-()]{8,}\d")
+
+
+def scrub(text: str | None) -> str | None:
+    """Masks anything that looks like a phone number (10 or more digits). Callers may say their number aloud,
+    and provider error texts can quote it, so every stored free text goes through here."""
+    if text is None:
+        return None
+    return _PHONE_LIKE.sub(lambda m: "[number removed]" if sum(c.isdigit() for c in m.group()) >= 10 else m.group(),
+                           text)
 
 
 def outcome(item: dict):
@@ -130,6 +152,9 @@ CREATE TABLE IF NOT EXISTS sarvam_campaigns(
 CREATE TABLE IF NOT EXISTS sarvam_queue(
   farmer_id TEXT, call_date TEXT, campaign_id TEXT, cohort_id TEXT, language TEXT, message_text TEXT,
   weather_source TEXT, pushed_at TEXT, PRIMARY KEY(farmer_id, call_date));
+CREATE TABLE IF NOT EXISTS call_details(
+  farmer_id TEXT, call_date TEXT, attempt_id TEXT, interaction_id TEXT, ended_by TEXT, failure_reason TEXT,
+  summary TEXT, transcript TEXT, fetched_at TEXT, PRIMARY KEY(farmer_id, call_date, attempt_id));
 """
 
 
@@ -162,6 +187,17 @@ class CampaignStore:
         now = datetime.now().isoformat(timespec="seconds")
         self.db.executemany("INSERT INTO sarvam_queue VALUES(?,?,?,?,?,?,?,?)", [
             (fid, day.isoformat(), campaign_id, cohort_id, lang, msg, src, now) for fid, lang, msg, src in rows])
+        self.db.commit()
+
+    def save_detail(self, farmer_id: str, day: date, attempt_id: str, interaction_id: str | None,
+                    ended_by: str | None, failure_reason: str | None, summary: str | None,
+                    transcript: list[dict] | None) -> None:
+        """One row per Sarvam attempt for the monitoring UI. Free texts are scrubbed; a rerun changes nothing."""
+        reason = None if failure_reason in (None, "", "NO_FAILURE_REASON") else scrub(failure_reason)
+        self.db.execute("INSERT OR IGNORE INTO call_details VALUES(?,?,?,?,?,?,?,?,?)", (
+            farmer_id, day.isoformat(), attempt_id, interaction_id, ended_by, reason, scrub(summary),
+            None if transcript is None else json.dumps(transcript, ensure_ascii=False),
+            datetime.now().isoformat(timespec="seconds")))
         self.db.commit()
 
     def queued(self, day: date) -> dict[str, dict]:

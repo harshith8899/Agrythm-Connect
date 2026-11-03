@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .adapters import build_ports
 from .adapters.sarvam_agent import _LANG_NAMES
-from .adapters.sarvam_campaign import IST, CampaignStore, QueuedCall, SarvamCampaigns, outcome
+from .adapters.sarvam_campaign import IST, CampaignStore, QueuedCall, SarvamCampaigns, outcome, scrub
 from .cli import ENV_FILE, load_env_file
 from .config import Settings
 from .contracts import AttemptStatus, CallAttempt, CallRequest, FarmerDayResult, FinalResult, Language
@@ -59,7 +59,7 @@ def sync(day: date, ports: Ports, store: CampaignStore, api: SarvamCampaigns, no
     for item in api.attempts(camp["campaign_id"], day):
         by_farmer.setdefault(item.get("user_identifier") or "", []).append(item)
 
-    done = pending = 0
+    done = pending = detail_rows = transcript_errors = 0
     for fid, q in queued.items():
         if ports.ledger.has_final_result(fid, day):
             continue
@@ -80,10 +80,21 @@ def sync(day: date, ports: Ports, store: CampaignStore, api: SarvamCampaigns, no
                 farmer_id=fid, call_date=day, attempt_no=n, status=outcome(i), language=Language(q["language"]),
                 message_text=q["message"], provider_call_id=i.get("attempt_id") or "",
                 duration_s=int(i.get("duration_in_seconds") or 0),
-                error="" if reason in ("", "NO_FAILURE_REASON") else reason[:80], weather_source=q["weather_source"]))
+                error="" if reason in ("", "NO_FAILURE_REASON") else scrub(reason)[:80],
+                weather_source=q["weather_source"]))
+            transcript = None
+            if outcome(i) is AttemptStatus.ANSWERED and i.get("interaction_id"):
+                try:
+                    transcript = api.transcript(i["interaction_id"])
+                except Exception:  # a missing transcript must not lose the call's other details
+                    transcript_errors += 1
+            store.save_detail(fid, day, i.get("attempt_id") or f"attempt-{n}", i.get("interaction_id"),
+                              i.get("ended_by"), reason, i.get("call_summary"), transcript)
+            detail_rows += 1
         ports.ledger.record_day_result(FarmerDayResult(fid, day, final_result(outcome(settled[-1])), len(settled)))
         done += 1
-    return [f"{day}: synced {done} result(s) from Sarvam; still in progress {pending}"]
+    return [f"{day}: synced {done} result(s) from Sarvam; still in progress {pending}; "
+            f"details {detail_rows}; transcript errors {transcript_errors}"]
 
 
 def _summary(day: date, ports: Ports) -> list[str]:

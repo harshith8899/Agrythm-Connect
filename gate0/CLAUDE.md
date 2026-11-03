@@ -8,7 +8,7 @@ Build it so it can merge into the final product. The core (`contracts.py`, `port
 
 ## Hard rules
 1. Only consented, active farmers are called. Anyone else is skipped and the reason recorded.
-2. The message always says it is an AI.
+2. The opening message does not announce that the voice is an AI (team decision, 2 Nov 2026), but the agent never claims to be human and says honestly that it is automated if a farmer sincerely asks.
 3. No phone numbers, farmer details or provider keys in git, logs, status views or error messages.
 4. One call outcome per farmer per day, never dialled twice for the same day (idempotent).
 5. A provider failure must never stop the morning run.

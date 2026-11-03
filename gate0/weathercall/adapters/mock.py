@@ -38,8 +38,8 @@ class MockTelephony:
 
 
 DEMO_WEATHER = {
-    "Mandya": WeatherReport("Mandya", "partly cloudy", 21, 32, 20, "mock"),
-    "Hassan": WeatherReport("Hassan", "light rain", 19, 27, 70, "mock"),
-    "Mysuru": WeatherReport("Mysuru", "clear", 20, 33, 5, "mock"),
+    "Mandya": WeatherReport("Mandya", "partly cloudy", 21, 32, 20, "mock", 14, 62),
+    "Hassan": WeatherReport("Hassan", "light rain", 19, 27, 70, "mock", 18, 84),
+    "Mysuru": WeatherReport("Mysuru", "clear", 20, 33, 5, "mock", 10, 48),
     # "Nowhere" is intentionally absent: exercises the weather-missing path
 }
