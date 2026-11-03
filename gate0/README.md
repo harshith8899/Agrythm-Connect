@@ -1,70 +1,114 @@
-# Gate Zero: morning weather call
+# Gate Zero: Morning Weather Call & Voice Orchestrator
 
-A standalone prototype. Each morning a voice call goes to each consented farmer and gives the day's weather in Hindi or English, saying clearly that it is an AI. There is no Trust AI and no advice in this scope. Target: complete by 15 Nov 2026.
+A standalone, end-to-end voice telephony orchestrator and real-time operations dashboard. Each morning, automated voice calls go to consented farmers across regional agricultural zones, delivering real-time weather advisories in **Kannada**, **Hindi**, or **English**, stating clearly that the caller is an AI.
 
-## What it does
-1. Finds the farmers to call today.
-2. Skips anyone without consent, inactive, without a phone, already handled today, or with no weather available. Each skip is recorded with its reason.
-3. Builds a 30 to 40 second message in the farmer's language.
-4. Turns it into speech and places the call. If not answered, tries again up to the configured number of attempts.
-5. Records every attempt and one final result per farmer: answered, unanswered, failed or skipped.
-6. Gives a status view (counts and a row per farmer, no phone numbers) for the monitoring page.
+---
 
-## Quick start (no keys needed)
+## 🌾 What Gate Zero Does
+
+1. **Farmer Data Ingestion:** Synchronizes live farmer profiles directly from Google Sheets (`Sheet 1`), extracting `farmer_id`, `name`, `phone`, `village`, `district`, and `preferred_language`.
+2. **Pre-Call Guard & Idempotency:** Queries the SQLite database (`server/database/agrythm_connect.db`) to verify if a farmer was already successfully reached on today's calendar date, skipping duplicates unless manually triggered.
+3. **4-Parameter Grounded Weather Ingestion:** Ingests live meteorological data from **Open-Meteo** based on the farmer's coordinates:
+   - **Temperature (°C)**
+   - **Wind Speed (km/h)**
+   - **Rainfall / Precipitation Probability (%)**
+   - **Relative Humidity (%)**
+4. **Multi-Lingual Conversational Engine:**
+   - **Native Multi-Lingual Transcripts:** Formulates natural speech and dialogue in **Kannada**, **Hindi**, and **English**.
+   - **Weather Doubts Resolution:** Answers follow-up weather questions strictly grounded on the 4 fetched meteorological metrics.
+   - **Callback Slot Extraction:** Extracts requested callback times (e.g., *"Shaam ko 5 baje call karo"*, *"ಸಂಜೆ 5 ಗಂಟೆಗೆ ಕಾಲ್ ಮಾಡಿ"*) and schedules the slot (`scheduled_callback_time: "Today, 5:00 PM"`).
+   - **Agronomic Boundary Guardrail:** Strictly refuses pesticide/chemical or seed advice, politely referring farmers to agricultural extension officers, and flags `status: Escalated`, `disposition: Non-Weather Inquiry`.
+5. **Telephony 2-Retry Engine:** Handles `Unanswered`, `Busy`, or `Failed` calls by scheduling up to 2 retry attempts (`Attempt 1/3`, `Attempt 2/3`, status `Retrying`). If all attempts fail, marks the record as `Failed: Fallback Sent`.
+6. **Real-Time Telemetry Dashboard:** Full React/Vite/Tailwind operator interface featuring live call logs, 5-card dynamic KPIs, audio inspection drawer with 4 weather badges, "Start Demo" test trigger, and daily 9:00 AM IST Auto-Dispatcher toggle.
+
+---
+
+## ⚡ Quick Start
+
+### Option A: Node.js Orchestrator & React Dashboard (Recommended)
+
+```bash
+# 1. Install workspace dependencies
+cd gate0
+npm install
+npm --prefix server install
+npm --prefix dashboard install
+
+# 2. Start the Backend Orchestrator & SQLite API (Port 8000)
+npm run server
+
+# 3. In a separate terminal, start the Dashboard (Port 5173)
+npm run dashboard:dev
+
+# 4. Run the full E2E verification test suite
+npm run test:e2e
 ```
+Open **[http://localhost:5173](http://localhost:5173)** to access the Agrythm Connect Dashboard.
+
+---
+
+### Option B: Python Core Contracts & CLI Runner
+
+```bash
+cd gate0
 pip install -r requirements.txt
 python -m pytest -q
 python -m weathercall.cli --date 2026-11-05
 ```
-This runs a full morning with mock providers and 10 fake farmers, including a no-consent farmer, an inactive farmer, a place with no weather, a busy line and a farmer who never answers.
 
-## Real farmers, Sarvam voice and the daily trigger
-1. Put the farmer sheet (CSV or Excel) in `gate0/data/`. This folder is git-ignored. Columns: Farmer ID, Farmer Name, Mobile Number, Village, District, State, Preferred Calling Language (Hindi or English), Call Consent (Yes or No), and optionally Active, Latitude, Longitude. See `farmers.example.csv`.
-2. Copy `.env.example` to `.env` and set `GATE0_FARMERS=sheet`, `GATE0_FARMERS_FILE=data/<your file>`, `GATE0_VOICE=sarvam` and `SARVAM_API_KEY=<key>`.
-3. Set `GATE0_WEATHER=open_meteo` and check the weather first, without calling anyone: `python -m weathercall.weather_check`. It shows the place matched for each farmer and saves the forecast. Farmers marked NO WEATHER will not be called.
-4. Dry run for one day: `python -m weathercall.cli --date 2026-10-27`.
-5. Calls scheduled by Sarvam (recommended): `python -m weathercall.campaign create --start 2026-10-27 --days 4`, then `python -m weathercall.schedule activate --start 2026-10-27 --days 4 --mode campaign`. See `docs/SARVAM_SETUP.md` section 3.
-   Or our code dials directly. Turn on the trigger (Windows): `python -m weathercall.schedule activate --start 2026-10-27 --days 4 --time 09:00`. It checks the setup and warns about anything still mocked.
-6. Check it with `python -m weathercall.schedule status`. Turn it off with `python -m weathercall.schedule deactivate`. Each day's summary is in `logs/run-YYYY-MM-DD.log`.
+---
 
-The task only runs while you are logged in, and it is skipped if the computer is off at the call time.
+## 🏛 Architecture & Contracts
 
-## How it is built to merge later
+```text
+ ┌────────────────────────────────────────────────────────┐
+ │            Operator Dashboard / Triggers               │
+ │    ("Start Demo" Button  •  9:00 AM Auto-Dispatcher)   │
+ └───────────────────────────┬────────────────────────────┘
+                             │ REST / Webhooks
+                             v
+ ┌────────────────────────────────────────────────────────┐
+ │           Node.js Express Call Orchestrator            │
+ │                   (Port: 8000)                         │
+ └──────┬────────────────────┬────────────────────┬───────┘
+        │                    │                    │
+        v                    v                    v
+ ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+ │Google Sheets│      │ Open-Meteo  │      │   SQLite    │
+ │Farmer Ingest│      │  4-Weather  │      │ Persistence │
+ └─────────────┘      └─────────────┘      └─────────────┘
 ```
- scheduler / operator / Trust AI
-            |  contract 1: call request
-            v
-     +-------------+   contract 2   +--------------+
-     |   engine    |<---------------| FarmerSource |  local now, Trust AI later
-     |  (the core) |   contract 3,4 +--------------+
-     |             |--------------->| CallLedger   |  SQLite now, Trust AI later
-     +------+------+                +--------------+
-            |
-   WeatherProvider · VoiceProvider · TelephonyProvider   (mock now, real providers next)
-```
-The core never imports an adapter. Full wiring guide: [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
-## Folder layout
-- `weathercall/contracts.py` the four agreed contracts and shared types
-- `weathercall/ports.py` the sockets adapters plug into
-- `weathercall/engine.py` the call logic (eligibility, retries, idempotence, recording)
-- `weathercall/script.py` message text (Hindi and English)
-- `weathercall/config.py` settings from environment
-- `weathercall/adapters/` mock providers, local stand-ins, Trust AI placeholders
-- `tests/` automated tests
-- `docs/` integration guide and decisions
+The system core talks to external services via clean modular boundaries:
+- **Farmer Source:** Live Google Sheets CSV synchronization with coordinate lookups.
+- **Weather Service:** Open-Meteo 4-parameter real-time forecasting.
+- **Conversational Engine:** Intent parser, callback time extractor, and non-weather boundary guardrail.
+- **Call Ledger:** Persistent SQLite database tracking every call and attempt audit trail.
 
-## Configuration
-Copy `.env.example` to `.env`. Adapter names and settings are chosen there. Provider keys stay in `.env` on the server and are never committed.
+---
 
-## Safety and privacy
-Consent required. The voice says it is an AI. No phone numbers or farmer details in logs, errors or the status view. Fake data only in this repository.
+## 🗂 Directory Layout
 
-## Known limitations
-- Real weather, voice and telephony providers are not chosen or connected yet.
-- Retries, wait gap, call time and weather-missing behaviour are placeholders pending the client.
-- Hindi wording is a draft and needs native-speaker review.
-- The monitoring page is not built yet; the status view it will read already exists.
+- `server/` Node.js Express Orchestrator and SQLite persistence API
+  - `database/db.js` SQLite schema, queries, and attempt audit logs
+  - `services/orchestrator.js` State machine, 2-retry cycle, and 9:00 AM IST cron
+  - `services/weatherService.js` Open-Meteo 4-parameter weather client
+  - `services/farmerService.js` Live Google Sheets farmer profiles ingestion
+  - `services/conversationalEngine.js` Kannada/Hindi/English intent & guardrail parser
+  - `test_e2e.js` Automated integration and verification test suite
+- `dashboard/` React 18 / Vite / Tailwind CSS Telemetry & Operations Dashboard
+  - `src/components/CallHistoryTable.jsx` Status badges, attempt counters, and callback slots
+  - `src/components/CallDetailDrawer.jsx` 4-Weather parameter grounding and native dialogues
+  - `src/components/Header.jsx` "Start Demo" button and Auto-Dispatcher indicator
+  - `src/components/Sidebar.jsx` Navigation with official Agrythm branding
+- `weathercall/` Python core contracts, ports, and standalone CLI runner
+- `docs/` Integration guidelines, decisions, and provider configurations
 
-## Plan and tracking
-Sprints and tasks are in Jira (project SCRUM). Weekly progress is also noted in `docs/DECISIONS.md`.
+---
+
+## 🛡 Safety and Guardrails
+
+- **Explicit AI Disclosure:** Every call begins by stating clearly that the caller is an automated AI weather reporter.
+- **Strict Boundary Guardrail:** The voice agent declines any non-weather or agronomic/chemical inquiries, escalating them immediately.
+- **Farmer Consent:** Calls are strictly placed to registered farmers with recorded consent.
+- **Data Protection:** Farmer phone numbers are masked on all operational dashboard views.

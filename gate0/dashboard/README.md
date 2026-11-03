@@ -1,217 +1,236 @@
 # Agrythm Connect — Voice Agent Telemetry & Operations Dashboard
 
-> **Real-Time Voice Intelligence, Grounded Weather Advisories, and Farmer Telemetry for Gate Zero Voice Agents**  
-> Built with **React 18+**, **Vite**, **Tailwind CSS**, and **SQLite REST Telemetry**.
+> **Real-Time Voice Intelligence, Grounded 4-Parameter Weather Advisories, Multi-Lingual Telemetry & Telephony Orchestration for Gate Zero**  
+> Built with **React 18+**, **Vite**, **Tailwind CSS**, **Node.js Express Orchestrator**, and **SQLite Persistence**.
 
 ---
 
 ## 🌾 Overview
 
-**Agrythm Connect Dashboard** is a real-time agricultural voice telemetry and monitoring system designed for the Gate Zero voice agent. It provides end-to-end visibility into automated weather advisory phone calls dispatched to farmers across regional agricultural zones in **Hindi** and **English**.
+**Agrythm Connect Dashboard** is a real-time agricultural voice telemetry and orchestration system designed for the Gate Zero voice agent. It provides end-to-end visibility into automated weather advisory phone calls dispatched to farmers across regional agricultural zones in **Kannada**, **Hindi**, and **English**.
 
-The dashboard bridges live telephony execution records stored in the Gate Zero SQLite database (`gate0.db`) with an interactive, field-first operator interface.
+The dashboard bridges live telephony execution records stored in the persistent SQLite database (`server/database/agrythm_connect.db`) with an interactive, field-first operator interface, supporting manual test dispatches, automated daily cron scheduling, real-time 4-parameter weather ingestion, and multi-lingual conversational dialogue inspection.
 
 ---
 
 ## ⚡ Key Architectural Features
 
-### 1. Live SQLite Telemetry Integration (Gate Zero Bridge)
-- **Local SQLite Telemetry Engine (`gate0.db`)**: Connects directly to the Gate Zero telephony backend via a lightweight local REST API server (`weathercall/server.py` on port `8000`).
-- **Real-Time Dual Endpoints**:
-  - `GET /api/calls`: Streams live attempt logs joined with execution outcomes (`attempts` + `day_results` tables), capturing call status (`answered`, `unanswered`, `busy`, `failed`, `skipped`), attempt numbers, duration, and spoken message text.
-  - `GET /api/farmers`: Streams registered farmer profiles directly from the database with automated Google Sheets fallback if the server is offline.
-- **Continuous Polling**: Auto-polls every 15 seconds to stream live call updates as the backend voice agent dials farmers.
+### 1. End-to-End Orchestrator & Live SQLite Persistence
+- **Persistent SQLite Telemetry Engine (`server/database/agrythm_connect.db`)**: Powered by native `node:sqlite` (`DatabaseSync`), storing complete call audit trails, attempt counts, transcripts, 4 weather parameters, retry schedules, and dispositions.
+- **Pre-Call Guard & Idempotency Check**: Queries the SQLite database before initiating calls to verify whether the farmer was already successfully reached today (`isFarmerCalledToday`), preventing duplicate calls while allowing explicit "Start Demo" test overrides.
+- **Automated Telephony 2-Retry Cycle**:
+  - Handles telephony flags (`Unanswered`, `Busy`, `Failed`).
+  - Automatically schedules retry attempts (`Attempt 1/3`, `Attempt 2/3`, status `Retrying`).
+  - If retries exceed 2 attempts, marks call as `Failed: Fallback Sent` and records the complete attempt history in `call_attempts`.
 
-### 2. Spoken Advisory Meteorological Grounding
-- **Natural Language Weather Parser (`extractWeatherFromMessage`)**:
-  - Dynamically extracts structured meteorological data directly from the generated spoken text in both **Hindi** (*"आज मौसम Partly cloudy रहेगा। तापमान 21 से 32 डिग्री सेल्सियस के बीच रहेगा..."*) and **English** (*"It will be Partly cloudy. The temperature will be between 21 and 32 degrees Celsius..."*).
-  - Grounds and displays key parameters:
-    - **Atmospheric Condition**: e.g., `Partly Cloudy`, `Clear`, `Light Rain`, `Overcast`.
-    - **Temperature Range**: e.g., `21°C – 32°C`.
-    - **Precipitation Chance**: e.g., `20%`, `70%`.
-    - **Derived Humidity & Wind Speed**: Realistic meteorological estimates correlated with rain probability and atmospheric condition (e.g., `57%` humidity, `10 km/h` wind speed).
-  - **Skipped Call Handling**: Gracefully handles skipped runs (`weather_unavailable`, `no_consent`, `inactive`), displaying clear explanatory badges instead of missing data.
+### 2. 4-Parameter Grounded Meteorological Ingestion
+- Ingests real-time weather from **Open-Meteo API** (`https://api.open-meteo.com/v1/forecast`) based on exact agricultural village coordinates:
+  1. **Temperature (°C)** (`temperature_2m`)
+  2. **Wind Speed (km/h)** (`wind_speed_10m`)
+  3. **Rainfall / Precipitation Probability (%)** (`precipitation_probability`)
+  4. **Relative Humidity (%)** (`relative_humidity_2m`)
+- Automatically caches and grounds conversational responses strictly on these 4 parameters.
 
-### 3. Farmer Privacy & Phone Masking
-- **Strict UI Masking**: Farmer phone numbers are automatically masked across all dashboard views (`+91 98XXX XX001`) to protect user privacy in field displays.
-- **Database Contact Integrity**: The underlying SQLite database and internal data models retain the exact, unmasked phone numbers (`+91 98450 12001`) required for automated telephony and SMS dispatch.
-- **Smart Search**: Filter bar allows operators to search by either the visible masked format or raw phone digits.
+### 3. Multi-Lingual Dialogue & Strict Boundary Guardrails
+- **Language-Aware Dialogue**:
+  - Ingests farmer language preferences from Google Sheets and renders native dialogue scripts:
+    - **Kannada**: `Dialogue Transcript (Kannada)` with native script and transliteration support.
+    - **Hindi**: `Dialogue Transcript (Hindi)` with Devanagari script.
+    - **English**: `Dialogue Transcript (English)`.
+- **Weather Doubts Resolution**: Accurately resolves follow-up queries (e.g., rain timing, temperature, wind) strictly using the 4 fetched meteorological metrics.
+- **Scheduled Callback Detection**: Intelligently extracts requested callback times from natural dialogue (e.g., *"Shaam ko 5 baje call karo"*, *"Call me after 2 PM"*) and populates `scheduled_callback_time` (e.g., `"Today, 5:00 PM"`).
+- **Agronomic & Chemical Boundary Guardrail**: Strict safety boundary that immediately declines chemical or pesticide recommendations, politely directing farmers to local agricultural extension officers, and flags the call record as `status: Escalated`, `disposition: Non-Weather Inquiry`.
 
-### 4. Bilingual Support (Hindi & English)
-- The voice agent and dashboard strictly support **Hindi** and **English**, standardizing language tags and badge formatting across all tables and cards.
+### 4. Real Data Google Sheets Synchronization
+- Directly fetches farmer profiles from live Google Sheets CSV (`Sheet 1`), completely eliminating dummy or mock records.
+- Automatically maps village coordinates (e.g., Humnabad: `17.7667, 77.2833`, Bhalki: `18.0441, 77.2185`) to ensure accurate hyper-local weather fetching.
+
+### 5. Official Agrythm Brand Identity
+- Integrated official Agrythm emblem logo across the desktop sidebar, mobile header, and browser favicon (`/agrythm-logo.png`).
 
 ---
 
 ## 🖥 Dashboard Views & Components
 
-1. **Live Call History Table (`CallHistoryTable.jsx`)**:
-   - Shows Call ID, timestamp, attempt number, farmer contact (masked), district, village, language badge, duration, and delivery status badge (`Delivered`, `Unanswered / Busy`, `Failed`, `Skipped`).
-   - Displays real-time weather summary and spoken message preview.
-   - Clicking any call opens the comprehensive Call Detail Drawer.
+1. **Screen C01: Call History Table (`CallHistoryTable.jsx`)**:
+   - Shows Call ID, timestamp, attempt number (`Attempt 1/3`, `Attempt 2/3`), farmer contact (masked for privacy), district, village, language badge (Kannada, Hindi, English), duration in seconds, and status badges (`Completed`, `Retrying`, `Failed`, `Escalated`).
+   - Dedicated **Callback Slot** indicator displaying `scheduled_callback_time` when requested.
+   - Clicking any call opens the comprehensive slide-over inspection drawer.
 
 2. **Call Detail Drawer (`CallDetailDrawer.jsx`)**:
-   - Slide-over panel featuring:
-     - Farmer profile summary with masked contact.
-     - Simulated post-call audio player with playback scrubber.
-     - **Weather Advisory Grounding Box**: Live telemetry badges (`Live Grounded (Open-Meteo)`), Temperature, Rain Chance, Humidity, Wind Speed, and the complete spoken message text.
-     - Original dialog transcript in native language.
+   - Displays the **4 Grounded Weather Parameters** used during the call.
+   - Renders multi-turn conversational transcript bubbles with language headers (`Dialogue Transcript (Kannada)` / `(Hindi)`).
+   - Displays scheduled callback reminders and agronomic escalation alerts.
+   - Complete attempt audit trail detailing timestamp, status, and retry intervals.
 
-3. **Farmer Directory (`FarmerDirectory.jsx`)**:
-   - Displays farmer cards loaded live from the backend database (`/api/farmers`).
-   - Shows total calls recorded per farmer, today's engagement indicator, village, district, language preference, and masked phone numbers.
-   - One-click **"View Call Logs"** filters the call history directly to that farmer's records.
+3. **Operational Header Triggers (`Header.jsx`)**:
+   - **"Start Demo" Trigger**: Executes an immediate batch test run across live farmer numbers with real-time state machine simulation.
+   - **"Auto Dispatcher (9:00 AM)" Indicator & Toggle**: Displays and toggles the scheduled daily 9:00 AM IST dispatch cron job.
 
-4. **District Weather Advisories (`WeatherAlertsView.jsx`)**:
-   - Aggregates call records by agricultural district.
-   - Displays district alert cards with latest forecast, temperature ranges, precipitation probabilities, and recorded spoken advisories.
+4. **Farmer Directory (`FarmerDirectory.jsx`)**:
+   - Displays real farmer profiles fetched directly from Google Sheets.
+   - Shows village, district, language preference, and masked phone numbers with quick filtering.
 
 5. **Operational KPI Metrics (`KpiMetrics.jsx`)**:
-   - Real-time summary cards: **Total Calls**, **Delivered Calls**, **Unanswered / Busy**, and **Skipped / Failed**.
-
-6. **Top Filter & Search Bar (`TopFilterBar.jsx`)**:
-   - Text search across Farmer Name, Phone Number, Village, and Call ID.
-   - Quick date presets: **"Today"**, **"Yesterday"**, and **"All Dates"** with native date picker sync.
-   - Multi-dropdown filters for District, Language (Hindi, English), and Call Status.
+   - 5-Card dynamic metrics: **Total Calls**, **Completed Calls**, **Farmers Reached**, **Retrying**, and **Escalations**.
 
 ---
 
-## 🗂 Project Directory Structure
+## 🗂 Directory Structure
 
 ```text
-gate0/dashboard/
-├── public/
-│   ├── favicon.svg                   # Agrythm leaf favicon
-│   └── icons.svg                     # Vector icon symbols
-├── src/
-│   ├── components/
-│   │   ├── CallDetailDrawer.jsx      # Slide-over call inspection drawer & weather grounding
-│   │   ├── CallHistoryTable.jsx      # Real-time voice agent telemetry table
-│   │   ├── FarmerDirectory.jsx       # Registered farmer profiles loaded from SQLite API
-│   │   ├── Header.jsx                # Sticky navigation header with live sync status
-│   │   ├── KpiMetrics.jsx            # KPI cards (Total, Delivered, Unanswered, Skipped)
-│   │   ├── OverviewCard.jsx          # Metric presentation card wrapper
-│   │   ├── Sidebar.jsx               # Left sidebar navigation
-│   │   ├── TopFilterBar.jsx          # Live search, date presets, and dropdown filters
-│   │   ├── WeatherAlertsView.jsx     # District-level weather advisory intelligence
-│   │   └── index.js                  # Component barrel export
-│   ├── hooks/
-│   │   ├── useVoiceAgentData.js      # Polling hook, filtering engine & data enrichment
-│   │   └── index.js                  # Hooks barrel export
-│   ├── utils/
-│   │   ├── callAnalytics.js          # Metric aggregation and duration formatters
-│   │   ├── constants.js              # API endpoints, sheet IDs, and status definitions
-│   │   ├── csvParser.js              # Streaming CSV parser wrapper
-│   │   ├── googleSheets.js           # SQLite telemetry fetcher with Sheets fallback
-│   │   └── index.js                  # Weather parser, phone masking & language normalizer
-│   ├── App.css                       # Application utility styles
-│   ├── App.jsx                       # Main application shell and tab router
-│   ├── index.css                     # Tailwind CSS directives
-│   └── main.jsx                      # React 18+ application entrypoint
-├── index.html                        # HTML root with viewport settings
-├── package.json                      # Project dependencies and npm scripts
-├── postcss.config.js                 # PostCSS Tailwind plugins
-├── tailwind.config.js                # Custom color palette tokens
-└── vite.config.js                    # Vite bundler configuration
+gate0/
+├── package.json                      # Workspace root scripts (server, dev, test)
+├── server/                           # Orchestrator & SQLite Telemetry Backend
+│   ├── database/
+│   │   ├── db.js                     # SQLite initialization, schema & queries (node:sqlite)
+│   │   └── agrythm_connect.db        # Persistent SQLite database (git-ignored)
+│   ├── routes/
+│   │   ├── callsRouter.js            # /api/calls, /api/calls/trigger-demo, /api/calls/webhook
+│   │   ├── farmersRouter.js          # /api/farmers (live Google Sheets sync)
+│   │   ├── weatherRouter.js          # /api/weather (Open-Meteo 4-parameter proxy)
+│   │   └── orchestratorRouter.js     # /api/orchestrator/status, /api/orchestrator/auto-dispatch
+│   ├── services/
+│   │   ├── conversationalEngine.js   # Intent classification, callback parsing & guardrails
+│   │   ├── farmerService.js          # Live Google Sheets CSV ingestion & caching
+│   │   ├── orchestrator.js           # Call lifecycle state machine, retries & cron scheduler
+│   │   └── weatherService.js         # Open-Meteo 4-parameter weather service
+│   ├── index.js                      # Express server entrypoint (Port 8000)
+│   └── test_e2e.js                   # End-to-end integration & verification test suite
+└── dashboard/                        # React 18+ / Vite / Tailwind CSS Frontend
+    ├── public/
+    │   └── agrythm-logo.png          # Official Agrythm brand emblem
+    ├── src/
+    │   ├── assets/
+    │   │   └── agrythm-logo.png      # Bundled brand asset
+    │   ├── components/
+    │   │   ├── CallDetailDrawer.jsx  # Slide-over inspection drawer & transcript bubbles
+    │   │   ├── CallHistoryTable.jsx  # Telemetry table with retry badges & callback slots
+    │   │   ├── FarmerDirectory.jsx   # Farmer directory from Google Sheets
+    │   │   ├── Header.jsx            # Top bar with Start Demo & Auto Dispatcher controls
+    │   │   ├── KpiMetrics.jsx        # 5-Card KPI metric summary
+    │   │   ├── Sidebar.jsx           # Desktop navigation with Agrythm branding
+    │   │   └── ...
+    │   ├── hooks/
+    │   │   ├── useVoiceAgentData.js  # Telemetry polling & call enrichment hook
+    │   │   └── useDashboardData.js   # Orchestrator status & control hook
+    │   └── utils/
+    │       └── googleSheets.js       # Backend REST API client & Sheets utilities
+    ├── index.html                    # Root HTML with Agrythm logo favicon
+    └── vite.config.js                # Vite bundler configuration
 ```
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Quick Start Guide
 
 ### 1. Prerequisites
-- **Node.js**: v18 or higher
-- **Python**: v3.10+ (for Gate Zero telemetry server)
-- **SQLite3**: Included with Python standard library
+- **Node.js**: v20 or higher (v26+ recommended for built-in `node:sqlite`)
+- **npm**: v10+
 
-### 2. Start the Gate Zero Telemetry API Server
-From your backend repository root (`gate0/`):
+### 2. Start the Orchestrator Backend Server
+From the `gate0/` directory:
 ```bash
-# Start the SQLite telemetry server on port 8000
-python -m weathercall.server
+# Start the Node.js Express server on port 8000
+npm run server
 ```
-The server will start and log:
+Or directly from `gate0/server/`:
+```bash
+node server/index.js
+```
+
+The orchestrator logs:
 ```text
-Gate Zero SQLite Telemetry API running on http://0.0.0.0:8000
-  - Calls endpoint:   http://localhost:8000/api/calls
-  - Farmers endpoint: http://localhost:8000/api/farmers
+======================================================
+Agrythm Connect - Orchestrator & SQLite API Server
+Port: http://localhost:8000
+Database: server/database/agrythm_connect.db
+Auto Dispatcher (9:00 AM IST): Active
+======================================================
 ```
 
-### 3. Start the Dashboard Frontend
-From the `gate0/dashboard/` directory:
+### 3. Start the Frontend Dashboard
+In a separate terminal from `gate0/`:
 ```bash
-# Install dependencies
-npm install
-
-# Start local development server
+# Start Vite development server
+npm run dashboard:dev
+```
+Or from `gate0/dashboard/`:
+```bash
 npm run dev
 ```
+
 Open **[http://localhost:5173](http://localhost:5173)** in your browser.
 
----
-
-## 🔍 Code Quality & Build
-
-### Static Linting
-Verify zero linting warnings across all source files:
+### 4. Run the End-to-End Test Suite
+Verify Google Sheets ingestion, 4-parameter weather fetching, multi-lingual dialogue handling, and SQLite persistence:
 ```bash
-npm run lint
+npm run test:e2e
 ```
-*Uses [Oxlint](https://oxc.rs/) — passes with 0 warnings and 0 errors.*
-
-### Production Build
-Generate optimized production bundles:
-```bash
-npm run build
-```
-Builds to `dist/` ready for hosting on Vercel, Netlify, or Firebase App Hosting.
 
 ---
 
-## 📡 API Reference
+## 📡 REST API Reference
 
 ### `GET /api/calls`
-Returns call execution attempts joined with daily outcomes.
+Retrieves all persistent call records joined with weather metrics, retry counts, and callback slots.
 
-**Response Schema:**
+**Sample Response Item:**
 ```json
-[
-  {
-    "call_id": "F001-2026-10-30-1",
-    "farmer_id": "F001",
-    "call_date": "2026-10-30",
-    "attempt_no": 1,
-    "attempt_status": "answered",
-    "call_status": "answered",
-    "skip_reason": null,
-    "language": "hi",
-    "duration_sec": 42,
-    "message_text": "नमस्ते Ramesh... आज मौसम Partly cloudy रहेगा। तापमान 21 से 32 डिग्री सेल्सियस के बीच रहेगा। बारिश की संभावना 20 प्रतिशत है...",
-    "weather_source": "open-meteo"
-  }
-]
+{
+  "call_id": "CALL-1002-1793700000000",
+  "farmer_id": "1002",
+  "farmer_name": "Harshith",
+  "phone_number": "6363713736",
+  "location": "Bhalki, Bidar",
+  "weather_temp": 29.2,
+  "weather_windspeed": 14.5,
+  "weather_rainfall": 16.0,
+  "weather_humidity": 50.0,
+  "status": "Completed",
+  "disposition": "Callback Requested",
+  "retry_count": 0,
+  "scheduled_callback_time": "Today, 5:00 PM",
+  "duration_seconds": 45,
+  "transcript": [
+    {"speaker": "Agent", "text": "ನಮಸ್ಕಾರ Harshith ಅವರೇ, ನಾನು ಅಗ್ರಿಥಮ್ ಕನೆಕ್ಟ್‌ನಿಂದ ಮಾತನಾಡುತ್ತಿದ್ದೇನೆ..."},
+    {"speaker": "Farmer", "text": "ಈಗ ನಾನು ಹೊರಗಡೆ ಇದ್ದೇನೆ, ಸಂಜೆ 5 ಗಂಟೆಗೆ ಕಾಲ್ ಮಾಡಿ."},
+    {"speaker": "Agent", "text": "ಖಂಡಿತ, ಸಂಜೆ 5:00 ಗಂಟೆಗೆ ನಿಮಗೆ ಮರಳಿ ಕರೆ ಮಾಡುತ್ತೇನೆ. ಧನ್ಯವಾದಗಳು."}
+  ],
+  "created_at": "2026-11-03 15:30:00"
+}
 ```
 
-### `GET /api/farmers`
-Returns registered farmer profiles from the SQLite `farmers` table.
+### `POST /api/calls/trigger-demo`
+Executes an immediate manual batch dispatch across registered farmers.
 
-**Response Schema:**
+**Response:**
 ```json
-[
-  {
-    "farmer_id": "F001",
-    "farmer_name": "Ramesh",
-    "phone_number": "+91 98450 12001",
-    "village": "Mandya",
-    "district": "Mandya",
-    "state": "Karnataka",
-    "primary_language": "Hindi",
-    "call_consent": "Yes",
-    "active": "Yes"
-  }
-]
+{
+  "success": true,
+  "message": "Demo call batch initiated for 2 farmers",
+  "dispatched_count": 2
+}
 ```
+
+### `GET /api/weather?lat=17.7667&lon=77.2833`
+Returns the 4 real-time meteorological metrics for the given coordinates.
+
+**Sample Response:**
+```json
+{
+  "temperature": 28.0,
+  "windSpeed": 14.7,
+  "precipitationProbability": 22.0,
+  "humidity": 58.0,
+  "weatherSource": "Open-Meteo Live API"
+}
+```
+
+### `GET /api/orchestrator/status`
+Returns the operational status of the 9:00 AM IST auto-dispatcher cron job.
 
 ---
 
 ## 📄 License
-Internal proprietary software for **Agrythm Connect — Voice Intelligence System**. All rights reserved.
+Internal proprietary software for **Agrythm Connect — Weather Voice Agent System**. All rights reserved.
