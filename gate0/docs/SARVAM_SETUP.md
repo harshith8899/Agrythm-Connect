@@ -4,17 +4,19 @@ Gate Zero calls through a Sarvam Voice Agent. Our code builds the weather messag
 
 ## 1. Dashboard setup (one time)
 1. **Phone number.** Under Deploy → Phone numbers, rent a number from Sarvam or connect Exotel, Plivo or another provider. Note the **connection ID** and the agent's **phone number** in E.164 form (+91...).
-2. **Agent.** Create an agent named `Gate0 Weather`. Settings:
-   - Greeting: leave a short placeholder. Our code replaces it on every call with the weather message.
-   - Instruction (paste):
-     > You are Agrythm's automated weather voice. You are an AI, not a person. Your first message already gives the full weather update. Do not repeat it unless asked once. If the farmer asks anything else, say politely that you can only share the weather and that their Agrythm contact person can help, then end the call. Never give farming, financial or medical advice. If asked whether you are a human, say clearly that you are an AI. End the call as soon as the update is delivered and the farmer has nothing more about the weather.
-   - Tools: keep **End call** on. Turn on **Voicemail detection** if it is offered.
-   - Call settings: maximum call length 90 seconds. Languages: Hindi and English.
-   - Variables tab → **Output variables** → **Add**: name `call_summary`, data type **String**, extraction prompt (paste):
-     > In one or two plain English sentences, say whether the farmer heard the weather update and anything they asked or said. Do not include phone numbers, names of other people or any advice.
-
-     Sarvam fills it after each connected call, and `campaign sync` saves it with the call details. Without it, the summary column stays empty and nothing else changes.
-   - Commit the version and note the **version number**.
+2. **Agent.** Create an agent named `Agrythm connect - Weather info`. The agent opens the call itself, asks if it is a good time to talk, then gives the weather from per-farmer variables that our backend sends. Settings:
+   - **Languages:** Hindi, Kannada and English. Do not write a prompt rule that tells the agent to switch language: Sarvam switches by itself and rejects such a rule.
+   - **Greeting (intro):** short, with variables, for example: "Hello {{farmer_name}}. I am Chetan Dabke's assistant, calling on behalf of Agrythm to share a short weather update for {{place_name}}. Is this a good time to talk?" Sarvam translates it for Hindi and Kannada.
+   - **Input variables** (all type string, set per call by the backend, names must match `script.weather_variables`): `farmer_name`, `place_name`, `temp_min_c`, `temp_max_c`, `wind_kmh`, `rain_chance_pct`, `humidity_pct`. Sarvam answers HTTP 422 if the backend sends a name the agent does not declare.
+   - **Output variables** (filled by Sarvam after each connected call):
+     - `call_summary` (string): one or two plain English sentences on whether the farmer heard the update and what they asked. No phone numbers, names of others or advice.
+     - `callback_time` (string): the time the farmer asked to be called back, as 24-hour `HH:MM`, plus the day only if they named one; empty if none.
+     - `understood_weather` (enum `yes`, `no`, `unclear`).
+     - `stop_calls_requested` (enum `yes`, `no`).
+   - **Instruction:** kept in the agent (the committed version is the source of truth). In short: Chetan Dabke's AI assistant for Agrythm; never claims to be human, and says it is an AI only if asked; after "yes, good time" it gives place, lowest and highest temperature, wind, chance of rain and humidity using exactly the variable values; if a value is empty it says the weather is not available and ends; answers weather questions only from those facts, never invents numbers; for anything else says it can only share the weather and ends; no farming, financial or medical advice; no phone numbers or personal details; ends only after the farmer says they are clear, always with the goodbye ("Thank you! Have a good day from Agrythm." in the call's language).
+   - **Tools:** keep **End call** on.
+   - **Call settings:** maximum call length 1500 s (the largest Sarvam allows); the agent ends the call itself once the farmer is clear.
+   - Commit the version and note the **version number**. Calls use only committed versions, so every change needs a new commit and a new `SARVAM_APP_VERSION`. Do not edit an older version in the dashboard while someone else edits (a save from a stale page overwrites newer changes).
 3. **IDs and key.**
    - Org ID and workspace ID: from the dashboard URL or Settings.
    - Agent ID: agent's ··· menu → Copy agent ID.
@@ -30,7 +32,7 @@ SARVAM_AGENT_API_KEY=...
 SARVAM_ORG_ID=...
 SARVAM_WORKSPACE_ID=...
 SARVAM_APP_ID=...
-SARVAM_APP_VERSION=1
+SARVAM_APP_VERSION=6               # the committed agent version in use
 SARVAM_CONNECTION_ID=...
 SARVAM_AGENT_PHONE=+91...
 ```
@@ -43,7 +45,7 @@ python -m weathercall.campaign create --start 2026-10-27 --days 4 --time 09:00 -
 python -m weathercall.schedule activate --start 2026-10-27 --days 4 --mode campaign
 ```
 - `create` makes the campaign in Sarvam: 09:00 to 11:00 IST every day for 4 days, with retries from `GATE0_MAX_ATTEMPTS` and `GATE0_RETRY_GAP_MINUTES`. It shows in the dashboard under Deploy → Campaigns.
-- The scheduled task runs `campaign daily` at 08:30. It pulls yesterday's results into our ledger, checks today's farmers (consent, weather saved) and pushes only the eligible ones. Each farmer's message goes as the agent's opening line, in their language. A farmer is never pushed twice for the same day.
+- The scheduled task runs `campaign daily` at 08:30. It pulls yesterday's results into our ledger, checks today's farmers (consent, weather saved) and pushes only the eligible ones. Each farmer goes in with their own variables (`app_variables`) and their language; the agent's intro opens the call and the agent speaks the weather from those variables. A farmer is never pushed twice for the same day.
 - The task runs one extra morning, so the last day's results are pulled in too.
 - Manual control: `campaign push`, `campaign sync --date D`, `campaign status`.
 - `campaign sync` also saves every attempt's details in the `call_details` table for the monitoring UI: Sarvam's `interaction_id`, who ended the call (`ended_by`), the full failure reason, the `call_summary` output variable and, for connected calls, the transcript as JSON (`role`, `content`, `language_name` per turn). Anything that looks like a phone number (10 or more digits) is replaced with `[number removed]` before it is stored. Sarvam's `user_contact` field is never read.
