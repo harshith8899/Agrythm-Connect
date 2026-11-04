@@ -21,7 +21,8 @@ def test_message_fits_target_length(farmer_idx):
     assert farmer.display_name in text
 
 
-_ASKS = {Language.EN: "Did you understand", Language.HI: "समझ आई", Language.KN: "ಅರ್ಥವಾಯಿತೇ"}
+_ASKS = {Language.EN: "Did you understand", Language.HI: "समझ आई", Language.KN: "ಅರ್ಥವಾಯಿತೇ",
+         Language.TE: "అర్థమైందా"}
 
 
 @pytest.mark.parametrize("lang", list(Language))
@@ -29,8 +30,8 @@ def test_every_language_greets_by_name_and_gives_only_the_four_weather_facts(lan
     farmer = dataclasses.replace(demo_farmers()[0], language=lang)
     text = build_message(farmer, DEMO_WEATHER["Hassan"])      # 19-27 C, wind 18, rain 70, humidity 84
     s = Settings()
-    # Kannada words are long and few, so the word-count estimate reads low; measure the real length after TTS is on
-    low = 20 if lang is Language.KN else s.target_seconds_min
+    # Kannada and Telugu words are long and few, so the word-count estimate reads low; measure the real length after TTS is on
+    low = 20 if lang in (Language.KN, Language.TE) else s.target_seconds_min
     assert low <= estimate_seconds(text) <= s.target_seconds_max, estimate_seconds(text)
     assert farmer.display_name in text and "Hassan" in text and _ASKS[lang] in text
     for number in ("19", "27", "18", "70", "84"):

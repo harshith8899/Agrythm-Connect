@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from ..contracts import AttemptStatus, Language, ProviderCallResult
 
 BASE = "https://apps.sarvam.ai/api"
-_LANG_NAMES = {Language.HI: "Hindi", Language.EN: "English", Language.KN: "Kannada"}
+_LANG_NAMES = {Language.HI: "Hindi", Language.EN: "English", Language.KN: "Kannada", Language.TE: "Telugu"}
 _STATUS = {"connected": AttemptStatus.ANSWERED, "no_answer": AttemptStatus.NO_ANSWER,
            "busy": AttemptStatus.BUSY, "failed": AttemptStatus.FAILED}
 

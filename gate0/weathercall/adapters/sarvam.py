@@ -16,7 +16,7 @@ from pathlib import Path
 from ..contracts import Language
 
 URL = "https://api.sarvam.ai/text-to-speech"
-_CODES = {Language.HI: "hi-IN", Language.EN: "en-IN", Language.KN: "kn-IN"}
+_CODES = {Language.HI: "hi-IN", Language.EN: "en-IN", Language.KN: "kn-IN", Language.TE: "te-IN"}
 
 
 class SarvamVoice:
