@@ -80,8 +80,8 @@ The dashboard bridges live telephony execution records stored in the persistent 
 
 ```text
 gate0/
-├── package.json                      # Workspace root scripts (server, dev, test)
-├── server/                           # Orchestrator & SQLite Telemetry Backend
+├── package.json                      # Workspace root scripts (start, backend, frontend)
+├── backend/                          # Orchestrator & SQLite Telemetry Backend
 │   ├── database/
 │   │   ├── db.js                     # SQLite initialization, schema & queries (node:sqlite)
 │   │   └── agrythm_connect.db        # Persistent SQLite database (git-ignored)
@@ -97,7 +97,7 @@ gate0/
 │   │   └── weatherService.js         # Open-Meteo 4-parameter weather service
 │   ├── index.js                      # Express server entrypoint (Port 8000)
 │   └── test_e2e.js                   # End-to-end integration & verification test suite
-└── dashboard/                        # React 18+ / Vite / Tailwind CSS Frontend
+└── frontend/                         # React 18+ / Vite / Tailwind CSS Frontend
     ├── public/
     │   └── agrythm-logo.png          # Official Agrythm brand emblem
     ├── src/
@@ -132,11 +132,11 @@ gate0/
 From the `gate0/` directory:
 ```bash
 # Start the Node.js Express server on port 8000
-npm run server
+npm run backend
 ```
-Or directly from `gate0/server/`:
+Or directly from `gate0/backend/`:
 ```bash
-node server/index.js
+node index.js
 ```
 
 The orchestrator logs:
@@ -144,7 +144,7 @@ The orchestrator logs:
 ======================================================
 Agrythm Connect - Orchestrator & SQLite API Server
 Port: http://localhost:8000
-Database: server/database/agrythm_connect.db
+Database: backend/database/agrythm_connect.db
 Auto Dispatcher (9:00 AM IST): Active
 ======================================================
 ```
@@ -153,9 +153,9 @@ Auto Dispatcher (9:00 AM IST): Active
 In a separate terminal from `gate0/`:
 ```bash
 # Start Vite development server
-npm run dashboard:dev
+npm run frontend
 ```
-Or from `gate0/dashboard/`:
+Or from `gate0/frontend/`:
 ```bash
 npm run dev
 ```

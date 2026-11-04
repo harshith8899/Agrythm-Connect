@@ -19,14 +19,14 @@ cd gate0
 
 # Install dependencies
 npm install
-npm --prefix server install
-npm --prefix dashboard install
+npm --prefix backend install
+npm --prefix frontend install
 
 # Start the Backend Orchestrator & SQLite API (Port 8000)
-npm run server
+npm run backend
 
-# In another terminal, start the Dashboard (Port 5173)
-npm run dashboard:dev
+# In another terminal, start the Frontend Dashboard (Port 5173)
+npm run frontend
 
 # Run End-to-End verification test suite
 npm run test:e2e
@@ -34,7 +34,7 @@ npm run test:e2e
 
 ### Gate Zero Python CLI Runner
 ```bash
-cd gate0
+cd gate0/backend
 pip install -r requirements.txt
 python -m pytest -q
 python -m weathercall.cli --date 2026-11-05

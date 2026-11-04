@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 # Points to gate0/gate0.db or the path set in GATE0_DB
-DEFAULT_DB = Path(__file__).resolve().parent.parent / "gate0.db"
+DEFAULT_DB = Path(__file__).resolve().parent.parent / "database" / "agrythm_connect.db"
 DB_PATH = os.environ.get("GATE0_DB", str(DEFAULT_DB))
 
 

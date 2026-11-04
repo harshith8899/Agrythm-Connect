@@ -14,7 +14,8 @@ from .adapters import build_ports
 from .config import Settings
 from .engine import run_morning
 
-ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+_default_env = Path(__file__).resolve().parent.parent / ".env"
+ENV_FILE = _default_env if _default_env.exists() else Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 def load_env_file(path: Path) -> None:
