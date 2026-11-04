@@ -6,6 +6,7 @@ export const Header = ({
   onRefresh, 
   refreshing, 
   syncStatus, 
+  isBackendOnline = true,
   activeTab,
   onTriggerDemo,
   triggeringDemo,
@@ -54,10 +55,17 @@ export const Header = ({
               <h1 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
                 {getTabTitle()}
               </h1>
-              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold bg-emerald-50 text-trust-green px-2 py-0.5 rounded-full border border-emerald-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-trust-green animate-pulse" />
-                Live Sync
-              </span>
+              {isBackendOnline ? (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold bg-emerald-50 text-trust-green px-2 py-0.5 rounded-full border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-trust-green animate-pulse" />
+                  Live Sync
+                </span>
+              ) : (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-200 shadow-2xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping" />
+                  Backend Offline
+                </span>
+              )}
             </div>
             <p className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
               Agrythm Connect • Weather Voice Agent System
@@ -89,9 +97,17 @@ export const Header = ({
           {/* Start Demo Button */}
           <button
             onClick={onTriggerDemo}
-            disabled={triggeringDemo}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-trust-navy hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-50 cursor-pointer active:scale-95"
-            title="Execute immediate manual batch run across test numbers"
+            disabled={triggeringDemo || !isBackendOnline}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 ${
+              !isBackendOnline
+                ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60'
+                : 'bg-trust-navy hover:bg-slate-800 text-white disabled:opacity-50'
+            }`}
+            title={
+              !isBackendOnline
+                ? "Backend server (http://localhost:8000) is offline. Start it with 'npm run backend' to run demo."
+                : "Execute immediate manual batch run across test numbers"
+            }
           >
             {triggeringDemo ? (
               <>
@@ -100,21 +116,25 @@ export const Header = ({
               </>
             ) : (
               <>
-                <Play className="w-3.5 h-3.5 fill-current text-emerald-400" />
+                <Play className={`w-3.5 h-3.5 fill-current ${isBackendOnline ? 'text-emerald-400' : 'text-slate-400'}`} />
                 <span>Start Demo</span>
               </>
             )}
           </button>
 
           {/* Cloud Sync Status Badge */}
-          <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs text-slate-600">
+          <div className={`hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs ${
+            isBackendOnline
+              ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-700'
+          }`}>
             <span
               className={`w-2 h-2 rounded-full ${
-                syncStatus === 'connected' ? 'bg-trust-green animate-pulse' : 'bg-amber-500'
+                isBackendOnline ? 'bg-trust-green animate-pulse' : 'bg-rose-600 animate-ping'
               }`}
             />
-            <span className="font-medium text-slate-700">
-              {syncStatus === 'connected' ? 'Connected (SQLite + Sheets)' : 'Syncing...'}
+            <span className="font-semibold">
+              {isBackendOnline ? 'Connected (Port 8000)' : 'Backend Offline (Port 8000)'}
             </span>
           </div>
 

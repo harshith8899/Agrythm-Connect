@@ -14,6 +14,7 @@ export const Sidebar = ({
   isOpen,
   setIsOpen,
   syncStatus,
+  isBackendOnline = true,
   weatherAlertsCount = 0
 }) => {
   const navItems = [
@@ -166,22 +167,27 @@ export const Sidebar = ({
           <div className="flex items-center justify-between text-xs text-slate-600">
             <span className="flex items-center gap-1.5 text-[11px] font-medium">
               <span
-                className={`w-2 h-2 rounded-full ${syncStatus === 'connected' ? 'bg-trust-green' : 'bg-amber-500 animate-pulse'
-                  }`}
+                className={`w-2 h-2 rounded-full ${
+                  isBackendOnline ? 'bg-trust-green' : 'bg-rose-500 animate-ping'
+                }`}
               />
-              Google Sheets Sync
+              Backend API (Port 8000)
             </span>
-            <span className="text-[10px] font-bold text-slate-500 capitalize">
-              {syncStatus}
+            <span className={`text-[10px] font-bold uppercase ${
+              isBackendOnline ? 'text-emerald-700' : 'text-rose-600'
+            }`}>
+              {isBackendOnline ? 'Online' : 'Offline'}
             </span>
           </div>
 
           <div className="flex items-center justify-between text-[11px] text-slate-500">
             <span className="flex items-center gap-1">
               <Activity className="w-3 h-3 text-trust-navy" />
-              Field-First Gateway
+              SQLite Persistence
             </span>
-            <span className="text-trust-green font-semibold">Nominal</span>
+            <span className={`font-semibold ${isBackendOnline ? 'text-trust-green' : 'text-rose-600'}`}>
+              {isBackendOnline ? 'Connected' : 'Disconnected'}
+            </span>
           </div>
         </div>
       </aside>

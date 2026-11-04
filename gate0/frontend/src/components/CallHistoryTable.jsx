@@ -17,7 +17,15 @@ import {
 import { GOOGLE_SHEETS_CONFIG } from '../utils/constants';
 import { maskPhoneNumber } from '../utils';
 
-export const CallHistoryTable = ({ callLogs, onSelectCall, selectedCallId, onResetFilters, isFiltered }) => {
+export const CallHistoryTable = ({ 
+  callLogs, 
+  onSelectCall, 
+  selectedCallId, 
+  onResetFilters, 
+  isFiltered,
+  isBackendOnline = true,
+  onRefresh
+}) => {
   const getStatusBadge = (status, disposition, skipReason) => {
     const s = String(status || '').toLowerCase();
     switch (s) {
@@ -88,6 +96,36 @@ export const CallHistoryTable = ({ callLogs, onSelectCall, selectedCallId, onRes
   };
 
   if (!callLogs || callLogs.length === 0) {
+    if (!isBackendOnline) {
+      return (
+        <div className="bg-rose-50/40 rounded-2xl border-2 border-dashed border-rose-200 p-12 text-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-600 mx-auto">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+          
+          <div>
+            <h3 className="text-base font-bold text-rose-900">
+              Backend Server Offline (Port 8000 Unreachable)
+            </h3>
+            <p className="text-xs text-rose-700 max-w-md mx-auto mt-1 leading-relaxed">
+              Unable to query the SQLite persistence layer at <code className="bg-rose-100 px-1 py-0.5 rounded font-mono font-bold text-rose-950">http://localhost:8000/api/calls</code>.
+              Run <code className="bg-rose-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-950">npm run backend</code> in your terminal to start the orchestrator and load call logs.
+            </p>
+          </div>
+
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 transition-colors shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry Connection</span>
+            </button>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center space-y-4">
         <div className="w-14 h-14 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mx-auto">

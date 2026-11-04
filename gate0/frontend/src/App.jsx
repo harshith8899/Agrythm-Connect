@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { 
   Sidebar, 
   Header, 
@@ -24,6 +25,8 @@ function App() {
     triggeringDemo,
     lastSynced,
     syncStatus,
+    isBackendOnline,
+    errorMessage,
     summaryMetrics,
     autoDispatcher,
     toggleAutoDispatcher,
@@ -73,6 +76,7 @@ function App() {
         isOpen={sidebarOpen}
         setIsOpen={setSidebarOpen}
         syncStatus={syncStatus}
+        isBackendOnline={isBackendOnline}
         weatherAlertsCount={summaryMetrics.severeWeatherAlerts}
       />
 
@@ -84,6 +88,7 @@ function App() {
           onRefresh={() => fetchAllData(false)}
           refreshing={refreshing}
           syncStatus={syncStatus}
+          isBackendOnline={isBackendOnline}
           activeTab={activeTab}
           onTriggerDemo={triggerDemo}
           triggeringDemo={triggeringDemo}
@@ -93,6 +98,30 @@ function App() {
 
         {/* Tab Content */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 space-y-6">
+          {/* Global Backend Offline Alert Banner */}
+          {!isBackendOnline && (
+            <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-900 shadow-xs animate-in fade-in duration-200">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-bold text-rose-950">
+                    Backend Telemetry Server Disconnected (Port 8000)
+                  </div>
+                  <div className="text-xs text-rose-700 mt-0.5 leading-relaxed">
+                    Cannot reach <code className="bg-rose-100 px-1 py-0.5 rounded font-mono font-bold text-rose-950">http://localhost:8000</code>. Run <code className="bg-rose-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-950">npm run backend</code> in your terminal to start SQLite persistence and live dispatch triggers.
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => fetchAllData(false)}
+                className="shrink-0 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer inline-flex items-center justify-center gap-1.5"
+              >
+                <span>Retry Connection</span>
+              </button>
+            </div>
+          )}
           {activeTab === 'overview' && (
             <>
               {/* Top Filter Bar with Calendar Display */}
@@ -126,6 +155,8 @@ function App() {
                 selectedCallId={selectedCall?.call_id}
                 onResetFilters={resetFilters}
                 isFiltered={isFiltered}
+                isBackendOnline={isBackendOnline}
+                onRefresh={() => fetchAllData(false)}
               />
             </>
           )}

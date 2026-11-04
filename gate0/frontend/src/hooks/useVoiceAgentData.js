@@ -23,6 +23,7 @@ export const useVoiceAgentData = () => {
   const [triggeringDemo, setTriggeringDemo] = useState(false);
   const [lastSynced, setLastSynced] = useState(null);
   const [syncStatus, setSyncStatus] = useState('syncing');
+  const [isBackendOnline, setIsBackendOnline] = useState(true);
   const [errorMessage, setErrorMessage] = useState(null);
 
   // Auto Dispatcher (9:00 AM) state
@@ -75,12 +76,22 @@ export const useVoiceAgentData = () => {
       setCallLogs(callLogsRes.data || []);
       if (dispRes) setAutoDispatcher(dispRes);
       setLastSynced(new Date());
-      setSyncStatus('connected');
-      setErrorMessage(null);
+
+      // Live Backend Health Detection:
+      // If callLogsRes is offline, the backend (http://localhost:8000) is unreachable.
+      const isOnline = callLogsRes.source === 'sqlite_live' || farmersRes.source === 'sqlite_live';
+      setIsBackendOnline(isOnline);
+      setSyncStatus(isOnline ? 'connected' : 'disconnected');
+      if (!isOnline) {
+        setErrorMessage("Backend server (http://localhost:8000) is offline. Run 'npm run backend' to enable SQLite persistence.");
+      } else {
+        setErrorMessage(null);
+      }
     } catch (err) {
       console.error('Error refreshing voice agent data:', err);
-      setSyncStatus('error');
-      setErrorMessage(err.message || 'Failed to sync with SQLite / Google Sheets');
+      setIsBackendOnline(false);
+      setSyncStatus('disconnected');
+      setErrorMessage(err.message || 'Failed to connect to backend server');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -353,6 +364,11 @@ export const useVoiceAgentData = () => {
 
   // Trigger immediate demo batch run across test numbers
   const triggerDemo = async () => {
+    if (!isBackendOnline) {
+      const msg = "Cannot trigger demo: Backend server (http://localhost:8000) is offline. Start it with 'npm run backend'.";
+      setErrorMessage(msg);
+      return;
+    }
     setTriggeringDemo(true);
     try {
       const res = await triggerDemoCalls();
@@ -360,7 +376,9 @@ export const useVoiceAgentData = () => {
       return res;
     } catch (err) {
       console.error('Failed to trigger demo batch:', err);
-      setErrorMessage(err.message || 'Failed to trigger demo');
+      setIsBackendOnline(false);
+      setSyncStatus('disconnected');
+      setErrorMessage(err.message || 'Failed to trigger demo: Backend is offline');
       throw err;
     } finally {
       setTriggeringDemo(false);
@@ -424,6 +442,7 @@ export const useVoiceAgentData = () => {
     triggeringDemo,
     lastSynced,
     syncStatus,
+    isBackendOnline,
     errorMessage,
     summaryMetrics,
     autoDispatcher,
