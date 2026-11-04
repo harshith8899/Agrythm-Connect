@@ -143,3 +143,11 @@ def test_task_runs_daily_at_call_time_and_expires(tmp_path):
     assert trig.find("t:EndBoundary", ns).text == "2026-10-30T23:59:59"
     assert trig.find("t:ScheduleByDay/t:DaysInterval", ns).text == "1"
     assert "--window-start 2026-10-27 --window-days 4" in root.find("t:Actions/t:Exec/t:Arguments", ns).text
+
+
+@pytest.mark.parametrize("word", ["Telugu", "telugu", "te", "TE-IN", "తెలుగు"])
+def test_sheet_accepts_telugu(tmp_path, word):
+    p = tmp_path / "f.csv"
+    p.write_text("Farmer ID,Farmer Name,Mobile Number,Village,District,State,Preferred Calling Language,Call Consent\n"
+                 f"F1,A,9876543210,Guntur,Guntur,Andhra Pradesh,{word},Yes\n", encoding="utf-8")
+    assert load_farmers(p)[0].language is Language.TE

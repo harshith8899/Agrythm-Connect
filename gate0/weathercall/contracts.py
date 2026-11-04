@@ -18,6 +18,7 @@ class Language(str, Enum):
     HI = "hi"
     EN = "en"
     KN = "kn"
+    TE = "te"
 
 
 class AttemptStatus(str, Enum):

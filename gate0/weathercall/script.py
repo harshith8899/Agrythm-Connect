@@ -2,9 +2,9 @@
 
 The message greets the farmer by name, gives today's temperature, wind, chance of rain and humidity (nothing
 else) for their village or district, and asks whether it was understood. It does not announce that the voice is an
-AI (team decision, 2 Nov 2026); the agent answers honestly if asked. Hindi and Kannada are plain spoken language,
+AI (team decision, 2 Nov 2026); the agent answers honestly if asked. Hindi, Kannada and Telugu are plain spoken language,
 because the farmers understand only their local language.
-Hindi and Kannada wording is a DRAFT and needs native-speaker review (see docs/DECISIONS.md).
+Hindi, Kannada and Telugu wording is a DRAFT and needs native-speaker review (see docs/DECISIONS.md).
 """
 from __future__ import annotations
 
@@ -48,7 +48,19 @@ _KN = (
     "ಈ ಹವಾಮಾನ ಮಾಹಿತಿ ನಿಮಗೆ ಅರ್ಥವಾಯಿತೇ? ದಯವಿಟ್ಟು ಹೌದು ಅಥವಾ ಇಲ್ಲ ಎಂದು ಹೇಳಿ."
 )
 
-_TEMPLATES = {Language.HI: _HI, Language.KN: _KN, Language.EN: _EN}
+_TE = (
+    "నమస్కారం {name} గారు. నేను అగ్రిథమ్ నుండి వాతావరణ సమాచారం చెప్పడానికి ఫోన్ చేస్తున్నాను. "
+    "ఈ రోజు {place} ప్రాంతం వాతావరణ సమాచారం ఇది. "
+    "ఉష్ణోగ్రత {tmin} నుండి {tmax} డిగ్రీల మధ్య ఉంటుంది. "
+    "గాలి వేగం గంటకు {wind} కిలోమీటర్ల వరకు ఉంటుంది. "
+    "వర్షం పడే అవకాశం {rain} శాతం ఉంది. "
+    "గాలిలో తేమ {humidity} శాతం ఉంటుంది. "
+    "నేను ప్రతి ఉదయం ఇలాగే వాతావరణ సమాచారం చెప్పడానికి ఫోన్ చేస్తాను. "
+    "ఈ ఫోన్లు మీకు వద్దనుకుంటే, దయచేసి మీ అగ్రిథమ్ సంప్రదింపు వ్యక్తికి చెప్పండి. "
+    "ఈ వాతావరణ సమాచారం మీకు అర్థమైందా? దయచేసి అవును లేదా కాదు అని చెప్పండి."
+)
+
+_TEMPLATES = {Language.HI: _HI, Language.KN: _KN, Language.TE: _TE, Language.EN: _EN}
 
 
 def build_message(farmer: FarmerContext, weather: WeatherReport) -> str:
