@@ -24,6 +24,7 @@ export const useVoiceAgentData = () => {
   const [lastSynced, setLastSynced] = useState(null);
   const [syncStatus, setSyncStatus] = useState('syncing');
   const [isBackendOnline, setIsBackendOnline] = useState(true);
+  const [sarvamLive, setSarvamLive] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
   // Auto Dispatcher (9:00 AM) state
@@ -74,7 +75,6 @@ export const useVoiceAgentData = () => {
 
       setFarmers(farmersRes.data || []);
       setCallLogs(callLogsRes.data || []);
-      if (dispRes) setAutoDispatcher(dispRes);
       setLastSynced(new Date());
 
       // Live Backend Health Detection:
@@ -82,6 +82,15 @@ export const useVoiceAgentData = () => {
       const isOnline = callLogsRes.source === 'sqlite_live' || farmersRes.source === 'sqlite_live';
       setIsBackendOnline(isOnline);
       setSyncStatus(isOnline ? 'connected' : 'disconnected');
+
+      if (dispRes) {
+        setAutoDispatcher(dispRes);
+        // Sarvam is live only if backend is online AND credentials exist
+        setSarvamLive(Boolean(isOnline && dispRes.sarvamLive));
+      } else {
+        setSarvamLive(false);
+      }
+
       if (!isOnline) {
         setErrorMessage("Backend server (http://localhost:8000) is offline. Run 'npm run backend' to enable SQLite persistence.");
       } else {
@@ -90,6 +99,7 @@ export const useVoiceAgentData = () => {
     } catch (err) {
       console.error('Error refreshing voice agent data:', err);
       setIsBackendOnline(false);
+      setSarvamLive(false);
       setSyncStatus('disconnected');
       setErrorMessage(err.message || 'Failed to connect to backend server');
     } finally {
@@ -443,6 +453,7 @@ export const useVoiceAgentData = () => {
     lastSynced,
     syncStatus,
     isBackendOnline,
+    sarvamLive,
     errorMessage,
     summaryMetrics,
     autoDispatcher,

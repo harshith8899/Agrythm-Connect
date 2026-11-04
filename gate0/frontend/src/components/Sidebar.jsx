@@ -15,6 +15,7 @@ export const Sidebar = ({
   setIsOpen,
   syncStatus,
   isBackendOnline = true,
+  sarvamLive = false,
   weatherAlertsCount = 0
 }) => {
   const navItems = [
@@ -94,14 +95,18 @@ export const Sidebar = ({
         {/* Voice Agent Context Badge */}
         <div className="mx-4 mt-4 p-3 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <Radio className="w-4 h-4 text-trust-green animate-pulse" />
+            <Radio className={`w-4 h-4 ${sarvamLive ? 'text-trust-green animate-pulse' : 'text-slate-400'}`} />
             <div>
               <div className="text-xs font-bold text-slate-800">Weather Voice Agent</div>
               <div className="text-[10px] text-slate-500">Post-Call Monitoring</div>
             </div>
           </div>
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-trust-green">
-            Active
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+            sarvamLive 
+              ? 'bg-emerald-100 text-trust-green border-emerald-200' 
+              : 'bg-slate-200/80 text-slate-600 border-slate-300'
+          }`}>
+            {sarvamLive ? 'Active' : 'Inactive'}
           </span>
         </div>
 

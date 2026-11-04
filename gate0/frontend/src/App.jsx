@@ -26,6 +26,7 @@ function App() {
     lastSynced,
     syncStatus,
     isBackendOnline,
+    sarvamLive,
     errorMessage,
     summaryMetrics,
     autoDispatcher,
@@ -77,6 +78,7 @@ function App() {
         setIsOpen={setSidebarOpen}
         syncStatus={syncStatus}
         isBackendOnline={isBackendOnline}
+        sarvamLive={sarvamLive}
         weatherAlertsCount={summaryMetrics.severeWeatherAlerts}
       />
 

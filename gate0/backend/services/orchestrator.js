@@ -27,13 +27,27 @@ let autoDispatcherEnabled = true;
 let lastDispatcherRun = null;
 let dispatcherTimer = null;
 
+export function checkSarvamLiveStatus() {
+  const apiKey = process.env.SARVAM_AGENT_API_KEY || process.env.SARVAM_API_KEY;
+  const connectionId = process.env.SARVAM_CONNECTION_ID;
+  const hasLiveCredentials = Boolean(apiKey && connectionId);
+  return {
+    isLive: hasLiveCredentials,
+    status: hasLiveCredentials ? 'active' : 'inactive',
+    provider: 'Sarvam Voice Agent'
+  };
+}
+
 export function getAutoDispatcherStatus() {
+  const sarvam = checkSarvamLiveStatus();
   return {
     enabled: autoDispatcherEnabled,
     scheduledTime: '09:00 AM IST',
     cronSchedule: '0 9 * * *',
     lastRun: lastDispatcherRun,
-    systemStatus: 'Operational'
+    systemStatus: 'Operational',
+    sarvamLive: sarvam.isLive,
+    sarvamStatus: sarvam.status
   };
 }
 
