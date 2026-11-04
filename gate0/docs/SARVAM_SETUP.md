@@ -5,7 +5,7 @@ Gate Zero calls through a Sarvam Voice Agent. Our code builds the weather messag
 ## 1. Dashboard setup (one time)
 1. **Phone number.** Under Deploy → Phone numbers, rent a number from Sarvam or connect Exotel, Plivo or another provider. Note the **connection ID** and the agent's **phone number** in E.164 form (+91...).
 2. **Agent.** Create an agent named `Agrythm connect - Weather info`. The agent opens the call itself, asks if it is a good time to talk, then gives the weather from per-farmer variables that our backend sends. Settings:
-   - **Languages:** Hindi, Kannada and English. Do not write a prompt rule that tells the agent to switch language: Sarvam switches by itself and rejects such a rule.
+   - **Languages:** Hindi, Kannada, Telugu and English. Do not write a prompt rule that tells the agent to switch language: Sarvam switches by itself and rejects such a rule.
    - **Greeting (intro):** short, with variables, for example: "Hello {{farmer_name}}. I am Chetan Dabke's assistant, calling on behalf of Agrythm to share a short weather update for {{place_name}}. Is this a good time to talk?" Sarvam translates it for Hindi and Kannada.
    - **Input variables** (all type string, set per call by the backend, names must match `script.weather_variables`): `farmer_name`, `place_name`, `temp_min_c`, `temp_max_c`, `wind_kmh`, `rain_chance_pct`, `humidity_pct`. Sarvam answers HTTP 422 if the backend sends a name the agent does not declare.
    - **Output variables** (filled by Sarvam after each connected call):

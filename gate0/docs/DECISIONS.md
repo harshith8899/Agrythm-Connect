@@ -31,6 +31,7 @@
 | 3 Nov 2026 | Agent output variables: `call_summary`, `callback_time`, `understood_weather`, `stop_calls_requested`. |
 | 3 Nov 2026 | Telephony is an Exotel connection in Sarvam (Deploy, Phone numbers). Phone numbers, keys and IDs stay in `.env`, never in git. A Vobiz connection also exists with no number. The Exotel trial may only call verified numbers, so the first real test is to a team member's own phone. |
 | 3 Nov 2026 | Client rule confirmed for requested-time callbacks: one attempt at the requested time, no retry if not picked up. Built only in the local test bench so far (not in git); the production job still has to implement it, together with a hosted scheduler. |
+| 4 Nov 2026 | Telugu is supported as a fourth calling language (`Telugu` or `te` in the sheet; agent and script). Telugu wording is a draft until a native speaker reviews it. |
 
 ## Open with the client (Chetan Sir)
 | Item | Placeholder now |
