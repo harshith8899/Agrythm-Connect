@@ -292,6 +292,34 @@ export const useVoiceAgentData = () => {
     const escalationCount = enrichedCallLogs.filter(c => c.status === 'Escalated' || c.disposition === 'Non-Weather Inquiry').length;
     const callbackCount = enrichedCallLogs.filter(c => Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested').length;
 
+    // Callbacks Scheduled logic:
+    // Tracks farmers who requested a callback and have not yet completed a follow-up call.
+    // If a farmer requests a callback, counter increments.
+    // If a subsequent call to that farmer completes (weather delivered), counter decrements.
+    const farmerCallbackState = new Map();
+    const sortedLogs = [...enrichedCallLogs].sort((a, b) => {
+      const timeA = new Date(a.created_at || a.call_date || 0).getTime();
+      const timeB = new Date(b.created_at || b.call_date || 0).getTime();
+      return timeA - timeB;
+    });
+
+    sortedLogs.forEach(c => {
+      const fid = c.farmer_id ? String(c.farmer_id).trim() : null;
+      if (!fid) return;
+
+      const hasCallbackRequest = Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested';
+      if (hasCallbackRequest) {
+        farmerCallbackState.set(fid, true);
+      } else if (c.status === 'Completed' && c.disposition === 'Weather Delivered') {
+        farmerCallbackState.set(fid, false);
+      }
+    });
+
+    let callbacksScheduled = 0;
+    farmerCallbackState.forEach(isPending => {
+      if (isPending) callbacksScheduled++;
+    });
+
     // Unique farmers reached (answered weather or resolved callback/escalation)
     const reachedFarmerIds = new Set();
     enrichedCallLogs.forEach(c => {
@@ -316,6 +344,7 @@ export const useVoiceAgentData = () => {
       failedCount,
       escalationCount,
       callbackCount,
+      callbacksScheduled,
       severeWeatherAlerts,
       totalRegisteredFarmers: farmers.length,
       confidenceRate: '98.5%'
