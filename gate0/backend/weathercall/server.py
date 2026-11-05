@@ -6,6 +6,7 @@
     GET  /api/health                         GET  /api/orchestrator/status
     GET  /api/calls   GET /api/calls/<id>    POST /api/orchestrator/auto-dispatch   {"enabled": true|false}
     GET  /api/farmers                        POST /api/orchestrator/run-now         send today's calls now
+    POST /api/farmers          add one farmer;  PUT/PATCH /api/farmers/<id>  edit one (also active and consent)
     POST /api/farmers/import   (CSV text)    POST /api/calls/send-now               (same; /trigger-demo kept as alias)
     GET  /api/callbacks                      GET  /api/weather?lat=..&lon=..
     GET  /api/system/checks                  connection checks: backend, database, weather API, Sarvam, phone line
@@ -44,7 +45,7 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
             if "*" in origins or origin in origins:
                 self.send_header("Access-Control-Allow-Origin", "*" if "*" in origins else origin)
                 self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
 
         def _send(self, code: int, body) -> None:
@@ -102,10 +103,36 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
                 return self._send(500, {"error": "server error"})
             self._send(404, {"error": "not found"})
 
+        def do_PUT(self):
+            path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            try:
+                body = self._body()
+                if path.startswith("/api/farmers/") and path != "/api/farmers/import":
+                    fields = json.loads(body or "{}")
+                    if not isinstance(fields, dict):
+                        raise ValueError("expected a JSON object")
+                    return self._send(200, service.update_farmer(urllib.parse.unquote(path[len("/api/farmers/"):]), fields))
+            except KeyError:
+                return self._send(404, {"error": "Farmer not found"})
+            except json.JSONDecodeError:
+                return self._send(400, {"error": "invalid JSON"})
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
+            except Exception:
+                return self._send(500, {"error": "server error"})
+            self._send(404, {"error": "not found"})
+
+        do_PATCH = do_PUT
+
         def do_POST(self):
             path = urllib.parse.urlparse(self.path).path.rstrip("/")
             try:
                 body = self._body()
+                if path == "/api/farmers":
+                    fields = json.loads(body or "{}")
+                    if not isinstance(fields, dict):
+                        raise ValueError("expected a JSON object")
+                    return self._send(201, service.add_farmer(fields))
                 if path == "/api/farmers/import":
                     try:
                         return self._send(200, service.import_csv(body))

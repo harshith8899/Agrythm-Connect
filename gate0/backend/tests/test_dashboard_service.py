@@ -251,8 +251,8 @@ def api(tmp_path):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
 
-    def call(path, data=None, origin=None):
-        req = urllib.request.Request(base + path, data=data, method="POST" if data is not None else "GET")
+    def call(path, data=None, origin=None, method=None):
+        req = urllib.request.Request(base + path, data=data, method=method or ("POST" if data is not None else "GET"))
         if origin:
             req.add_header("Origin", origin)
         try:
@@ -572,3 +572,71 @@ def test_sarvams_end_reasons():
     for normal in ("AGENT_ENDS", "USER_ENDS", "TIMEOUT", "NO_END_REASON", None, ""):
         assert not _is_network_drop(normal)
     assert _is_network_drop("NETWORK_DISCONNECT") and _is_network_drop("connection_lost")
+
+
+# ---- an admin adds and edits farmers by hand --------------------------------------------------------------------------
+NEW = {"farmer_name": "Lakshmi", "phone_number": "+91 98765 43299", "preferred_language": "kannada",
+       "village": "Mandya", "district": "Mandya", "state": "Karnataka", "call_consent": True}
+
+
+def test_a_farmer_can_be_added_by_hand(tmp_path):
+    s = make(tmp_path)
+    f = s.add_farmer(NEW)
+    assert f["farmer_id"] == "F001" and f["preferred_language"] == "Kannada" and f["phone_number"] == "******3299"
+    assert (f["call_consent"], f["active"]) == ("Yes", "Yes")
+    assert s.add_farmer({**NEW, "farmer_name": "Next"})["farmer_id"] == "F002"
+    s.import_csv(ONE)                                          # imported and typed-in farmers live side by side
+    assert len(s.farmers()) == 3
+
+
+def test_consent_is_never_assumed_for_a_new_farmer(tmp_path):
+    s = make(tmp_path)
+    data = {k: v for k, v in NEW.items() if k != "call_consent"}
+    assert s.add_farmer(data)["call_consent"] == "No"
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"farmer_name": " "}, "name"), ({"phone_number": "12345"}, "10 digits"), ({"preferred_language": "French"}, "language"),
+    ({"village": "", "district": ""}, "village or district"), ({"farmer_id": "F1"}, "already exists")])
+def test_a_bad_new_farmer_is_refused(tmp_path, change, message):
+    s = make(tmp_path)
+    s.import_csv(ONE)
+    with pytest.raises(ValueError, match=message):
+        s.add_farmer({**NEW, **change})
+
+
+def test_a_farmer_can_be_edited_deactivated_and_reactivated(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED))
+    s = make(tmp_path, d)
+    s.import_csv(ONE)
+    f = s.update_farmer("F1", {"farmer_name": "Ramesh Kumar", "preferred_language": "Telugu", "phone_number": "9000000001"})
+    assert (f["farmer_name"], f["preferred_language"], f["phone_number"]) == ("Ramesh Kumar", "Telugu", "******0001")
+    assert s.update_farmer("F1", {"phone_number": ""})["phone_number"] == "******0001"          # blank keeps the old number
+    assert s.update_farmer("F1", {"active": False})["active"] == "No"
+    s.fire(D)
+    assert d.calls == [] and s.calls()[0]["status"] == "Skipped"                                  # not called while inactive
+    assert s.update_farmer("F1", {"active": "Yes"})["active"] == "Yes"
+    s.fire(D + timedelta(days=1))
+    assert len(d.calls) == 1 and d.calls[0][1] == "Telugu"
+
+
+def test_edit_errors(tmp_path):
+    s = make(tmp_path)
+    s.import_csv(ONE)
+    with pytest.raises(KeyError):
+        s.update_farmer("nope", {"active": False})
+    with pytest.raises(ValueError):
+        s.update_farmer("F1", {"call_consent": "maybe"})
+
+
+def test_api_add_and_edit_a_farmer(api):
+    call, s = api
+    code, body, _ = call("/api/farmers", json.dumps(NEW).encode())
+    assert code == 201 and body["farmer_id"] == "F001"
+    code, body, _ = call("/api/farmers/F001", json.dumps({"active": False, "village": "Hassan"}).encode(), method="PUT")
+    assert code == 200 and body["active"] == "No" and body["village"] == "Hassan"
+    assert call("/api/farmers/F001", json.dumps({"call_consent": False}).encode(), method="PATCH")[1]["call_consent"] == "No"
+    assert call("/api/farmers/zzz", b"{}", method="PUT")[0] == 404
+    assert call("/api/farmers", json.dumps({**NEW, "phone_number": "1"}).encode())[0] == 400
+    assert call("/api/farmers", b"nope")[0] == 400
+    assert "9876543299" not in json.dumps(call("/api/farmers")[1])

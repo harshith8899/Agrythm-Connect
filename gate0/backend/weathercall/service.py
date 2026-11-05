@@ -25,7 +25,7 @@ from .adapters.mock import MockVoice, MockWeather
 from .adapters.open_meteo import OpenMeteoWeather, geocode
 from .adapters.sarvam_agent import _LANG_NAMES
 from .adapters.sarvam_campaign import IST, scrub
-from .adapters.sheet import _ALIASES, _key, _read_rows, load_farmers
+from .adapters.sheet import _ALIASES, _LANG, _key, _read_rows, load_farmers
 from .adapters.weather_store import StoredWeather
 from .config import Settings
 from .contracts import (AttemptStatus, CallAttempt, CallRequest, FarmerContext, FarmerDayResult, Language,
@@ -252,14 +252,125 @@ class DashboardService:
             self.db.commit()
         return {"imported": len(farmers), "no_location": [f.farmer_id for f in farmers if not (f.latitude or f.longitude)]}
 
+    _FARMER_COLS = "farmer_id,name,phone,language,village,district,state,lat,lon,consent,active"
+
+    @staticmethod
+    def _farmer_dict(r) -> dict:
+        return {"farmer_id": r[0], "farmer_name": r[1], "phone_number": mask_phone(r[2]),
+                "preferred_language": _LANG_LABELS[Language(r[3])], "village": r[4], "district": r[5], "state": r[6],
+                "located": bool(r[7] or r[8]), "call_consent": "Yes" if r[9] else "No", "active": "Yes" if r[10] else "No"}
+
     def farmers(self) -> list[dict]:
         with self.lock:
-            rows = self.db.execute("SELECT farmer_id,name,phone,language,village,district,state,lat,lon,consent,active "
-                                   "FROM dash_farmers ORDER BY farmer_id").fetchall()
-        return [{"farmer_id": r[0], "farmer_name": r[1], "phone_number": mask_phone(r[2]),
-                 "preferred_language": _LANG_LABELS[Language(r[3])], "village": r[4], "district": r[5], "state": r[6],
-                 "located": bool(r[7] or r[8]), "call_consent": "Yes" if r[9] else "No", "active": "Yes" if r[10] else "No"}
-                for r in rows]
+            rows = self.db.execute(f"SELECT {self._FARMER_COLS} FROM dash_farmers ORDER BY farmer_id").fetchall()
+        return [self._farmer_dict(r) for r in rows]
+
+    # -- adding and editing farmers by hand (an admin) ---------------------------------------------------------------
+    @staticmethod
+    def _yes_no(value, field: str) -> bool:
+        if isinstance(value, bool):
+            return value
+        v = str(value).strip().lower()
+        if v in ("yes", "y", "true", "1"):
+            return True
+        if v in ("no", "n", "false", "0"):
+            return False
+        raise ValueError(f"{field} must be Yes or No")
+
+    @staticmethod
+    def _clean_phone(value) -> str:
+        digits = re.sub(r"\D", "", str(value or ""))
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        elif len(digits) == 11 and digits.startswith("0"):
+            digits = digits[1:]
+        if len(digits) != 10:
+            raise ValueError("phone number must have 10 digits")
+        return digits
+
+    def _next_farmer_id(self) -> str:
+        with self.lock:
+            ids = [r[0] for r in self.db.execute("SELECT farmer_id FROM dash_farmers")]
+        top = max((int(m.group(1)) for i in ids if (m := re.fullmatch(r"F(\d+)", i))), default=0)
+        return f"F{top + 1:03d}"
+
+    def _locate(self, village: str, district: str, state: str) -> tuple[float, float]:
+        if not self.real_weather:
+            return 0.0, 0.0
+        try:
+            place = geocode(village, district, state)
+        except Exception:                       # lookup down: saved without a location, so no weather and no call
+            place = None
+        return (place.latitude, place.longitude) if place else (0.0, 0.0)
+
+    def add_farmer(self, data: dict) -> dict:
+        """Saves one farmer typed in by an admin. Consent is never assumed: it is Yes only if the form says so."""
+        name = str(data.get("farmer_name", "")).strip()
+        village, district = str(data.get("village", "")).strip(), str(data.get("district", "")).strip()
+        state = str(data.get("state", "")).strip()
+        if not name:
+            raise ValueError("farmer name is required")
+        if not (village or district):
+            raise ValueError("village or district is required")
+        lang = _LANG.get(_key(data.get("preferred_language", "")))
+        if lang is None:
+            raise ValueError("language must be Hindi, Kannada, Telugu or English")
+        phone = self._clean_phone(data.get("phone_number"))
+        fid = str(data.get("farmer_id") or "").strip() or self._next_farmer_id()
+        with self.lock:
+            if self.db.execute("SELECT 1 FROM dash_farmers WHERE farmer_id=?", (fid,)).fetchone():
+                raise ValueError(f"Farmer ID {fid} already exists")
+        lat, lon = self._locate(village, district, state)
+        consent = self._yes_no(data.get("call_consent", False), "call consent")
+        active = self._yes_no(data.get("active", True), "active")
+        with self.lock:
+            self.db.execute("INSERT INTO dash_farmers VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
+                fid, name[:80], phone, lang.value, village, district, state, lat, lon, int(consent), int(active)))
+            self.db.commit()
+        return next(f for f in self.farmers() if f["farmer_id"] == fid)
+
+    def update_farmer(self, fid: str, data: dict) -> dict:
+        """Changes only the fields sent (name, phone, language, place, consent, active). A blank phone keeps the old one."""
+        with self.lock:
+            r = self.db.execute(f"SELECT {self._FARMER_COLS} FROM dash_farmers WHERE farmer_id=?", (fid,)).fetchone()
+        if not r:
+            raise KeyError(fid)
+        _, name, phone, language, village, district, state, lat, lon, consent, active = r
+        if "farmer_name" in data:
+            name = str(data["farmer_name"]).strip()
+            if not name:
+                raise ValueError("farmer name is required")
+        if str(data.get("phone_number") or "").strip():
+            phone = self._clean_phone(data["phone_number"])
+        if "preferred_language" in data:
+            lang = _LANG.get(_key(data["preferred_language"]))
+            if lang is None:
+                raise ValueError("language must be Hindi, Kannada, Telugu or English")
+            language = lang.value
+        moved = False
+        for key in ("village", "district", "state"):
+            if key in data and str(data[key]).strip() != {"village": village, "district": district, "state": state}[key]:
+                moved = True
+        if "village" in data:
+            village = str(data["village"]).strip()
+        if "district" in data:
+            district = str(data["district"]).strip()
+        if "state" in data:
+            state = str(data["state"]).strip()
+        if not (village or district):
+            raise ValueError("village or district is required")
+        if moved:
+            lat, lon = self._locate(village, district, state)       # the place changed: find its weather location again
+        if "call_consent" in data:
+            consent = int(self._yes_no(data["call_consent"], "call consent"))
+        if "active" in data:
+            active = int(self._yes_no(data["active"], "active"))
+        with self.lock:
+            self.db.execute("UPDATE dash_farmers SET name=?, phone=?, language=?, village=?, district=?, state=?, lat=?, "
+                            "lon=?, consent=?, active=? WHERE farmer_id=?",
+                            (name[:80], phone, language, village, district, state, lat, lon, consent, active, fid))
+            self.db.commit()
+        return next(f for f in self.farmers() if f["farmer_id"] == fid)
 
     # -- sending the day's calls ---------------------------------------------------------------------------------
     def _save(self, fid: str, day: date, **kw) -> None:
