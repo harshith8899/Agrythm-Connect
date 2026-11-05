@@ -346,18 +346,22 @@ export const CallDetailDrawer = ({ call, onClose }) => {
             {transcriptItems.length > 0 ? (
               <div className="space-y-3 pt-1">
                 {transcriptItems.map((turn, idx) => {
-                  const isAgent = turn.speaker === 'Agent';
-                  const isSystem = turn.speaker === 'System';
+                  // Normalize both internal schema ({ speaker, text }) and Sarvam Agent schema ({ role, content, language_name })
+                  const rawSpeaker = turn.speaker || turn.role || turn.author || (idx % 2 === 0 ? 'Agent' : 'Farmer');
+                  const isAgent = /agent|bot|assistant/i.test(rawSpeaker);
+                  const isSystem = /system|notice/i.test(rawSpeaker);
+                  const displaySpeaker = isSystem ? 'System' : (isAgent ? 'Agent' : 'Farmer');
+                  const turnText = turn.text || turn.content || turn.message || (typeof turn === 'string' ? turn : '');
 
                   if (isSystem) {
                     return (
                       <div key={idx} className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
-                        <strong>System Notice:</strong> {formatTranscriptText(turn.text, transcriptMode)}
+                        <strong>System Notice:</strong> {formatTranscriptText(turnText, transcriptMode)}
                       </div>
                     );
                   }
 
-                  const renderedText = formatTranscriptText(turn.text, transcriptMode);
+                  const renderedText = formatTranscriptText(turnText, transcriptMode);
 
                   return (
                     <div 
@@ -376,9 +380,9 @@ export const CallDetailDrawer = ({ call, onClose }) => {
                       }`}>
                         <div className="flex items-center justify-between gap-3 mb-1.5">
                           <span className="font-bold text-[10px] uppercase tracking-wider text-slate-400">
-                            {turn.speaker}
+                            {displaySpeaker}
                           </span>
-                          {transcriptMode !== 'original' && hasIndicScript(turn.text) && (
+                          {transcriptMode !== 'original' && hasIndicScript(turnText) && (
                             <span className="text-[9px] font-medium px-1.5 py-0.2 rounded bg-white text-slate-500 border border-slate-200 shadow-2xs">
                               {transcriptMode === 'romanized' ? 'English script' : 'English translation'}
                             </span>
