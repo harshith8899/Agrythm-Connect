@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, MinusCircle, AlertTriangle, ChevronDown } from 'lucide-react';
-import { getSystemChecks, getUsage, saveUsageRate } from '../utils';
+import { getSystemChecks, getUsage, saveUsageRate, getAlerts } from '../utils';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
@@ -24,6 +24,7 @@ const UsageCell = ({ title, data }) => (
 export const SystemStatusView = ({ isBackendOnline = true }) => {
   const [report, setReport] = useState(null);
   const [usage, setUsage] = useState(null);
+  const [alerts, setAlerts] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [rateInput, setRateInput] = useState('');
@@ -33,9 +34,10 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
     try {
-      const [checks, use] = await Promise.all([getSystemChecks(refresh), getUsage(refresh)]);
+      const [checks, use, al] = await Promise.all([getSystemChecks(refresh), getUsage(refresh), getAlerts().catch(() => [])]);
       setReport(checks);
       setUsage(use);
+      setAlerts(al);
       setRateInput((prev) => (prev === '' ? String(use.rate) : prev));
       setError('');
     } catch (err) {
@@ -89,6 +91,20 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
           <span>Check now</span>
         </button>
       </div>
+
+      {/* Alerts for the team */}
+      {alerts.length > 0 && (
+        <div className="bg-white rounded-2xl border border-amber-200 divide-y divide-amber-100">
+          <div className="p-4 text-[11px] font-bold tracking-wider text-amber-700 uppercase">Needs the team ({alerts.length})</div>
+          {alerts.slice(0, 10).map((a, i) => (
+            <div key={`${a.at}-${i}`} className="p-4 text-xs text-slate-700">
+              <span className="font-semibold text-slate-900">{a.farmer_name || a.farmer_id || 'System'}</span>
+              <span className="text-slate-400"> · {String(a.at).replace('T', ' ').slice(0, 16)}</span>
+              <p className="mt-0.5">{a.text}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* The connections */}
       <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100">

@@ -70,6 +70,9 @@ export const getUsage = (refresh = false) => getJson(`${API_BASE}/api/usage${ref
 export const saveUsageRate = (sarvamRate) =>
   postJson('/api/usage', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sarvam_rate: sarvamRate }) });
 
+/** Things the team must act on: farmers who asked to stop, failed calls, skipped runs. */
+export const getAlerts = () => getJson(`${API_BASE}/api/alerts`);
+
 export const getCallbacks = () => getJson(`${API_BASE}/api/callbacks`);
 
 export const getWeatherParameters = (lat, lon) => getJson(`${API_BASE}/api/weather?lat=${lat}&lon=${lon}`);
