@@ -3,8 +3,9 @@
 Checks: backend, database, weather API (Open-Meteo), Sarvam API and the phone line, each ok, fail or off (not set up).
 Usage: calls and billed minutes counted from Sarvam's own call records, the way Sarvam bills them: each connected call
 in started 60-second minutes (45 s = 1, 61 s = 2); calls that were not picked up, were busy or failed cost nothing.
-Sarvam has no endpoint for the credit balance (it is only on Settings -> Billing, "Credits Left"), so no balance,
-remaining credits or rupee cost is shown or guessed here. An "insufficient quota" answer from Sarvam is flagged.
+Sarvam has no endpoint for the credit balance (it is only on Settings -> Billing, "Credits Left"), so no balance or
+remaining credits are shown or guessed here. The amount is an estimate: billed minutes times a per-minute rate (Sarvam's
+pay-as-you-go ₹3.50 by default, before GST; editable for another plan). An "insufficient quota" answer is flagged.
 """
 from __future__ import annotations
 
@@ -21,6 +22,8 @@ from .adapters.sarvam_usage import make_usage
 UTC = timezone.utc
 PROBE_PLACE = (12.97194, 77.59369)          # Bengaluru: any place will do, it only proves the weather API answers
 CACHE_SECONDS = 30
+DEFAULT_RATE = 3.5                          # INR a minute: Sarvam pay-as-you-go, before GST (Pro 3.25, Growth 3.15)
+MAX_RATE = 1000.0
 USAGE_DAYS = 60
 _AUTO = object()
 _EXHAUSTED = re.compile(r"insufficient[_ ]quota|\b402\b", re.I)
@@ -69,17 +72,37 @@ class SystemChecks:
         return data, error
 
     # -- usage: real call records only ---------------------------------------------------------------------------
+    def rate(self) -> float:
+        raw = self.service._get_setting("usage_sarvam_rate")
+        return float(raw) if raw else DEFAULT_RATE
+
+    def set_rate(self, value) -> dict:
+        """Saves the per-minute rate of the Sarvam plan (rupees a minute)."""
+        if isinstance(value, bool) or value is None:
+            raise ValueError("sarvam_rate must be a number")
+        try:
+            n = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("sarvam_rate must be a number") from None
+        if not math.isfinite(n) or not 0 < n <= MAX_RATE:
+            raise ValueError(f"sarvam_rate must be more than 0 and at most {MAX_RATE:g}")
+        self.service._set_setting("usage_sarvam_rate", repr(n))
+        return self.usage()
+
     @staticmethod
-    def _totals(rows: list[dict]) -> dict:
+    def _totals(rows: list[dict], rate: float) -> dict:
+        minutes = sum(billed_minutes(a["connectivity_status"], a["duration_in_seconds"]) for a in rows)
         return {"calls": len(rows), "connected": sum(1 for a in rows if a["connectivity_status"] == "connected"),
-                "billed_minutes": sum(billed_minutes(a["connectivity_status"], a["duration_in_seconds"]) for a in rows)}
+                "billed_minutes": minutes, "amount": round(minutes * rate, 2)}
 
     def usage(self, refresh: bool = False) -> dict:
+        rate = self.rate()
         out = {"configured": self.usage_reader is not None, "error": "", "exhausted": False, "today": None, "week": None,
-               "window": None, "window_days": USAGE_DAYS, "days": [],
+               "window": None, "window_days": USAGE_DAYS, "days": [], "rate": rate, "currency": "INR",
                "note": "Minutes are counted the way Sarvam bills: started 60-second minutes of connected calls. "
-                       "Calls not picked up, busy or failed cost nothing. The credit balance is only on Sarvam's "
-                       "Settings, Billing page."}
+                       "Calls not picked up, busy or failed cost nothing. The amount is an estimate (billed minutes "
+                       "times the rate, before GST); the exact figure and the credit balance are on Sarvam's "
+                       "Settings, Usage and Billing pages."}
         rows, error = self._attempts(refresh)
         if rows is None:
             out["error"] = "" if error == "not configured" else error
@@ -89,10 +112,10 @@ class SystemChecks:
         by_day: dict[str, list[dict]] = {}
         for a in rows:
             by_day.setdefault(_when(a).astimezone(IST).date().isoformat(), []).append(a)
-        out["today"] = self._totals(by_day.get(today.isoformat(), []))
-        out["week"] = self._totals([a for a in rows if _when(a) >= now - timedelta(days=7)])
-        out["window"] = self._totals(rows)
-        out["days"] = [{"date": d, **self._totals(by_day[d])} for d in sorted(by_day, reverse=True)[:14]]
+        out["today"] = self._totals(by_day.get(today.isoformat(), []), rate)
+        out["week"] = self._totals([a for a in rows if _when(a) >= now - timedelta(days=7)], rate)
+        out["window"] = self._totals(rows, rate)
+        out["days"] = [{"date": d, **self._totals(by_day[d], rate)} for d in sorted(by_day, reverse=True)[:14]]
         out["exhausted"] = any(a.get("failure_reason") and _EXHAUSTED.search(a["failure_reason"])
                                and _when(a) >= now - timedelta(days=7) for a in rows)
         return out

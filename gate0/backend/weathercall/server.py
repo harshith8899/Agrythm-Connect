@@ -9,7 +9,8 @@
     POST /api/farmers/import   (CSV text)    POST /api/calls/send-now               (same; /trigger-demo kept as alias)
     GET  /api/callbacks                      GET  /api/weather?lat=..&lon=..
     GET  /api/system/checks                  connection checks: backend, database, weather API, Sarvam, phone line
-    GET  /api/usage                          calls and billed minutes from Sarvam's records (no balance: Sarvam has no API for it)
+    GET  /api/usage   POST /api/usage        calls, billed minutes and an estimated amount from Sarvam's records; POST sets the
+                                             per-minute rate {"sarvam_rate": 3.5} (no balance: Sarvam has no API for it)
 
 Phone numbers are masked in every response and never logged. CORS allows only the origins in GATE0_CORS_ORIGINS
 (default: the local dashboard); set it to the hosted dashboard's address in production. There is no login yet.
@@ -113,6 +114,11 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
                     if not service.start_fire(day):
                         return self._send(409, {"error": "a send is already in progress"})
                     return self._send(202, {"started": True, "date": day.isoformat(), "callMode": service.dialler.mode})
+                if path == "/api/usage":
+                    fields = json.loads(body or "{}")
+                    if not isinstance(fields, dict) or "sarvam_rate" not in fields:
+                        return self._send(400, {"error": 'Field "sarvam_rate" (rupees a minute) is required'})
+                    return self._send(200, system.set_rate(fields["sarvam_rate"]))
                 if path == "/api/orchestrator/auto-dispatch":
                     enabled = json.loads(body or "{}").get("enabled")
                     if enabled is None:

@@ -76,10 +76,11 @@ def test_usage_counts_calls_and_billed_minutes_from_sarvams_records(tmp_path):
                 attempt(60 * 24 * 3, seconds=125),                  # three days ago: in the week, not today
                 attempt(60 * 24 * 20, seconds=30)]                  # twenty days ago: in the window only
     u = system(tmp_path, FakeUsage(attempts)).usage()
-    assert u["today"] == {"calls": 4, "connected": 2, "billed_minutes": 3}              # 45 s -> 1, 61 s -> 2
-    assert u["week"] == {"calls": 5, "connected": 3, "billed_minutes": 6}               # + 125 s -> 3
-    assert u["window"] == {"calls": 6, "connected": 4, "billed_minutes": 7}
-    assert set(u["today"]) == {"calls", "connected", "billed_minutes"}              # real counts only: no balance, no rupees
+    assert u["today"] == {"calls": 4, "connected": 2, "billed_minutes": 3, "amount": 10.5}      # 45 s -> 1, 61 s -> 2
+    assert u["week"] == {"calls": 5, "connected": 3, "billed_minutes": 6, "amount": 21.0}       # + 125 s -> 3
+    assert u["window"] == {"calls": 6, "connected": 4, "billed_minutes": 7, "amount": 24.5}
+    assert u["rate"] == 3.5 and u["currency"] == "INR"                                          # Sarvam pay-as-you-go
+    assert set(u["today"]) == {"calls", "connected", "billed_minutes", "amount"}     # an estimate; there is still no balance
 
 
 def test_daily_breakdown_is_by_india_date(tmp_path):
@@ -87,12 +88,27 @@ def test_daily_breakdown_is_by_india_date(tmp_path):
     days = s.usage()["days"]
     assert [d["date"] for d in days] == ["2026-11-06", "2026-11-05"]
     assert days[0]["billed_minutes"] == 1 and days[1]["billed_minutes"] == 3
+    assert days[0]["amount"] == 3.5 and days[1]["amount"] == 10.5
 
 
 def test_exhausted_credits_are_spotted_from_sarvams_error(tmp_path):
     s = system(tmp_path, FakeUsage([attempt(5, "failed", 0, '{"error":{"code":402,"type":"insufficient_quota_error"}}')]))
     assert s.usage()["exhausted"] is True
     assert system(tmp_path, FakeUsage([attempt(5, "failed", 0, "exotel: not KYC compliant")]), name="b.db").usage()["exhausted"] is False
+
+
+def test_the_rate_can_be_changed_and_the_amounts_follow(tmp_path):
+    s = system(tmp_path, FakeUsage([attempt(10, seconds=45), attempt(20, seconds=61)]))
+    assert s.usage()["today"]["amount"] == 10.5
+    u = s.set_rate(3.15)                                              # a cheaper plan
+    assert u["rate"] == 3.15 and u["today"]["amount"] == 9.45 and u["days"][0]["amount"] == 9.45
+    assert s.usage()["rate"] == 3.15                                  # kept
+
+
+@pytest.mark.parametrize("bad", [-1, 0, "abc", None, True, float("inf"), 100000])
+def test_a_bad_rate_is_rejected(tmp_path, bad):
+    with pytest.raises(ValueError):
+        system(tmp_path).set_rate(bad)
 
 
 def test_a_sarvam_error_is_reported_not_raised(tmp_path):
@@ -181,4 +197,9 @@ def test_api_checks_and_usage(api):
     assert code == 200 and body["overall"] == "ok" and len(body["checks"]) == 5
     code, body = api("/api/usage")
     assert code == 200 and body["today"]["billed_minutes"] == 1
+    assert body["rate"] == 3.5 and body["today"]["amount"] == 3.5
+    code, body = api("/api/usage", json.dumps({"sarvam_rate": 3.25}).encode())
+    assert code == 200 and body["rate"] == 3.25 and body["today"]["amount"] == 3.25
+    assert api("/api/usage", json.dumps({"sarvam_rate": -2}).encode())[0] == 400
+    assert api("/api/usage", b"nope")[0] == 400
     assert api("/api/credits")[0] == 404                       # there is no balance to read or set
