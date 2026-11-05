@@ -23,14 +23,16 @@ from .cli import ENV_FILE, load_env_file
 from .config import Settings
 from .contracts import AttemptStatus, CallAttempt, CallRequest, FarmerDayResult, FinalResult, Language
 from .engine import Ports, final_result, prepare_call
-from .script import weather_variables
+from .script import format_now, weather_variables
 
 
-def push(day: date, ports: Ports, settings: Settings, store: CampaignStore, api: SarvamCampaigns) -> list[str]:
+def push(day: date, ports: Ports, settings: Settings, store: CampaignStore, api: SarvamCampaigns,
+         now: datetime | None = None) -> list[str]:
     camp = store.campaign_for(day)
     if camp is None:
         return [f"{day}: no Sarvam campaign covers this day; run 'campaign create' first"]
     already = store.queued_ids(day)
+    now_text = format_now(now or datetime.now(IST))      # lets the agent confirm a callback's day and time
     calls, rows, skipped = [], [], 0
     for fid in ports.farmers.list_callable_ids(day):
         if fid in already:
@@ -41,7 +43,7 @@ def push(day: date, ports: Ports, settings: Settings, store: CampaignStore, api:
             continue
         f = prepared.farmer
         calls.append(QueuedCall(f.farmer_id, f.phone, _LANG_NAMES[f.language], prepared.message,
-                                weather_variables(f, prepared.weather)))
+                                weather_variables(f, prepared.weather, now_text)))
         rows.append((f.farmer_id, f.language.value, prepared.message, prepared.weather.source))
     if calls:
         cohort_ids = api.stream_cohort(camp["campaign_id"], f"gate0-{day.isoformat()}-{datetime.now():%H%M}", calls)

@@ -40,6 +40,20 @@ def ref(text="Hello. I am an AI.", lang=Language.EN):
     return SarvamAgentVoice().synthesize(text, lang)
 
 
+def test_every_language_has_an_agent_name_and_a_tts_code():
+    from weathercall.adapters.sarvam import _CODES
+    from weathercall.adapters.sarvam_agent import _LANG_NAMES
+    for lang in Language:
+        assert lang in _LANG_NAMES and lang in _CODES, lang
+    assert _LANG_NAMES[Language.TE] == "Telugu" and _CODES[Language.TE] == "te-IN"
+
+
+def test_telugu_call_asks_sarvam_for_telugu():
+    t, http = make([None, "connected"])
+    t.place_call("9876543210", ref("నమస్కారం", Language.TE))
+    assert json.loads(http.requests[0].data)["app_config"]["app_overrides"] == {"initial_language_name": "Telugu"}
+
+
 def test_adapters_fit_ports():
     t, _ = make([])
     assert isinstance(t, P.TelephonyProvider) and isinstance(SarvamAgentVoice(), P.VoiceProvider)

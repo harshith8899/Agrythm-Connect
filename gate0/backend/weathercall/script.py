@@ -2,11 +2,13 @@
 
 The message greets the farmer by name, gives today's temperature, wind, chance of rain and humidity (nothing
 else) for their village or district, and asks whether it was understood. It does not announce that the voice is an
-AI (team decision, 2 Nov 2026); the agent answers honestly if asked. Hindi and Kannada are plain spoken language,
+AI (team decision, 2 Nov 2026); the agent answers honestly if asked. Hindi, Kannada and Telugu are plain spoken language,
 because the farmers understand only their local language.
-Hindi and Kannada wording is a DRAFT and needs native-speaker review (see docs/DECISIONS.md).
+Hindi, Kannada and Telugu wording is a DRAFT and needs native-speaker review (see docs/DECISIONS.md).
 """
 from __future__ import annotations
+
+from datetime import datetime
 
 from .contracts import FarmerContext, Language, WeatherReport
 
@@ -48,7 +50,19 @@ _KN = (
     "ಈ ಹವಾಮಾನ ಮಾಹಿತಿ ನಿಮಗೆ ಅರ್ಥವಾಯಿತೇ? ದಯವಿಟ್ಟು ಹೌದು ಅಥವಾ ಇಲ್ಲ ಎಂದು ಹೇಳಿ."
 )
 
-_TEMPLATES = {Language.HI: _HI, Language.KN: _KN, Language.EN: _EN}
+_TE = (
+    "నమస్కారం {name} గారు. నేను అగ్రిథమ్ నుండి వాతావరణ సమాచారం చెప్పడానికి ఫోన్ చేస్తున్నాను. "
+    "ఈ రోజు {place} ప్రాంతం వాతావరణ సమాచారం ఇది. "
+    "ఉష్ణోగ్రత {tmin} నుండి {tmax} డిగ్రీల మధ్య ఉంటుంది. "
+    "గాలి వేగం గంటకు {wind} కిలోమీటర్ల వరకు ఉంటుంది. "
+    "వర్షం పడే అవకాశం {rain} శాతం ఉంది. "
+    "గాలిలో తేమ {humidity} శాతం ఉంటుంది. "
+    "నేను ప్రతి ఉదయం ఇలాగే వాతావరణ సమాచారం చెప్పడానికి ఫోన్ చేస్తాను. "
+    "ఈ ఫోన్లు మీకు వద్దనుకుంటే, దయచేసి మీ అగ్రిథమ్ సంప్రదింపు వ్యక్తికి చెప్పండి. "
+    "ఈ వాతావరణ సమాచారం మీకు అర్థమైందా? దయచేసి అవును లేదా కాదు అని చెప్పండి."
+)
+
+_TEMPLATES = {Language.HI: _HI, Language.KN: _KN, Language.TE: _TE, Language.EN: _EN}
 
 
 def build_message(farmer: FarmerContext, weather: WeatherReport) -> str:
@@ -58,14 +72,27 @@ def build_message(farmer: FarmerContext, weather: WeatherReport) -> str:
     )
 
 
-def weather_variables(farmer: FarmerContext, weather: WeatherReport) -> dict[str, str]:
+_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+           "November", "December"]
+
+
+def format_now(now: datetime) -> str:
+    """The date and time as the agent can say it, e.g. 'Thursday, 5 November 2026, 09:05 AM'. The agent uses it to
+    confirm a callback's day and morning-or-evening, so the caller passes the current time in India."""
+    hour12 = now.hour % 12 or 12
+    return (f"{_DAYS[now.weekday()]}, {now.day} {_MONTHS[now.month - 1]} {now.year}, "
+            f"{hour12:02d}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}")
+
+
+def weather_variables(farmer: FarmerContext, weather: WeatherReport, now_text: str = "") -> dict[str, str]:
     """The per-farmer values the Sarvam agent speaks from. The names are the agent's declared variables
     (Sarvam rejects any name the agent does not declare), and every value is text."""
     return {
         "farmer_name": farmer.display_name, "place_name": weather.place_name,
         "temp_min_c": str(weather.temp_min_c), "temp_max_c": str(weather.temp_max_c),
         "wind_kmh": str(weather.wind_kmh), "rain_chance_pct": str(weather.rain_chance_pct),
-        "humidity_pct": str(weather.humidity_pct),
+        "humidity_pct": str(weather.humidity_pct), "now_text": now_text,
     }
 
 
