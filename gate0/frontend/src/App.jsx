@@ -25,7 +25,6 @@ function App() {
     lastSynced,
     syncStatus,
     isBackendOnline,
-    sarvamLive,
     errorMessage,
     summaryMetrics,
     autoDispatcher,
@@ -70,9 +69,6 @@ function App() {
         setActiveTab={setActiveTab}
         isOpen={sidebarOpen}
         setIsOpen={setSidebarOpen}
-        syncStatus={syncStatus}
-        isBackendOnline={isBackendOnline}
-        sarvamLive={sarvamLive}
         weatherAlertsCount={summaryMetrics.severeWeatherAlerts}
       />
 
@@ -120,7 +116,10 @@ function App() {
           )}
           {activeTab === 'overview' && (
             <>
-              {/* Top Filter Bar with Calendar Display */}
+              {/* KPI Metrics */}
+              <KpiMetrics metrics={summaryMetrics} />
+
+              {/* Filters, below the summary cards */}
               <TopFilterBar
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
@@ -140,9 +139,6 @@ function App() {
                 availableDistricts={availableDistricts}
                 availableLanguages={availableLanguages}
               />
-
-              {/* KPI Metrics */}
-              <KpiMetrics metrics={summaryMetrics} />
 
               {/* Call History Table */}
               <CallHistoryTable

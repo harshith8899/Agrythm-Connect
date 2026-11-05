@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, RefreshCw, Play, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Menu, RefreshCw, Play, Clock } from 'lucide-react';
 
 export const Header = ({ 
   onToggleSidebar, 
@@ -23,7 +23,7 @@ export const Header = ({
         return 'System Status & Sarvam Usage';
       case 'overview':
       default:
-        return 'Screen C01: Agrythm Connect Call Overview';
+        return 'Call Overview';
     }
   };
 
@@ -66,9 +66,6 @@ export const Header = ({
                 </span>
               )}
             </div>
-            <p className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-              Agrythm Connect • Weather Voice Agent System
-            </p>
           </div>
         </div>
 
@@ -122,22 +119,6 @@ export const Header = ({
               </>
             )}
           </button>
-
-          {/* Cloud Sync Status Badge */}
-          <div className={`hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs ${
-            isBackendOnline
-              ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800'
-              : 'bg-rose-50 border-rose-200 text-rose-700'
-          }`}>
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isBackendOnline ? 'bg-trust-green animate-pulse' : 'bg-rose-600 animate-ping'
-              }`}
-            />
-            <span className="font-semibold">
-              {isBackendOnline ? 'Connected (Port 8000)' : 'Backend Offline (Port 8000)'}
-            </span>
-          </div>
 
           {/* Quick Refresh */}
           <button

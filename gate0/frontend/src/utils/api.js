@@ -56,6 +56,26 @@ export const updateDispatcherStatus = (enabled) =>
     body: JSON.stringify({ enabled }),
   });
 
+const sendJson = async (method, path, payload) => {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  if (!response.ok) throw new Error((body && body.error) || `HTTP ${response.status}`);
+  return body;
+};
+
+/** Adds one farmer typed in by an admin. Consent is only Yes if call_consent is true. */
+export const addFarmer = (fields) => sendJson('POST', '/api/farmers', fields);
+
+/** Changes the fields sent for one farmer (name, phone, language, place, call_consent, active). */
+export const updateFarmer = (farmerId, fields) => sendJson('PUT', `/api/farmers/${encodeURIComponent(farmerId)}`, fields);
+
 /** Uploads a farmers CSV (Farmer ID, Farmer Name, Mobile Number, Village, District, State, Language, Consent). */
 export const importFarmersCsv = async (file) =>
   postJson('/api/farmers/import', { headers: { 'Content-Type': 'text/csv' }, body: await file.text() });

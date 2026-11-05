@@ -4,8 +4,6 @@ import {
   Users,
   CloudRain,
   ShieldCheck,
-  Activity,
-  Radio,
   X
 } from 'lucide-react';
 
@@ -14,29 +12,23 @@ export const Sidebar = ({
   setActiveTab,
   isOpen,
   setIsOpen,
-  syncStatus,
-  isBackendOnline = true,
-  sarvamLive = false,
   weatherAlertsCount = 0
 }) => {
   const navItems = [
     {
       id: 'overview',
-      label: 'Screen C01: Call Logs',
-      sublabel: 'Overview & Telemetry',
+      label: 'Call Logs',
       icon: PhoneCall,
       badge: 'Live',
     },
     {
       id: 'farmers',
       label: 'Farmer Directory',
-      sublabel: 'Profiles & Languages',
       icon: Users,
     },
     {
       id: 'weather',
       label: 'Weather Advisories',
-      sublabel: 'District Alerts & Rain',
       icon: CloudRain,
       badge: weatherAlertsCount > 0
         ? `${weatherAlertsCount} Alert${weatherAlertsCount > 1 ? 's' : ''}`
@@ -48,7 +40,6 @@ export const Sidebar = ({
     {
       id: 'system',
       label: 'System Status',
-      sublabel: 'Connections & Sarvam usage',
       icon: ShieldCheck,
     },
   ];
@@ -99,24 +90,6 @@ export const Sidebar = ({
           </button>
         </div>
 
-        {/* Voice Agent Context Badge */}
-        <div className="mx-4 mt-4 p-3 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <Radio className={`w-4 h-4 ${sarvamLive ? 'text-trust-green animate-pulse' : 'text-slate-400'}`} />
-            <div>
-              <div className="text-xs font-bold text-slate-800">Weather Voice Agent</div>
-              <div className="text-[10px] text-slate-500">Post-Call Monitoring</div>
-            </div>
-          </div>
-          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
-            sarvamLive 
-              ? 'bg-emerald-100 text-trust-green border-emerald-200' 
-              : 'bg-slate-200/80 text-slate-600 border-slate-300'
-          }`}>
-            {sarvamLive ? 'Active' : 'Inactive'}
-          </span>
-        </div>
-
         {/* Navigation items */}
         <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto mt-2">
           <div className="px-3 py-1.5 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
@@ -150,12 +123,6 @@ export const Sidebar = ({
                     >
                       {item.label}
                     </div>
-                    <div
-                      className={`text-[10px] ${isActive ? 'text-slate-300' : 'text-slate-400'
-                        }`}
-                    >
-                      {item.sublabel}
-                    </div>
                   </div>
                 </div>
 
@@ -174,34 +141,6 @@ export const Sidebar = ({
           })}
         </nav>
 
-        {/* Sidebar Footer System Status */}
-        <div className="p-4 border-t border-slate-100 bg-slate-50/50 space-y-2">
-          <div className="flex items-center justify-between text-xs text-slate-600">
-            <span className="flex items-center gap-1.5 text-[11px] font-medium">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isBackendOnline ? 'bg-trust-green' : 'bg-rose-500 animate-ping'
-                }`}
-              />
-              Backend API (Port 8000)
-            </span>
-            <span className={`text-[10px] font-bold uppercase ${
-              isBackendOnline ? 'text-emerald-700' : 'text-rose-600'
-            }`}>
-              {isBackendOnline ? 'Online' : 'Offline'}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between text-[11px] text-slate-500">
-            <span className="flex items-center gap-1">
-              <Activity className="w-3 h-3 text-trust-navy" />
-              SQLite Persistence
-            </span>
-            <span className={`font-semibold ${isBackendOnline ? 'text-trust-green' : 'text-rose-600'}`}>
-              {isBackendOnline ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-        </div>
       </aside>
     </>
   );
