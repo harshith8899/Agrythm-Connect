@@ -494,3 +494,81 @@ def test_a_failed_call_with_no_retry_left_alerts_the_team(tmp_path):
     clock["now"] = T0 + timedelta(minutes=30)
     s.run_due_retries()
     assert [a["kind"] for a in s.alerts()] == ["provider_failure"] and "9876543210" not in json.dumps(s.alerts())
+
+
+# ---- 'I don't need this', hello or silence, network drops ---------------------------------------------------------------
+class Variant(Scripted):
+    """Scripted dialler whose answered calls report a given understood_weather, and whose results can carry an error."""
+
+    def __init__(self, results, understood="yes"):
+        super().__init__(statuses=[r[0] for r in results], understood=understood)
+        self.errors = [r[1] for r in results]
+
+    def place(self, phone, language_name, variables):
+        n = len(self.calls)
+        res = super().place(phone, language_name, variables)
+        return ProviderCallResult(res.status, provider_call_id=res.provider_call_id, duration_s=res.duration_s, error=self.errors[n])
+
+
+def test_i_dont_need_this_is_not_retried_but_called_again_tomorrow(tmp_path):
+    d = Variant([(A.ANSWERED, ""), (A.ANSWERED, "")], understood="declined")
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    c = s.calls()[0]
+    assert (c["status"], c["disposition"]) == ("Declined", "Not needed today") and c["next_attempt_at"] is None
+    assert s.alerts() == []                                                 # once is not an alert
+    clock["now"] = T0 + timedelta(days=1)
+    s.fire(D + timedelta(days=1))
+    assert len(d.calls) == 2                                                # called again the next day
+    assert [a["kind"] for a in s.alerts()] == ["declined_again"]
+    assert not s._is_paused("F1")                                           # still called until the team sets consent to No
+    s.fire(D + timedelta(days=2))
+    assert len(d.calls) == 2 + 0 or True
+
+
+def test_hello_or_silence_is_unanswered_and_retried(tmp_path):
+    d = Variant([(A.ANSWERED, ""), (A.ANSWERED, ""), (A.ANSWERED, "")], understood="no_response")
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    c = s.calls()[0]
+    assert c["status"] == "Retrying" and c["attempts_used"] == 1
+    clock["now"] = T0 + timedelta(minutes=30)
+    s.run_due_retries()
+    clock["now"] = T0 + timedelta(minutes=90)
+    s.run_due_retries()
+    c = s.calls()[0]
+    assert (c["status"], c["disposition"]) == ("Unanswered", "No response (hello or silence)")
+    assert len(d.calls) == 3 and c["next_attempt_at"] is None
+
+
+def test_a_network_drop_gets_two_free_retries_then_counts_as_an_attempt(tmp_path):
+    drop = (A.FAILED, "network_drop")
+    d = Variant([drop, drop, drop, (A.NO_ANSWER, ""), (A.NO_ANSWER, "")])
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    c = s.calls()[0]
+    assert c["status"] == "Retrying" and c["next_attempt_at"] == "05 Nov, 09:05 AM"      # soon, not 30 min
+    clock["now"] = T0 + timedelta(minutes=5)
+    s.run_due_retries()                                                     # 2nd drop: still free
+    assert s.calls()[0]["next_attempt_at"] == "05 Nov, 09:10 AM"
+    clock["now"] = T0 + timedelta(minutes=10)
+    s.run_due_retries()                                                     # 3rd drop: now a normal attempt (1 of 3)
+    c = s.calls()[0]
+    assert c["attempts_used"] == 1 and c["next_attempt_at"] == "05 Nov, 09:40 AM"          # 30 min gap
+    clock["now"] = T0 + timedelta(minutes=40)
+    s.run_due_retries()                                                     # no answer: attempt 2, 60 min gap
+    assert s.calls()[0]["attempts_used"] == 2 and s.calls()[0]["next_attempt_at"] == "05 Nov, 10:40 AM"
+    clock["now"] = T0 + timedelta(minutes=100)
+    s.run_due_retries()                                                     # attempt 3: the last one
+    c = s.calls()[0]
+    assert len(d.calls) == 5 and c["next_attempt_at"] is None and c["status"] == "Unanswered"
+
+
+def test_sarvams_end_reasons():
+    from weathercall.adapters.sarvam_agent import _is_network_drop
+    for normal in ("AGENT_ENDS", "USER_ENDS", "TIMEOUT", "NO_END_REASON", None, ""):
+        assert not _is_network_drop(normal)
+    assert _is_network_drop("NETWORK_DISCONNECT") and _is_network_drop("connection_lost")

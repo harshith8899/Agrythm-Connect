@@ -1,7 +1,7 @@
 """Read-only look at Sarvam's call records: what was dialled, how long each call lasted, why a call failed.
 
-Sarvam documents no endpoint for the credit balance, so the dashboard works it out from these records (call lengths)
-plus a balance a person types in from Sarvam's Settings -> Billing page. Phone numbers in the failure text are masked
+Sarvam documents no endpoint for the credit balance, so the dashboard shows only what these records give (calls,
+billed minutes and an estimated amount); the balance is on Sarvam's Settings -> Billing page. Phone numbers in the failure text are masked
 and the full number Sarvam returns in each record (`user_contact`) is never read.
 """
 from __future__ import annotations

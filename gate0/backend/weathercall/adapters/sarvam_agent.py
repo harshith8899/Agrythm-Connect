@@ -44,6 +44,15 @@ def to_e164(phone: str, country_code: str = "91") -> str:
     raise ValueError("phone number is not a 10-digit Indian mobile or E.164 number")
 
 
+_NORMAL_ENDS = {"", "AGENT_ENDS", "USER_ENDS", "TIMEOUT", "NO_END_REASON"}
+
+
+def _is_network_drop(ended_by) -> bool:
+    """A connected call that ended for a reason other than the agent, the farmer or the time limit was cut by the
+    line (the exact Sarvam value is not documented, so any other end reason counts as a drop)."""
+    return str(ended_by or "").upper() not in _NORMAL_ENDS
+
+
 class SarvamAgentTelephony:
     _NEEDED = ("SARVAM_ORG_ID", "SARVAM_WORKSPACE_ID", "SARVAM_APP_ID", "SARVAM_CONNECTION_ID", "SARVAM_AGENT_PHONE")
 
@@ -106,6 +115,9 @@ class SarvamAgentTelephony:
             if status is None:
                 continue
             reason = item.get("failure_reason") or ""
+            if status is AttemptStatus.ANSWERED and _is_network_drop(item.get("ended_by")):
+                return ProviderCallResult(AttemptStatus.FAILED, provider_call_id=attempt_id,
+                                          duration_s=int(item.get("duration_in_seconds") or 0), error="network_drop")
             return ProviderCallResult(
                 status=status, provider_call_id=attempt_id, duration_s=int(item.get("duration_in_seconds") or 0),
                 error="" if reason in ("", "NO_FAILURE_REASON") else reason[:80],

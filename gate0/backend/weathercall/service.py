@@ -36,6 +36,9 @@ from .script import format_now, weather_variables
 CALL_FROM, CALL_TO = dtime(5, 0), dtime(22, 0)   # callbacks only inside these hours (IST), set by the team on 5 Nov
 GRACE_MINUTES = 30        # a callback not placed within this long after its time is marked missed, not called late
 MAX_RELATIVE_MINUTES = 12 * 60
+NETWORK_DROP = "network_drop"   # set by the Sarvam adapter when a connected call was cut by the network
+MAX_FREE_RETRIES = 2        # a dropped call (network) is retried twice a day without counting as an attempt
+NETWORK_RETRY_MIN = 5
 MAX_RESCHEDULES = 2       # a farmer may move a callback at most twice (team, 5 Nov)
 ALREADY_NOTE = "Send skipped: already called today (one call per farmer per day)"
 DAILY_RUN_TIME = dtime(9, 0)
@@ -54,6 +57,7 @@ CREATE TABLE IF NOT EXISTS dash_callbacks(
   farmer_id TEXT, due_at TEXT, source_date TEXT, status TEXT, note TEXT, attempt_id TEXT, call_summary TEXT,
   understood_weather TEXT, requested_text TEXT, updated_at TEXT, reschedules INT DEFAULT 0, PRIMARY KEY(farmer_id, due_at));
 CREATE TABLE IF NOT EXISTS dash_stops(farmer_id TEXT, call_date TEXT, PRIMARY KEY(farmer_id, call_date));
+CREATE TABLE IF NOT EXISTS dash_declines(farmer_id TEXT, call_date TEXT, PRIMARY KEY(farmer_id, call_date));
 CREATE TABLE IF NOT EXISTS dash_paused(farmer_id TEXT PRIMARY KEY, since TEXT);
 CREATE TABLE IF NOT EXISTS dash_alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, kind TEXT, farmer_id TEXT, text TEXT);
 CREATE TABLE IF NOT EXISTS dash_retries(
@@ -211,6 +215,17 @@ class DashboardService:
             self._alert("stop_calls", fid, "Asked to stop calling on two different days. Calls are stopped; "
                                           "please check consent with the farmer and update it.")
 
+    def _note_decline(self, fid: str, day: date) -> None:
+        """'I don't need this': no retry today, called again tomorrow. From the second day on, the team is told; calls
+        stop only when the team marks the farmer as no consent."""
+        with self.lock:
+            new = self.db.execute("INSERT OR IGNORE INTO dash_declines VALUES(?,?)", (fid, day.isoformat())).rowcount == 1
+            days = self.db.execute("SELECT COUNT(*) FROM dash_declines WHERE farmer_id=?", (fid,)).fetchone()[0]
+            self.db.commit()
+        if new and days >= 2:
+            self._alert("declined_again", fid, f"Said they do not need the weather information on {days} different days. "
+                                               "Please ask the farmer; if they do not want calls, set consent to No.")
+
     # -- farmers -------------------------------------------------------------------------------------------------
     def import_csv(self, text: str) -> dict:
         """Saves the farmers in a CSV or sheet export (Farmer ID, Farmer Name, Mobile Number, Village, District, State,
@@ -314,9 +329,11 @@ class DashboardService:
                    duration_s=res.duration_s, transcript=json.dumps(transcript) if transcript else "", **out)
         if out.get("stop_calls_requested") == "yes":
             self._note_stop(fid, day)
+        if out.get("understood_weather") == "declined":
+            self._note_decline(fid, day)
         if out.get("callback_time") and out.get("stop_calls_requested") != "yes":
             self._schedule_callback(fid, day, out["callback_time"])
-        if not self._plan_retry(fid, day, attempt_no, res.status, out) and res.status is AttemptStatus.FAILED:
+        if not self._plan_retry(fid, day, attempt_no, res.status, out, res.error) and res.status is AttemptStatus.FAILED:
             self._alert("provider_failure", fid,
                         f"The call failed and will not be retried ({scrub(res.error or 'provider error')[:80]}).")
 
@@ -326,25 +343,47 @@ class DashboardService:
             return self.db.execute("SELECT 1 FROM dash_callbacks WHERE farmer_id=? AND source_date=?",
                                    (fid, day.isoformat())).fetchone() is not None
 
-    def _plan_retry(self, fid: str, day: date, attempt_no: int, status: AttemptStatus, out: dict) -> bool:
-        """Plans the next attempt; False when none is due (so the caller can alert on a failed call)."""
-        if self._has_callback(fid, day) or out.get("stop_calls_requested") == "yes":
-            return False
-        if status in (AttemptStatus.NO_ANSWER, AttemptStatus.BUSY) or (
-                status is AttemptStatus.ANSWERED and out.get("understood_weather") in ("no", "unclear")):
-            gaps = RETRY_GAPS_MIN              # not picked up, rejected, busy, or heard but never confirmed
-        elif status is AttemptStatus.FAILED:
-            gaps = FAILURE_RETRY_GAPS_MIN
+    def _attempt_errors(self, fid: str, day: date) -> list[str]:
+        """The error text of each attempt recorded for that farmer and day, in order."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            return [r[0] or "" for r in conn.execute("SELECT error FROM attempts WHERE farmer_id=? AND call_date=? "
+                                                     "ORDER BY attempt_no", (fid, day.isoformat()))]
+        except sqlite3.OperationalError:
+            return []
+        finally:
+            conn.close()
+
+    def _plan_retry(self, fid: str, day: date, attempt_no: int, status: AttemptStatus, out: dict, error: str = "") -> bool:
+        """Plans the next call; False when none is due (so the caller can alert on a failed call). attempt_no is the
+        call's place in the day's sequence; the first MAX_FREE_RETRIES network drops do not count as attempts."""
+        understood = out.get("understood_weather")
+        if self._has_callback(fid, day) or out.get("stop_calls_requested") == "yes" or understood == "declined":
+            return False                       # a callback, a stop request or 'I don't need this': no retry today
+        errors = self._attempt_errors(fid, day)
+        total = max(len(errors), attempt_no)
+        drops = sum(1 for e in errors if e == NETWORK_DROP)
+        counted = total - min(drops, MAX_FREE_RETRIES)
+        free = error == NETWORK_DROP and drops <= MAX_FREE_RETRIES
+        if free:
+            minutes = NETWORK_RETRY_MIN        # the farmer was cut off: ring again soon, attempt count unchanged
         else:
-            return False
-        if attempt_no >= self.settings.max_attempts or attempt_no > len(gaps):
-            return False
-        due = self._now() + timedelta(minutes=gaps[attempt_no - 1])
+            if error == NETWORK_DROP or status in (AttemptStatus.NO_ANSWER, AttemptStatus.BUSY) or (
+                    status is AttemptStatus.ANSWERED and understood in ("no", "unclear", "no_response")):
+                gaps = RETRY_GAPS_MIN          # not picked up, rejected, busy, silent, or heard but never confirmed
+            elif status is AttemptStatus.FAILED:
+                gaps = FAILURE_RETRY_GAPS_MIN
+            else:
+                return False
+            if counted >= self.settings.max_attempts or counted > len(gaps):
+                return False
+            minutes = gaps[counted - 1]
+        due = self._now() + timedelta(minutes=minutes)
         if due.date() != day or not (CALL_FROM <= due.timetz().replace(tzinfo=None) <= CALL_TO):
             return False                       # a retry never runs after the calling window or on another day
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO dash_retries VALUES(?,?,?,?,?,?)", (
-                fid, day.isoformat(), attempt_no + 1, due.isoformat(timespec="seconds"), "pending", ""))
+                fid, day.isoformat(), total + 1, due.isoformat(timespec="seconds"), "pending", ""))
             self.db.commit()
         return True
 
@@ -572,6 +611,10 @@ class DashboardService:
         if status == "answered":
             if has_callback:
                 return "Callback Scheduled", "Callback Requested"
+            if understood == "declined":
+                return "Declined", "Not needed today"
+            if understood == "no_response":
+                return "Unanswered", "No response (hello or silence)"
             if understood == "yes":
                 return "Completed", "Weather Delivered"
             return "Not Confirmed", "Heard, not confirmed"
@@ -618,7 +661,7 @@ class DashboardService:
                 "weather_windspeed": w.get("wind"), "weather_rainfall": w.get("rain"), "weather_humidity": w.get("humidity"),
                 "weather_source": w.get("source", ""), "status": dash_status, "disposition": disposition,
                 "note": scrub(note or ""), "retry_count": max(len(attempts) - 1, 0), "duration_seconds": dur or 0,
-                "attempts_used": len(attempts), "max_attempts": self.settings.max_attempts,
+                "attempts_used": len(attempts) - min(sum(1 for x in attempts if x["error_message"] == NETWORK_DROP), MAX_FREE_RETRIES), "max_attempts": self.settings.max_attempts,
                 "next_attempt_at": datetime.fromisoformat(retry_at).strftime("%d %b, %I:%M %p") if retry_at else None,
                 "scheduled_callback_time": cb_due.strftime("%d %b, %I:%M %p") if cb_due else None,
                 "callback_status": cb[1] if cb else None, "callback_requested_text": cb_text or "",
