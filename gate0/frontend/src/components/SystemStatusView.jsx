@@ -29,7 +29,7 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   const [loading, setLoading] = useState(false);
   const [rateInput, setRateInput] = useState('');
   const [rateMessage, setRateMessage] = useState(null);
-  const [open, setOpen] = useState({}); // check id -> true/false; a failing check opens by itself
+  const [checksOpen, setChecksOpen] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -66,6 +66,7 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   };
 
   const overallOk = report && report.overall === 'ok';
+  const okCount = report ? report.checks.filter((c) => c.status === 'ok').length : 0;
 
   return (
     <div className="space-y-6">
@@ -106,31 +107,44 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
         </div>
       )}
 
-      {/* The connections */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100">
-        {(report ? report.checks : []).map((c) => {
-          const style = STATUS_STYLE[c.status] || STATUS_STYLE.off;
-          const Icon = style.icon;
-          const isOpen = open[c.id] ?? c.status === 'fail';
-          return (
-            <div key={c.id}>
-              <button
-                type="button"
-                onClick={() => setOpen((prev) => ({ ...prev, [c.id]: !isOpen }))}
-                aria-expanded={isOpen}
-                className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50 cursor-pointer"
-              >
-                <Icon className={`w-5 h-5 shrink-0 ${style.color}`} />
-                <span className="text-sm font-bold text-slate-900">{c.name}</span>
-                <span className={`text-[10px] font-bold uppercase ${style.color}`}>{style.label}</span>
-                {c.ms != null && <span className="text-[10px] text-slate-400">{c.ms} ms</span>}
-                <ChevronDown className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {isOpen && <p className="text-xs text-slate-600 px-4 pb-4 pl-12 break-words">{c.detail}</p>}
+      {/* The connections: one dropdown for the whole group */}
+      {report && (
+        <div className="bg-white rounded-2xl border border-slate-200/80">
+          <button
+            type="button"
+            onClick={() => setChecksOpen(!checksOpen)}
+            aria-expanded={checksOpen}
+            className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50 rounded-2xl cursor-pointer"
+          >
+            <span className="text-sm font-bold text-slate-900">Connections</span>
+            <span className={`text-xs font-semibold ${okCount === report.checks.length ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {okCount} of {report.checks.length} OK
+            </span>
+            <ChevronDown className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${checksOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {checksOpen && (
+            <div className="divide-y divide-slate-100 border-t border-slate-100">
+              {report.checks.map((c) => {
+                const style = STATUS_STYLE[c.status] || STATUS_STYLE.off;
+                const Icon = style.icon;
+                return (
+                  <div key={c.id} className="flex items-start gap-3 p-4">
+                    <Icon className={`w-5 h-5 mt-0.5 shrink-0 ${style.color}`} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-900">{c.name}</span>
+                        <span className={`text-[10px] font-bold uppercase ${style.color}`}>{style.label}</span>
+                        {c.ms != null && <span className="text-[10px] text-slate-400">{c.ms} ms</span>}
+                      </div>
+                      <p className="text-xs text-slate-600 mt-0.5 break-words">{c.detail}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Usage from Sarvam's own call records */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-5 space-y-4">
