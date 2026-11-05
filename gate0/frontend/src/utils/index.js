@@ -2,6 +2,7 @@ export * from './constants';
 export * from './csvParser';
 export * from './googleSheets';
 export * from './callAnalytics';
+export * from './transcriptTranslation';
 
 /**
  * Masks a phone number for user privacy in UI presentation (e.g. +91 98XXX XX001).
