@@ -17,8 +17,9 @@ Built with React 18, Vite and Tailwind CSS. No data is kept in the browser; it a
 - **Farmer Directory:** the farmers in the database, with an **Import farmers (CSV)** button. Phone numbers are masked.
 - **Weather Advisories:** the weather facts sent to each district (facts only, no farming advice).
 - **System Status:** one page that shows whether the backend, database, weather API (Open-Meteo), Sarvam and the phone
-  line (Exotel) are working, with the reason when one is not, plus Sarvam usage (calls and billed minutes today, 7 days
-  and 60 days, and per day). There is no credit balance: Sarvam has no API for it, so it is only on Sarvam's Settings, Billing page.
+  line (Exotel) are working, with the reason when one is not, plus Sarvam usage: an estimated amount in rupees, calls and billed minutes for today,
+  7 days and 60 days, and per day. The amount is billed minutes times a per-minute rate you can change on the page (default
+  ₹3.50, Sarvam pay-as-you-go, before GST). There is no credit balance: Sarvam has no API for it, so it is only on Sarvam's Settings, Billing page.
 - **Header:** **Send now** places today's calls for every eligible farmer (it asks first when calls are real, and says
   "simulated" when no real calls are placed). **Auto Dispatcher** switches the daily 9:00 AM send on or off (off by default).
 
@@ -52,7 +53,7 @@ GATE0_CORS_ORIGINS=https://your-dashboard.example.com python -m weathercall.serv
 | `GET /api/orchestrator/status`, `POST /api/orchestrator/auto-dispatch` | Mode (real or simulated), last send, daily auto-send switch |
 | `GET /api/weather?lat=&lon=` | Today's weather for a place |
 | `GET /api/system/checks` | Backend, database, weather API, Sarvam and phone line: ok, fail or not set up |
-| `GET /api/usage` | Calls and billed minutes from Sarvam's call records |
+| `GET /api/usage`, `POST /api/usage` | Calls, billed minutes and the estimated amount from Sarvam's call records; POST saves the per-minute rate |
 
 Phone numbers are masked in every response. There is no login yet; it must be added before the dashboard is exposed.
 

@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, MinusCircle, AlertTriangle } from 'lucide-react';
-import { getSystemChecks, getUsage } from '../utils';
+import { getSystemChecks, getUsage, saveUsageRate } from '../utils';
+
+const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
 const STATUS_STYLE = {
   ok: { icon: CheckCircle2, color: 'text-emerald-600', label: 'OK' },
@@ -11,9 +13,9 @@ const STATUS_STYLE = {
 const UsageCell = ({ title, data }) => (
   <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
     <div className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">{title}</div>
-    <div className="text-2xl font-bold text-slate-900 mt-1">{data ? data.billed_minutes : '-'}</div>
+    <div className="text-2xl font-bold text-slate-900 mt-1">{data ? rupees(data.amount) : '-'}</div>
     <div className="text-[11px] text-slate-500">
-      billed minutes{data ? `, ${data.calls} calls (${data.connected} connected)` : ''}
+      {data ? `${data.billed_minutes} billed minutes, ${data.calls} calls (${data.connected} connected)` : ''}
     </div>
   </div>
 );
@@ -24,6 +26,8 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   const [usage, setUsage] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [rateInput, setRateInput] = useState('');
+  const [rateMessage, setRateMessage] = useState(null);
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -31,6 +35,7 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
       const [checks, use] = await Promise.all([getSystemChecks(refresh), getUsage(refresh)]);
       setReport(checks);
       setUsage(use);
+      setRateInput((prev) => (prev === '' ? String(use.rate) : prev));
       setError('');
     } catch (err) {
       setError(err.message || 'Could not reach the backend');
@@ -44,6 +49,18 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
     const timer = setInterval(() => load(false), 60000);
     return () => clearInterval(timer);
   }, [load]);
+
+  const handleSaveRate = async () => {
+    setRateMessage(null);
+    try {
+      const updated = await saveUsageRate(Number(rateInput));
+      setUsage(updated);
+      setRateInput(String(updated.rate));
+      setRateMessage({ ok: true, text: 'Rate saved.' });
+    } catch (err) {
+      setRateMessage({ ok: false, text: err.message });
+    }
+  };
 
   const overallOk = report && report.overall === 'ok';
 
@@ -97,7 +114,7 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
       <div className="bg-white rounded-2xl border border-slate-200/80 p-5 space-y-4">
         <div>
           <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Sarvam Usage</span>
-          <h3 className="text-base font-bold text-slate-900">Calls and billed minutes</h3>
+          <h3 className="text-base font-bold text-slate-900">Estimated amount, calls and billed minutes</h3>
         </div>
 
         {usage && usage.exhausted && (
@@ -122,6 +139,29 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
               <UsageCell title={`Last ${usage.window_days} days`} data={usage.window} />
             </div>
 
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+              <label htmlFor="rate" className="font-semibold">Rate per billed minute (₹)</label>
+              <input
+                id="rate"
+                type="number"
+                min="0"
+                step="0.05"
+                value={rateInput}
+                onChange={(e) => setRateInput(e.target.value)}
+                className="w-24 px-2 py-1 border border-slate-200 rounded-lg text-xs"
+              />
+              <button
+                onClick={handleSaveRate}
+                className="px-3 py-1 rounded-lg bg-trust-navy text-white font-semibold hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                Save rate
+              </button>
+              {rateMessage && (
+                <span className={rateMessage.ok ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold'}>{rateMessage.text}</span>
+              )}
+              <span className="text-slate-400">Sarvam pay-as-you-go is ₹3.50 (Pro 3.25, Growth 3.15), before GST.</span>
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
@@ -129,7 +169,8 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
                     <th className="py-2 pr-4">Day</th>
                     <th className="py-2 pr-4">Calls</th>
                     <th className="py-2 pr-4">Connected</th>
-                    <th className="py-2">Billed minutes</th>
+                    <th className="py-2 pr-4">Billed minutes</th>
+                    <th className="py-2">Amount (estimate)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -138,7 +179,8 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
                       <td className="py-2 pr-4 font-mono text-slate-700">{d.date}</td>
                       <td className="py-2 pr-4">{d.calls}</td>
                       <td className="py-2 pr-4">{d.connected}</td>
-                      <td className="py-2 font-semibold text-slate-900">{d.billed_minutes}</td>
+                      <td className="py-2 pr-4">{d.billed_minutes}</td>
+                      <td className="py-2 font-semibold text-slate-900">{rupees(d.amount)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -66,6 +66,10 @@ export const getSystemChecks = (refresh = false) => getJson(`${API_BASE}/api/sys
 /** Calls and billed minutes counted from Sarvam's own call records (Sarvam has no balance API). */
 export const getUsage = (refresh = false) => getJson(`${API_BASE}/api/usage${refresh ? '?refresh=1' : ''}`);
 
+/** Saves the per-minute rate of the Sarvam plan (rupees a minute); amounts are billed minutes times this rate. */
+export const saveUsageRate = (sarvamRate) =>
+  postJson('/api/usage', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sarvam_rate: sarvamRate }) });
+
 export const getCallbacks = () => getJson(`${API_BASE}/api/callbacks`);
 
 export const getWeatherParameters = (lat, lon) => getJson(`${API_BASE}/api/weather?lat=${lat}&lon=${lon}`);
