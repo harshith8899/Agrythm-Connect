@@ -8,6 +8,8 @@ Hindi, Kannada and Telugu wording is a DRAFT and needs native-speaker review (se
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from .contracts import FarmerContext, Language, WeatherReport
 
 WORDS_PER_SECOND = 2.4  # rough speaking pace; replaced by real measured length once TTS is connected
@@ -70,14 +72,27 @@ def build_message(farmer: FarmerContext, weather: WeatherReport) -> str:
     )
 
 
-def weather_variables(farmer: FarmerContext, weather: WeatherReport) -> dict[str, str]:
+_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+           "November", "December"]
+
+
+def format_now(now: datetime) -> str:
+    """The date and time as the agent can say it, e.g. 'Thursday, 5 November 2026, 09:05 AM'. The agent uses it to
+    confirm a callback's day and morning-or-evening, so the caller passes the current time in India."""
+    hour12 = now.hour % 12 or 12
+    return (f"{_DAYS[now.weekday()]}, {now.day} {_MONTHS[now.month - 1]} {now.year}, "
+            f"{hour12:02d}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}")
+
+
+def weather_variables(farmer: FarmerContext, weather: WeatherReport, now_text: str = "") -> dict[str, str]:
     """The per-farmer values the Sarvam agent speaks from. The names are the agent's declared variables
     (Sarvam rejects any name the agent does not declare), and every value is text."""
     return {
         "farmer_name": farmer.display_name, "place_name": weather.place_name,
         "temp_min_c": str(weather.temp_min_c), "temp_max_c": str(weather.temp_max_c),
         "wind_kmh": str(weather.wind_kmh), "rain_chance_pct": str(weather.rain_chance_pct),
-        "humidity_pct": str(weather.humidity_pct),
+        "humidity_pct": str(weather.humidity_pct), "now_text": now_text,
     }
 
 

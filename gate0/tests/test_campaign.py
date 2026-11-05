@@ -72,7 +72,7 @@ def test_create_campaign_window_retries_and_timezone():
 def test_push_sends_only_eligible_farmers_with_their_message_once():
     ports, store, api, http = setup([farmer(1), farmer(2, lang=Language.EN, place="Mysuru"),
                                      farmer(3, consent=False), farmer(4, place="Nowhere")])
-    out = push(D, ports, Settings(), store, api)
+    out = push(D, ports, Settings(), store, api, now=datetime(2026, 10, 27, 8, 30, tzinfo=IST))
     users = http.bodies("/cohorts/stream")[0]["users"]
     assert [u["user_identifier"] for u in users] == ["F1", "F2"]
     assert users[0]["user_phone_number"] == "+919876543201"
@@ -81,7 +81,7 @@ def test_push_sends_only_eligible_farmers_with_their_message_once():
     assert users[1]["app_overrides"] == {"initial_language_name": "English"}
     assert users[0]["app_variables"] == {"farmer_name": "Name1", "place_name": "Mandya", "temp_min_c": "21",
                                          "temp_max_c": "32", "wind_kmh": "14", "rain_chance_pct": "20",
-                                         "humidity_pct": "62"}
+                                         "humidity_pct": "62", "now_text": "Tuesday, 27 October 2026, 08:30 AM"}
     assert users[1]["app_variables"]["place_name"] == "Mysuru" and users[1]["app_variables"]["humidity_pct"] == "48"
     assert "98765432" not in json.dumps([u["app_variables"] for u in users])        # no phone number inside variables
     rows = {r.farmer_id: r for r in ports.ledger.status(D).rows}
