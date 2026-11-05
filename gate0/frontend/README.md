@@ -53,6 +53,7 @@ GATE0_CORS_ORIGINS=https://your-dashboard.example.com python -m weathercall.serv
 | `GET /api/orchestrator/status`, `POST /api/orchestrator/auto-dispatch` | Mode (real or simulated), last send, daily auto-send switch |
 | `GET /api/weather?lat=&lon=` | Today's weather for a place |
 | `GET /api/system/checks` | Backend, database, weather API, Sarvam and phone line: ok, fail or not set up |
+| `GET /api/alerts` | Things the team must act on (stop requests, failed calls, skipped runs); shown on System Status |
 | `GET /api/usage`, `POST /api/usage` | Calls, billed minutes and the estimated amount from Sarvam's call records; POST saves the per-minute rate |
 
 Phone numbers are masked in every response. There is no login yet; it must be added before the dashboard is exposed.
