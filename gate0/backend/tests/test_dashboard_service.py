@@ -815,3 +815,42 @@ def test_a_second_send_keeps_the_real_failure_reason(tmp_path):
     again = s.calls()[0]
     assert again["status"] == "Failed" and again["note"] == first["note"] and "already called" not in again["note"]
     assert again["disposition"] == first["disposition"]
+
+# ---- a hosted API needs its token -------------------------------------------------------------------------------------
+@pytest.fixture
+def locked_api(tmp_path):
+    s = make(tmp_path, MockDialler())
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(s, {"*"}, token="s3cret-token"))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def call(path, token=None, data=None):
+        req = urllib.request.Request(base + path, data=data, method="POST" if data is not None else "GET")
+        if token is not None:
+            req.add_header("X-API-Token", token)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+    yield call
+    srv.shutdown()
+
+
+def test_the_api_refuses_calls_without_the_token_but_health_stays_open(locked_api):
+    assert locked_api("/api/health") == 200                      # for the host's health check
+    for path in ("/api/farmers", "/api/calls", "/api/usage", "/api/alerts"):
+        assert locked_api(path) == 401 and locked_api(path, "wrong") == 401
+        assert locked_api(path, "s3cret-token") == 200
+    assert locked_api("/api/calls/send-now", data=b"{}") == 401  # no calls placed without the token
+    assert locked_api("/api/farmers", data=json.dumps(NEW).encode()) == 401
+
+
+def test_run_refuses_a_public_address_without_a_token(tmp_path, monkeypatch):
+    from weathercall import server
+    monkeypatch.setenv("GATE0_API_HOST", "0.0.0.0")
+    monkeypatch.delenv("GATE0_API_TOKEN", raising=False)
+    monkeypatch.setenv("GATE0_DB", str(tmp_path / "x.db"))
+    monkeypatch.setattr(server, "load_env_file", lambda p: None)
+    with pytest.raises(SystemExit, match="GATE0_API_TOKEN"):
+        server.run(port=0)
