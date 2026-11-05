@@ -7,3 +7,4 @@ export * from './CallHistoryTable';
 export * from './CallDetailDrawer';
 export * from './FarmerDirectory';
 export * from './WeatherAlertsView';
+export * from './SystemStatusView';

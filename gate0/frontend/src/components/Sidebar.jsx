@@ -3,6 +3,7 @@ import {
   PhoneCall,
   Users,
   CloudRain,
+  ShieldCheck,
   Activity,
   Radio,
   X
@@ -43,6 +44,12 @@ export const Sidebar = ({
       badgeColor: weatherAlertsCount > 0
         ? 'bg-amber-100 text-amber-800 border border-amber-200'
         : 'bg-slate-100 text-slate-500 border border-slate-200',
+    },
+    {
+      id: 'system',
+      label: 'System Status',
+      sublabel: 'Connections & Sarvam usage',
+      icon: ShieldCheck,
     },
   ];
 

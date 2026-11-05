@@ -8,7 +8,8 @@ import {
   CallHistoryTable, 
   CallDetailDrawer, 
   FarmerDirectory, 
-  WeatherAlertsView
+  WeatherAlertsView,
+  SystemStatusView
 } from './components';
 import { useVoiceAgentData } from './hooks';
 
@@ -167,6 +168,10 @@ function App() {
 
           {activeTab === 'weather' && (
             <WeatherAlertsView callLogs={callLogs} />
+          )}
+
+          {activeTab === 'system' && (
+            <SystemStatusView isBackendOnline={isBackendOnline} />
           )}
         </main>
       </div>

@@ -60,6 +60,12 @@ export const updateDispatcherStatus = (enabled) =>
 export const importFarmersCsv = async (file) =>
   postJson('/api/farmers/import', { headers: { 'Content-Type': 'text/csv' }, body: await file.text() });
 
+/** Backend, database, weather API, Sarvam and the phone line: each ok, fail or off (not set up). */
+export const getSystemChecks = (refresh = false) => getJson(`${API_BASE}/api/system/checks${refresh ? '?refresh=1' : ''}`);
+
+/** Calls and billed minutes counted from Sarvam's own call records (Sarvam has no balance API). */
+export const getUsage = (refresh = false) => getJson(`${API_BASE}/api/usage${refresh ? '?refresh=1' : ''}`);
+
 export const getCallbacks = () => getJson(`${API_BASE}/api/callbacks`);
 
 export const getWeatherParameters = (lat, lon) => getJson(`${API_BASE}/api/weather?lat=${lat}&lon=${lon}`);
