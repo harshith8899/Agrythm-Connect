@@ -2,6 +2,8 @@
 
 Gate Zero calls through a Sarvam Voice Agent. Our code builds the weather message, including the AI disclosure. Sarvam dials the farmer, and the agent speaks that message as its first line. The result (answered, no answer, busy or failed) is read back from Sarvam's Analytics API.
 
+Run the Python commands in this guide from `gate0/backend`.
+
 ## 1. Dashboard setup (one time)
 1. **Phone number.** Under Deploy → Phone numbers, rent a number from Sarvam or connect Exotel, Plivo or another provider. Note the **connection ID** and the agent's **phone number** in E.164 form (+91...).
 2. **Agent.** Create an agent named `Agrythm connect - Weather info`. The agent opens the call itself, asks if it is a good time to talk, then gives the weather from per-farmer variables that our backend sends. Settings:

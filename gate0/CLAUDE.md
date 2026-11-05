@@ -19,6 +19,7 @@ Retries, wait between attempts, call time, what to do when weather is missing. D
 
 ## Commands
 ```
+cd backend
 python -m pytest -q
 python -m weathercall.cli --date 2026-11-05
 ```
