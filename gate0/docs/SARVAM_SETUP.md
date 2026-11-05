@@ -7,13 +7,13 @@ Gate Zero calls through a Sarvam Voice Agent. Our code builds the weather messag
 2. **Agent.** Create an agent named `Agrythm connect - Weather info`. The agent opens the call itself, asks if it is a good time to talk, then gives the weather from per-farmer variables that our backend sends. Settings:
    - **Languages:** Hindi, Kannada, Telugu and English. Do not write a prompt rule that tells the agent to switch language: Sarvam switches by itself and rejects such a rule.
    - **Greeting (intro):** short, with variables, for example: "Hello {{farmer_name}}. I am Chetan Dabke's assistant, calling on behalf of Agrythm to share a short weather update for {{place_name}}. Is this a good time to talk?" Sarvam translates it for Hindi and Kannada.
-   - **Input variables** (all type string, set per call by the backend, names must match `script.weather_variables`): `farmer_name`, `place_name`, `temp_min_c`, `temp_max_c`, `wind_kmh`, `rain_chance_pct`, `humidity_pct`. Sarvam answers HTTP 422 if the backend sends a name the agent does not declare.
+   - **Input variables** (all type string, set per call by the backend, names must match `script.weather_variables`): `farmer_name`, `place_name`, `temp_min_c`, `temp_max_c`, `wind_kmh`, `rain_chance_pct`, `humidity_pct`, and `now_text` (today's date and time in India, from `script.format_now`, so the agent can confirm a callback's day and morning or evening). Sarvam answers HTTP 422 if the backend sends a name the agent does not declare.
    - **Output variables** (filled by Sarvam after each connected call):
      - `call_summary` (string): one or two plain English sentences on whether the farmer heard the update and what they asked. No phone numbers, names of others or advice.
-     - `callback_time` (string): the time the farmer asked to be called back, as 24-hour `HH:MM`, plus the day only if they named one; empty if none.
+     - `callback_time` (string): when the farmer asked to be called back, in one of three forms: `HH:MM` on the 24-hour clock (later today), `tomorrow HH:MM`, or `in N minutes` / `in N hours`; empty if no usable time was settled.
      - `understood_weather` (enum `yes`, `no`, `unclear`).
      - `stop_calls_requested` (enum `yes`, `no`).
-   - **Instruction:** kept in the agent (the committed version is the source of truth). In short: Chetan Dabke's AI assistant for Agrythm; never claims to be human, and says it is an AI only if asked; after "yes, good time" it gives place, lowest and highest temperature, wind, chance of rain and humidity using exactly the variable values; if a value is empty it says the weather is not available and ends; answers weather questions only from those facts, never invents numbers; for anything else says it can only share the weather and ends; no farming, financial or medical advice; no phone numbers or personal details; ends only after the farmer says they are clear, always with the goodbye ("Thank you! Have a good day from Agrythm." in the call's language).
+   - **Instruction:** kept in the agent (the committed version is the source of truth). In short: Chetan Dabke's AI assistant for Agrythm; never claims to be human, and says it is an AI only if asked; after "yes, good time" it gives place, lowest and highest temperature, wind, chance of rain and humidity using exactly the variable values; if a value is empty it says the weather is not available and ends; answers weather questions only from those facts, never invents numbers; for anything else says it can only share the weather and ends; no farming, financial or medical advice; no phone numbers or personal details; a callback request (busy, or "call me later") gets a very short flow: if the day and morning or evening are not clear it asks one question to settle them (naming the real date from `now_text`), then confirms the time in one sentence with thanks and ends; no weather and no comments on being busy; calls only between 8 in the morning and 7 in the evening; ends only after the farmer says they are clear, always with the goodbye ("Thank you! Have a good day from Agrythm." in the call's language).
    - **Tools:** keep **End call** on.
    - **Call settings:** maximum call length 1500 s (the largest Sarvam allows); the agent ends the call itself once the farmer is clear.
    - Commit the version and note the **version number**. Calls use only committed versions, so every change needs a new commit and a new `SARVAM_APP_VERSION`. Do not edit an older version in the dashboard while someone else edits (a save from a stale page overwrites newer changes).
@@ -32,7 +32,7 @@ SARVAM_AGENT_API_KEY=...
 SARVAM_ORG_ID=...
 SARVAM_WORKSPACE_ID=...
 SARVAM_APP_ID=...
-SARVAM_APP_VERSION=6               # the committed agent version in use
+SARVAM_APP_VERSION=8               # the committed agent version in use
 SARVAM_CONNECTION_ID=...
 SARVAM_AGENT_PHONE=+91...
 ```
