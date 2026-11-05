@@ -8,6 +8,8 @@
     GET  /api/farmers                        POST /api/orchestrator/run-now         send today's calls now
     POST /api/farmers/import   (CSV text)    POST /api/calls/send-now               (same; /trigger-demo kept as alias)
     GET  /api/callbacks                      GET  /api/weather?lat=..&lon=..
+    GET  /api/system/checks                  connection checks: backend, database, weather API, Sarvam, phone line
+    GET  /api/usage                          calls and billed minutes from Sarvam's records (no balance: Sarvam has no API for it)
 
 Phone numbers are masked in every response and never logged. CORS allows only the origins in GATE0_CORS_ORIGINS
 (default: the local dashboard); set it to the hosted dashboard's address in production. There is no login yet.
@@ -23,12 +25,15 @@ from pathlib import Path
 
 from .cli import ENV_FILE, load_env_file
 from .service import DashboardService
+from .system import SystemChecks
 
 MAX_BODY = 2 * 1024 * 1024
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
 
-def make_handler(service: DashboardService, origins: set[str]):
+def make_handler(service: DashboardService, origins: set[str], system: SystemChecks | None = None):
+    system = system or SystemChecks(service)
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):            # no request logging: URLs and bodies could hold farmer data
             pass
@@ -81,6 +86,10 @@ def make_handler(service: DashboardService, origins: set[str]):
                     return self._send(200, service.callbacks())
                 if path == "/api/orchestrator/status":
                     return self._send(200, service.status())
+                if path == "/api/system/checks":
+                    return self._send(200, system.checks(refresh="refresh" in q))
+                if path == "/api/usage":
+                    return self._send(200, system.usage(refresh="refresh" in q))
                 if path == "/api/weather":
                     w = service.weather_for(float(q["lat"][0]), float(q["lon"][0]))
                     return self._send(200, w) if w else self._send(404, {"error": "No weather for these coordinates"})
