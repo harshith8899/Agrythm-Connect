@@ -128,7 +128,7 @@ def test_failure_notes_never_hold_phone_numbers(tmp_path):
     class Boom(Scripted):
         def place(self, *a):
             raise ConnectionError("down")
-    s = make(tmp_path, Boom())
+    s = make(tmp_path, Boom(), now=lambda: T0)     # fixed clock: a real one after 21:30 puts the retry past 22:00
     s.import_csv(ONE)
     s.fire(D)
     c = s.calls()[0]
