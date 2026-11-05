@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, CheckCircle2, XCircle, MinusCircle, AlertTriangle } from 'lucide-react';
+import { RefreshCw, CheckCircle2, XCircle, MinusCircle, AlertTriangle, ChevronDown } from 'lucide-react';
 import { getSystemChecks, getUsage, saveUsageRate } from '../utils';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
@@ -28,6 +28,7 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   const [loading, setLoading] = useState(false);
   const [rateInput, setRateInput] = useState('');
   const [rateMessage, setRateMessage] = useState(null);
+  const [open, setOpen] = useState({}); // check id -> true/false; a failing check opens by itself
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -94,17 +95,22 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
         {(report ? report.checks : []).map((c) => {
           const style = STATUS_STYLE[c.status] || STATUS_STYLE.off;
           const Icon = style.icon;
+          const isOpen = open[c.id] ?? c.status === 'fail';
           return (
-            <div key={c.id} className="flex items-start gap-3 p-4">
-              <Icon className={`w-5 h-5 mt-0.5 shrink-0 ${style.color}`} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-slate-900">{c.name}</span>
-                  <span className={`text-[10px] font-bold uppercase ${style.color}`}>{style.label}</span>
-                  {c.ms != null && <span className="text-[10px] text-slate-400">{c.ms} ms</span>}
-                </div>
-                <p className="text-xs text-slate-600 mt-0.5 break-words">{c.detail}</p>
-              </div>
+            <div key={c.id}>
+              <button
+                type="button"
+                onClick={() => setOpen((prev) => ({ ...prev, [c.id]: !isOpen }))}
+                aria-expanded={isOpen}
+                className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50 cursor-pointer"
+              >
+                <Icon className={`w-5 h-5 shrink-0 ${style.color}`} />
+                <span className="text-sm font-bold text-slate-900">{c.name}</span>
+                <span className={`text-[10px] font-bold uppercase ${style.color}`}>{style.label}</span>
+                {c.ms != null && <span className="text-[10px] text-slate-400">{c.ms} ms</span>}
+                <ChevronDown className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isOpen && <p className="text-xs text-slate-600 px-4 pb-4 pl-12 break-words">{c.detail}</p>}
             </div>
           );
         })}
