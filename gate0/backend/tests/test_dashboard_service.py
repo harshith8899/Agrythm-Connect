@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import threading
 import time
@@ -98,11 +99,12 @@ def test_calls_json_has_the_shape_the_dashboard_reads(tmp_path):
 
 
 @pytest.mark.parametrize("statuses, understood, expected", [
-    ((A.NO_ANSWER,), "yes", ("Unanswered", "No Answer")), ((A.BUSY,), "yes", ("Unanswered", "Busy")),
+    ((A.NO_ANSWER,), "yes", ("Unanswered", "No Answer or Rejected")), ((A.BUSY,), "yes", ("Unanswered", "Busy")),
     ((A.FAILED,), "yes", ("Failed", "Provider Error")), ((A.ANSWERED,), "unclear", ("Not Confirmed", "Heard, not confirmed")),
     ((A.ANSWERED,), "yes", ("Completed", "Weather Delivered"))])
-def test_dashboard_status_for_each_outcome(tmp_path, statuses, understood, expected):
+def test_dashboard_status_for_each_outcome_when_no_retry_is_left(tmp_path, statuses, understood, expected):
     s = make(tmp_path, Scripted(statuses, understood=understood))
+    s.settings = dataclasses.replace(s.settings, max_attempts=1)          # one attempt: the first outcome is final
     s.import_csv(ONE)
     s.fire(D)
     c = s.calls()[0]
@@ -130,7 +132,7 @@ def test_failure_notes_never_hold_phone_numbers(tmp_path):
     s.import_csv(ONE)
     s.fire(D)
     c = s.calls()[0]
-    assert c["status"] == "Failed" and c["note"] == "ConnectionError" and "9876543210" not in json.dumps(c)
+    assert c["status"] == "Retrying" and c["note"] == "ConnectionError" and "9876543210" not in json.dumps(c)   # retried once
 
 
 # ---- callbacks -------------------------------------------------------------------------------------------------
@@ -294,3 +296,127 @@ def test_api_cors_allows_only_the_listed_origin(api):
     call, _ = api
     assert call("/api/health", origin="http://localhost:5173")[2]["Access-Control-Allow-Origin"] == "http://localhost:5173"
     assert call("/api/health", origin="http://evil.example")[2]["Access-Control-Allow-Origin"] is None
+
+
+# ---- retries: not picked up, rejected, busy, not confirmed, provider failure -----------------------------------------
+T0 = datetime(2026, 11, 5, 9, 0, tzinfo=IST)
+
+
+def timed(tmp_path, dialler, start=T0, name="t.db"):
+    clock = {"now": start}
+    return make(tmp_path, dialler, now=lambda: clock["now"], name=name), clock
+
+
+def test_unanswered_call_retries_after_30_then_60_minutes_and_then_stops(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.NO_ANSWER, A.NO_ANSWER))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    c = s.calls()[0]
+    assert (c["status"], c["disposition"]) == ("Retrying", "Retry scheduled")
+    assert c["attempts_used"] == 1 and c["max_attempts"] == 3 and c["next_attempt_at"] == "05 Nov, 09:30 AM"
+    assert c["attempts_log"][0]["status"] == "No Answer or Rejected"
+    clock["now"] = T0 + timedelta(minutes=29)
+    assert s.run_due_retries() == 0 and len(d.calls) == 1                  # not before the 30 minutes
+    clock["now"] = T0 + timedelta(minutes=30)
+    assert s.run_due_retries() == 1 and len(d.calls) == 2
+    c = s.calls()[0]
+    assert c["status"] == "Retrying" and c["attempts_used"] == 2 and c["next_attempt_at"] == "05 Nov, 10:30 AM"   # +60 min
+    clock["now"] = T0 + timedelta(minutes=90)
+    assert s.run_due_retries() == 1 and len(d.calls) == 3
+    c = s.calls()[0]
+    assert (c["status"], c["disposition"]) == ("Unanswered", "No Answer or Rejected") and c["next_attempt_at"] is None
+    assert c["attempts_used"] == 3 and [a["attempt_number"] for a in c["attempts_log"]] == [1, 2, 3]
+    clock["now"] = T0 + timedelta(days=1)
+    assert s.run_due_retries() == 0 and len(d.calls) == 3                  # never a fourth
+
+
+def test_farmer_picks_up_on_a_retry_and_retries_stop(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    clock["now"] = T0 + timedelta(minutes=30)
+    s.run_due_retries()
+    c = s.calls()[0]
+    assert c["status"] == "Completed" and c["next_attempt_at"] is None and c["attempts_used"] == 2
+    assert s.run_due_retries() == 0 and len(d.calls) == 2
+
+
+def test_rejected_and_busy_are_retried_like_not_picked_up(tmp_path):
+    for status in (A.BUSY, A.NO_ANSWER):
+        d = Scripted((status, A.ANSWERED))
+        s, clock = timed(tmp_path, d, name=f"{status.value}.db")
+        s.import_csv(ONE)
+        s.fire(D)
+        assert s.calls()[0]["status"] == "Retrying"
+
+
+def test_heard_but_not_confirmed_is_retried_but_a_callback_or_stop_request_is_not(tmp_path):
+    s, _ = timed(tmp_path, Scripted((A.ANSWERED,), understood="unclear"))
+    s.import_csv(ONE)
+    s.fire(D)
+    assert s.calls()[0]["status"] == "Retrying"
+    s2, _ = timed(tmp_path, Scripted((A.ANSWERED,), understood="unclear", callback_text="17:30"), name="cb.db")
+    s2.import_csv(ONE)
+    s2.fire(D)
+    assert s2.calls()[0]["status"] == "Callback Scheduled" and s2.calls()[0]["next_attempt_at"] is None
+    s3, _ = timed(tmp_path, Scripted((A.ANSWERED,), understood="unclear", stop="yes"), name="stop.db")
+    s3.import_csv(ONE)
+    s3.fire(D)
+    assert s3.calls()[0]["next_attempt_at"] is None
+
+
+def test_provider_failure_is_retried_once_only(tmp_path):
+    d = Scripted((A.FAILED, A.FAILED, A.FAILED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    assert s.calls()[0]["status"] == "Retrying"
+    clock["now"] = T0 + timedelta(minutes=30)
+    s.run_due_retries()
+    c = s.calls()[0]
+    assert c["status"] == "Failed" and c["next_attempt_at"] is None and len(d.calls) == 2
+    clock["now"] = T0 + timedelta(hours=3)
+    assert s.run_due_retries() == 0 and len(d.calls) == 2
+
+
+def test_a_retry_the_system_missed_is_not_placed_late(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    clock["now"] = T0 + timedelta(minutes=70)                              # due at 09:30, 40 minutes late
+    assert s.run_due_retries() == 0 and len(d.calls) == 1
+    c = s.calls()[0]
+    assert c["status"] == "Unanswered" and c["next_attempt_at"] is None
+
+
+def test_no_retry_is_planned_after_the_calling_window(tmp_path):
+    s, _ = timed(tmp_path, Scripted((A.NO_ANSWER,)), start=datetime(2026, 11, 5, 21, 45, tzinfo=IST))
+    s.import_csv(ONE)
+    s.fire(D)
+    c = s.calls()[0]
+    assert c["status"] == "Unanswered" and c["next_attempt_at"] is None       # 22:15 would be outside 5:00 to 22:00
+
+
+def test_retry_is_dropped_if_consent_is_withdrawn(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    with s.lock:
+        s.db.execute("UPDATE dash_farmers SET consent=0")
+        s.db.commit()
+    clock["now"] = T0 + timedelta(minutes=30)
+    assert s.run_due_retries() == 0 and len(d.calls) == 1
+    assert s.calls()[0]["next_attempt_at"] is None
+
+
+def test_the_normal_send_does_not_call_again_while_retries_are_pending(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED))
+    s, _ = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    s.fire(D)
+    assert len(d.calls) == 1
