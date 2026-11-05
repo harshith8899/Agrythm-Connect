@@ -89,7 +89,7 @@ export const TopFilterBar = ({
     { id: 'yesterday', label: 'Yesterday' },
   ];
 
-  const statuses = ['All Status', 'Completed', 'Callback Scheduled', 'Retrying', 'Not Confirmed', 'Unanswered', 'Failed', 'Skipped'];
+  const statuses = ['All Status', 'Completed', 'Callback Scheduled', 'Retrying', 'Not Confirmed', 'Declined', 'Unanswered', 'Failed', 'Skipped'];
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 space-y-4 shadow-2xs">
