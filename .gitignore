@@ -21,6 +21,11 @@ gate0/data/
 gate0/audio/
 gate0/logs/
 
+# Node
+node_modules/
+dist/
+.vite-temp/
+
 # IDE
 .vscode/
 .idea/

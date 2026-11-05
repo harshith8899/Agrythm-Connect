@@ -25,7 +25,7 @@ from .cli import ENV_FILE, load_env_file
 from .config import Settings
 
 TASK_NAME = "Agrythm Gate0 Weather Call"
-GATE0_DIR = Path(__file__).resolve().parent.parent
+GATE0_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 def task_xml(start: date, days: int, call_time: str, python: str, workdir: Path, mode: str = "direct") -> str:

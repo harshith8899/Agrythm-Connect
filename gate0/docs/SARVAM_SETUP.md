@@ -2,6 +2,8 @@
 
 Gate Zero calls through a Sarvam Voice Agent. Our code builds the weather message, including the AI disclosure. Sarvam dials the farmer, and the agent speaks that message as its first line. The result (answered, no answer, busy or failed) is read back from Sarvam's Analytics API.
 
+Run the Python commands in this guide from `gate0/backend`.
+
 ## 1. Dashboard setup (one time)
 1. **Phone number.** Under Deploy → Phone numbers, rent a number from Sarvam or connect Exotel, Plivo or another provider. Note the **connection ID** and the agent's **phone number** in E.164 form (+91...).
 2. **Agent.** Create an agent named `Agrythm connect - Weather info`. The agent opens the call itself, asks if it is a good time to talk, then gives the weather from per-farmer variables that our backend sends. Settings:
@@ -11,7 +13,7 @@ Gate Zero calls through a Sarvam Voice Agent. Our code builds the weather messag
    - **Output variables** (filled by Sarvam after each connected call):
      - `call_summary` (string): one or two plain English sentences on whether the farmer heard the update and what they asked. No phone numbers, names of others or advice.
      - `callback_time` (string): when the farmer asked to be called back, in one of three forms: `HH:MM` on the 24-hour clock (later today), `tomorrow HH:MM`, or `in N minutes` / `in N hours`; empty if no usable time was settled.
-     - `understood_weather` (enum `yes`, `no`, `unclear`).
+     - `understood_weather` (enum `yes`, `no`, `unclear`, `declined` for 'I don't need this', `no_response` for hello or silence; version 10 and later).
      - `stop_calls_requested` (enum `yes`, `no`).
    - **Instruction:** kept in the agent (the committed version is the source of truth). In short: Chetan Dabke's AI assistant for Agrythm; never claims to be human, and says it is an AI only if asked; after "yes, good time" it gives place, lowest and highest temperature, wind, chance of rain and humidity using exactly the variable values; if a value is empty it says the weather is not available and ends; answers weather questions only from those facts, never invents numbers; for anything else says it can only share the weather and ends; no farming, financial or medical advice; no phone numbers or personal details; a callback request (busy, or "call me later") gets a very short flow: if the day and morning or evening are not clear it asks one question to settle them (naming the real date from `now_text`), then confirms the time in one sentence, says the normal goodbye and ends; no weather and no comments on being busy; calls only between 5 in the morning and 10 at night; ends only after the farmer says they are clear, always with the goodbye ("Thank you! Have a good day from Agrythm." in the call's language).
    - **Tools:** keep **End call** on.
@@ -32,7 +34,7 @@ SARVAM_AGENT_API_KEY=...
 SARVAM_ORG_ID=...
 SARVAM_WORKSPACE_ID=...
 SARVAM_APP_ID=...
-SARVAM_APP_VERSION=9               # the committed agent version in use
+SARVAM_APP_VERSION=10              # the committed agent version in use
 SARVAM_CONNECTION_ID=...
 SARVAM_AGENT_PHONE=+91...
 ```

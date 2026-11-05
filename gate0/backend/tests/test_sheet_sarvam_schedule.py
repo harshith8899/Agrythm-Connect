@@ -29,7 +29,10 @@ def write(tmp_path, body, header=HEADER, name="farmers.csv"):
 
 
 def test_example_sheet_loads_and_fits_the_port():
-    src = SheetFarmerSource(Path(__file__).parent.parent / "farmers.example.csv")
+    csv_path = Path(__file__).parent.parent / "farmers.example.csv"
+    if not csv_path.exists():
+        csv_path = Path(__file__).parent.parent.parent / "farmers.example.csv"
+    src = SheetFarmerSource(csv_path)
     assert isinstance(src, P.FarmerSource) and len(src.list_callable_ids(D)) >= 3
 
 

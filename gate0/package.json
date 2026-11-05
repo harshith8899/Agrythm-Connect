@@ -1,0 +1,16 @@
+{
+  "name": "agrythm-connect-gate0",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "cd backend && python -m weathercall.server",
+    "backend": "cd backend && python -m weathercall.server",
+    "backend:node-legacy": "npm --prefix backend run start",
+    "frontend": "npm --prefix frontend run dev",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
+    "test:backend": "cd backend && python -m pytest -q",
+    "test:node-legacy": "node backend/test_e2e.js"
+  }
+}
