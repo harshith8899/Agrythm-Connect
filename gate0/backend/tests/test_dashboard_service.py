@@ -420,3 +420,77 @@ def test_the_normal_send_does_not_call_again_while_retries_are_pending(tmp_path)
     s.fire(D)
     s.fire(D)
     assert len(d.calls) == 1
+
+
+# ---- team rules of 5 Nov: stop requests, reschedule limit, skipped daily run, alerts ----------------------------------
+def test_stop_calling_on_a_second_day_stops_the_calls_and_alerts_the_team(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED, A.ANSWERED), stop="yes")
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    assert s.alerts() == [] and not s._is_paused("F1")                      # once is not enough
+    s.fire(D)                                                               # same day again: still the same day
+    assert not s._is_paused("F1")
+    clock["now"] = T0 + timedelta(days=1)
+    s.fire(D + timedelta(days=1))
+    assert s._is_paused("F1") and [a["kind"] for a in s.alerts()] == ["stop_calls"]
+    calls_before = len(d.calls)
+    s.fire(D + timedelta(days=2))
+    assert len(d.calls) == calls_before                                     # no longer called
+    s.import_csv(ONE)                                                       # a person updated the sheet
+    assert not s._is_paused("F1")
+
+
+class AlwaysCallback(Scripted):
+    def outputs(self, attempt_id):
+        out = super().outputs(attempt_id)
+        out["callback_time"] = "in 30 minutes"
+        return out
+
+
+def test_a_callback_can_be_moved_twice_and_no_more(tmp_path):
+    d = AlwaysCallback((A.ANSWERED,) * 5)
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)                                                               # asks for a callback (1st callback)
+    for minutes in (35, 70, 105):
+        clock["now"] = T0 + timedelta(minutes=minutes)
+        s.run_due_callbacks()
+    cbs = s.callbacks()
+    assert len(cbs) == 3 and len(d.calls) == 4                              # the call, the callback, 2 reschedules
+    assert [a["kind"] for a in s.alerts()] == ["callback_limit"]
+
+
+def test_the_daily_run_is_skipped_and_the_team_told_when_the_backend_was_down_until_after_the_window(tmp_path):
+    d = Scripted()
+    s, clock = timed(tmp_path, d, start=datetime(2026, 11, 5, 22, 30, tzinfo=IST))
+    s.import_csv(ONE)
+    s.set_auto_dispatch(True)
+    s.tick()
+    assert d.calls == [] and [a["kind"] for a in s.alerts()] == ["run_skipped"]
+    s.tick()
+    assert len(s.alerts()) == 1                                             # once, not every tick
+
+
+def test_the_daily_run_starts_late_when_still_inside_the_window(tmp_path):
+    d = Scripted()
+    s, clock = timed(tmp_path, d, start=datetime(2026, 11, 5, 14, 0, tzinfo=IST))
+    s.import_csv(ONE)
+    s.set_auto_dispatch(True)
+    s.tick()
+    deadline = time.time() + 5
+    while s.running and time.time() < deadline:
+        time.sleep(0.05)
+    time.sleep(0.2)
+    assert len(d.calls) == 1 and s.alerts() == []
+
+
+def test_a_failed_call_with_no_retry_left_alerts_the_team(tmp_path):
+    d = Scripted((A.FAILED, A.FAILED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    assert s.alerts() == []                                                 # a retry is still coming
+    clock["now"] = T0 + timedelta(minutes=30)
+    s.run_due_retries()
+    assert [a["kind"] for a in s.alerts()] == ["provider_failure"] and "9876543210" not in json.dumps(s.alerts())

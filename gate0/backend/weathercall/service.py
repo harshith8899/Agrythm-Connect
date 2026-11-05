@@ -36,6 +36,7 @@ from .script import format_now, weather_variables
 CALL_FROM, CALL_TO = dtime(5, 0), dtime(22, 0)   # callbacks only inside these hours (IST), set by the team on 5 Nov
 GRACE_MINUTES = 30        # a callback not placed within this long after its time is marked missed, not called late
 MAX_RELATIVE_MINUTES = 12 * 60
+MAX_RESCHEDULES = 2       # a farmer may move a callback at most twice (team, 5 Nov)
 ALREADY_NOTE = "Send skipped: already called today (one call per farmer per day)"
 DAILY_RUN_TIME = dtime(9, 0)
 RETRY_GAPS_MIN = (30, 60)        # client rule: 30 min before attempt 2, then 1 hour before attempt 3 (3 attempts)
@@ -51,7 +52,10 @@ CREATE TABLE IF NOT EXISTS dash_results(
   transcript TEXT, updated_at TEXT, PRIMARY KEY(farmer_id, call_date));
 CREATE TABLE IF NOT EXISTS dash_callbacks(
   farmer_id TEXT, due_at TEXT, source_date TEXT, status TEXT, note TEXT, attempt_id TEXT, call_summary TEXT,
-  understood_weather TEXT, requested_text TEXT, updated_at TEXT, PRIMARY KEY(farmer_id, due_at));
+  understood_weather TEXT, requested_text TEXT, updated_at TEXT, reschedules INT DEFAULT 0, PRIMARY KEY(farmer_id, due_at));
+CREATE TABLE IF NOT EXISTS dash_stops(farmer_id TEXT, call_date TEXT, PRIMARY KEY(farmer_id, call_date));
+CREATE TABLE IF NOT EXISTS dash_paused(farmer_id TEXT PRIMARY KEY, since TEXT);
+CREATE TABLE IF NOT EXISTS dash_alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, kind TEXT, farmer_id TEXT, text TEXT);
 CREATE TABLE IF NOT EXISTS dash_retries(
   farmer_id TEXT, call_date TEXT, attempt_no INT, due_at TEXT, status TEXT, note TEXT,
   PRIMARY KEY(farmer_id, call_date, attempt_no));
@@ -111,7 +115,8 @@ class DBFarmers:
 
     def list_callable_ids(self, call_date: date) -> list[str]:
         with self.lock:
-            return [r[0] for r in self.db.execute("SELECT farmer_id FROM dash_farmers ORDER BY farmer_id")]
+            return [r[0] for r in self.db.execute("SELECT farmer_id FROM dash_farmers WHERE farmer_id NOT IN "
+                                                  "(SELECT farmer_id FROM dash_paused) ORDER BY farmer_id")]
 
     def get_context(self, farmer_id: str) -> FarmerContext | None:
         with self.lock:
@@ -131,6 +136,10 @@ class DashboardService:
         self.db = sqlite3.connect(db_path, check_same_thread=False)
         self.lock = threading.Lock()
         self.db.executescript(_SCHEMA)
+        try:                                                    # databases made before the reschedule limit
+            self.db.execute("ALTER TABLE dash_callbacks ADD COLUMN reschedules INT DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         self.settings = Settings.from_env()
         self.dialler, self.note = (dialler, note) if dialler else make_dialler(env)
         e = env if env is not None else os.environ
@@ -172,6 +181,36 @@ class DashboardService:
                 "note": self.note, "weatherSource": "open-meteo (real)" if self.real_weather else "mock",
                 "lastSend": self.last_run}
 
+    # -- alerts for the team, and farmers who asked us to stop -------------------------------------------------------
+    def _alert(self, kind: str, fid: str, text: str) -> None:
+        with self.lock:
+            self.db.execute("INSERT INTO dash_alerts(at, kind, farmer_id, text) VALUES(?,?,?,?)",
+                            (self._now().isoformat(timespec="seconds"), kind, fid, text))
+            self.db.commit()
+
+    def alerts(self, limit: int = 50) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT a.at, a.kind, a.farmer_id, f.name, a.text FROM dash_alerts a "
+                                   "LEFT JOIN dash_farmers f ON f.farmer_id=a.farmer_id ORDER BY a.id DESC LIMIT ?",
+                                   (limit,)).fetchall()
+        return [{"at": r[0], "kind": r[1], "farmer_id": r[2], "farmer_name": r[3] or "", "text": r[4]} for r in rows]
+
+    def _is_paused(self, fid: str) -> bool:
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM dash_paused WHERE farmer_id=?", (fid,)).fetchone() is not None
+
+    def _note_stop(self, fid: str, day: date) -> None:
+        """'Stop calling me' on a second, different day stops the calls and tells a person (who updates consent)."""
+        with self.lock:
+            self.db.execute("INSERT OR IGNORE INTO dash_stops VALUES(?,?)", (fid, day.isoformat()))
+            days = self.db.execute("SELECT COUNT(*) FROM dash_stops WHERE farmer_id=?", (fid,)).fetchone()[0]
+            new = days >= 2 and self.db.execute("INSERT OR IGNORE INTO dash_paused VALUES(?,?)",
+                                                (fid, self._now().isoformat(timespec="seconds"))).rowcount == 1
+            self.db.commit()
+        if new:
+            self._alert("stop_calls", fid, "Asked to stop calling on two different days. Calls are stopped; "
+                                          "please check consent with the farmer and update it.")
+
     # -- farmers -------------------------------------------------------------------------------------------------
     def import_csv(self, text: str) -> dict:
         """Saves the farmers in a CSV or sheet export (Farmer ID, Farmer Name, Mobile Number, Village, District, State,
@@ -191,6 +230,7 @@ class DashboardService:
         with self.lock:
             for f in farmers:
                 village, district, state = extra.get(f.farmer_id, ("", "", ""))
+                self.db.execute("DELETE FROM dash_paused WHERE farmer_id=?", (f.farmer_id,))   # sheet updated by a person
                 self.db.execute("INSERT OR REPLACE INTO dash_farmers VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
                     f.farmer_id, f.display_name, f.phone, f.language.value, village, district, state,
                     f.latitude, f.longitude, int(f.consent), int(f.active)))
@@ -234,6 +274,8 @@ class DashboardService:
                     self.db.commit()
             else:
                 self._save(fid, day, status="skipped", note=reason, mode=self.dialler.mode)
+                if reason == "weather_unavailable":
+                    self._alert("weather_unavailable", fid, "No weather for this farmer today, so no call was made.")
             return reason
         farmer, w = prepared.farmer, prepared.weather
         res, out = self._place(farmer, w)
@@ -270,9 +312,13 @@ class DashboardService:
         self._save(fid, day, status=res.status.value, note=res.error, weather=json.dumps(weather),
                    attempt_id=res.provider_call_id, mode=self.dialler.mode, language=farmer.language.value,
                    duration_s=res.duration_s, transcript=json.dumps(transcript) if transcript else "", **out)
+        if out.get("stop_calls_requested") == "yes":
+            self._note_stop(fid, day)
         if out.get("callback_time") and out.get("stop_calls_requested") != "yes":
             self._schedule_callback(fid, day, out["callback_time"])
-        self._plan_retry(fid, day, attempt_no, res.status, out)
+        if not self._plan_retry(fid, day, attempt_no, res.status, out) and res.status is AttemptStatus.FAILED:
+            self._alert("provider_failure", fid,
+                        f"The call failed and will not be retried ({scrub(res.error or 'provider error')[:80]}).")
 
     # -- retries: 3 attempts, 30 min then 1 hour; a farmer who asked for a callback or to stop is not retried ----------
     def _has_callback(self, fid: str, day: date) -> bool:
@@ -280,25 +326,27 @@ class DashboardService:
             return self.db.execute("SELECT 1 FROM dash_callbacks WHERE farmer_id=? AND source_date=?",
                                    (fid, day.isoformat())).fetchone() is not None
 
-    def _plan_retry(self, fid: str, day: date, attempt_no: int, status: AttemptStatus, out: dict) -> None:
+    def _plan_retry(self, fid: str, day: date, attempt_no: int, status: AttemptStatus, out: dict) -> bool:
+        """Plans the next attempt; False when none is due (so the caller can alert on a failed call)."""
         if self._has_callback(fid, day) or out.get("stop_calls_requested") == "yes":
-            return
+            return False
         if status in (AttemptStatus.NO_ANSWER, AttemptStatus.BUSY) or (
                 status is AttemptStatus.ANSWERED and out.get("understood_weather") in ("no", "unclear")):
             gaps = RETRY_GAPS_MIN              # not picked up, rejected, busy, or heard but never confirmed
         elif status is AttemptStatus.FAILED:
             gaps = FAILURE_RETRY_GAPS_MIN
         else:
-            return
+            return False
         if attempt_no >= self.settings.max_attempts or attempt_no > len(gaps):
-            return
+            return False
         due = self._now() + timedelta(minutes=gaps[attempt_no - 1])
         if due.date() != day or not (CALL_FROM <= due.timetz().replace(tzinfo=None) <= CALL_TO):
-            return                             # a retry never runs after the calling window or on another day
+            return False                       # a retry never runs after the calling window or on another day
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO dash_retries VALUES(?,?,?,?,?,?)", (
                 fid, day.isoformat(), attempt_no + 1, due.isoformat(timespec="seconds"), "pending", ""))
             self.db.commit()
+        return True
 
     def _retry_update(self, fid: str, day: str, attempt_no: int, status: str, note: str = "") -> None:
         with self.lock:
@@ -334,8 +382,8 @@ class DashboardService:
 
     def _retry_one(self, ports: Ports, fid: str, day: date, attempt_no: int) -> str:
         farmer = ports.farmers.get_context(fid)
-        if farmer is None or not farmer.active or not farmer.consent or not farmer.phone:
-            return "not callable (consent, active or phone)"
+        if farmer is None or not farmer.active or not farmer.consent or not farmer.phone or self._is_paused(fid):
+            return "not callable (consent, active, phone or asked to stop)"
         w = ports.weather.get_weather(farmer.place_name, farmer.latitude, farmer.longitude, day)
         if w is None:
             return "weather_unavailable"
@@ -346,7 +394,7 @@ class DashboardService:
                 message_text="(retry)", provider_call_id=res.provider_call_id, duration_s=res.duration_s,
                 error=res.error, weather_source=w.source))
         except sqlite3.IntegrityError:
-            pass
+            ports.ledger.db.rollback()          # a failed insert must not keep the database locked
         ports.ledger.db.execute("UPDATE day_results SET result=?, attempts=? WHERE farmer_id=? AND call_date=?",
                                 (final_result(res.status).value, attempt_no, fid, day.isoformat()))
         ports.ledger.db.commit()
@@ -377,16 +425,19 @@ class DashboardService:
         return True
 
     # -- callbacks: one more call at the time the farmer asked for, never retried ---------------------------------
-    def _schedule_callback(self, fid: str, source_day: date, text: str, now: datetime | None = None) -> None:
+    def _schedule_callback(self, fid: str, source_day: date, text: str, now: datetime | None = None,
+                           reschedules: int = 0) -> None:
         due = parse_callback(text, now or self._now())
         if due is None:
             return
         in_hours = CALL_FROM <= due.timetz().replace(tzinfo=None) <= CALL_TO
         status, note = ("pending", "") if in_hours else ("skipped", "outside calling hours (5:00 to 22:00 IST)")
         with self.lock:
-            self.db.execute("INSERT OR IGNORE INTO dash_callbacks VALUES(?,?,?,?,?,?,?,?,?,?)", (
+            self.db.execute("INSERT OR IGNORE INTO dash_callbacks(farmer_id, due_at, source_date, status, note, attempt_id, "
+                            "call_summary, understood_weather, requested_text, updated_at, reschedules) "
+                            "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
                 fid, due.isoformat(timespec="seconds"), source_day.isoformat(), status, note, "", "", "",
-                scrub(text)[:60], self._now().isoformat(timespec="seconds")))
+                scrub(text)[:60], self._now().isoformat(timespec="seconds"), reschedules))
             self.db.commit()
 
     def _cb_update(self, fid: str, due_at: str, **kw) -> None:
@@ -423,8 +474,8 @@ class DashboardService:
     def _callback_one(self, ports: Ports, fid: str, due_at: str, source_day: date) -> int:
         due_day = datetime.fromisoformat(due_at).date()
         farmer = ports.farmers.get_context(fid)
-        if farmer is None or not farmer.active or not farmer.consent or not farmer.phone:
-            self._cb_update(fid, due_at, status="skipped", note="not callable (consent, active or phone)")
+        if farmer is None or not farmer.active or not farmer.consent or not farmer.phone or self._is_paused(fid):
+            self._cb_update(fid, due_at, status="skipped", note="not callable (consent, active, phone or asked to stop)")
             return 0
         w = ports.weather.get_weather(farmer.place_name, farmer.latitude, farmer.longitude, due_day)
         if w is None:
@@ -444,6 +495,7 @@ class DashboardService:
                     ports.ledger.record_day_result(FarmerDayResult(fid, due_day, final_result(res.status), 1))
                 break
             except sqlite3.IntegrityError:
+                ports.ledger.db.rollback()
                 continue
         out: dict = {}
         if res.status is AttemptStatus.ANSWERED:
@@ -453,6 +505,17 @@ class DashboardService:
                 out = {}
         self._cb_update(fid, due_at, status=res.status.value, note=res.error, attempt_id=res.provider_call_id,
                         call_summary=out.get("call_summary", ""), understood_weather=out.get("understood_weather", ""))
+        if out.get("stop_calls_requested") == "yes":
+            self._note_stop(fid, due_day)
+        elif out.get("callback_time"):                      # asked to be called later again: allowed twice at most
+            with self.lock:
+                used = self.db.execute("SELECT reschedules FROM dash_callbacks WHERE farmer_id=? AND due_at=?",
+                                       (fid, due_at)).fetchone()[0] or 0
+            if used < MAX_RESCHEDULES:
+                self._schedule_callback(fid, source_day, out["callback_time"], reschedules=used + 1)
+            else:
+                self._alert("callback_limit", fid,
+                            f"Asked to move the callback again after {MAX_RESCHEDULES} reschedules; no more callbacks.")
         return 1
 
     def callbacks(self) -> list[dict]:
@@ -472,7 +535,11 @@ class DashboardService:
                 and self._get_setting("last_auto_run_date") != now.date().isoformat() and not self.running):
             self._set_setting("last_auto_run_date", now.date().isoformat())
             self._set_setting("last_auto_run", now.isoformat(timespec="seconds"))
-            self.start_fire(now.date())
+            if now.time() > CALL_TO:                       # backend was down all day: too late to call anyone
+                self._alert("run_skipped", "",
+                            f"Today's calls were skipped: the backend was not running until after {CALL_TO:%H:%M}.")
+            else:
+                self.start_fire(now.date())
 
     def scheduler_loop(self, every: int = 30) -> None:
         import time as _t

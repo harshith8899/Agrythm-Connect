@@ -85,6 +85,8 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
                     return self._send(200, service.farmers())
                 if path == "/api/callbacks":
                     return self._send(200, service.callbacks())
+                if path == "/api/alerts":
+                    return self._send(200, service.alerts())
                 if path == "/api/orchestrator/status":
                     return self._send(200, service.status())
                 if path == "/api/system/checks":
