@@ -39,6 +39,24 @@ export const CallDetailDrawer = ({ call, onClose }) => {
   const isCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested';
   const attempts = Array.isArray(call.attempts_log) ? call.attempts_log : [];
 
+  // Why the call is not finished, in plain words (a rejected call and an unpicked one look the same to the network)
+  const lastAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+  const retryNote = (() => {
+    if (!lastAttempt || !['Retrying', 'Unanswered', 'Not Confirmed', 'Failed'].includes(call.status)) return null;
+    const attemptText = `attempt ${call.attempts_used || attempts.length} of ${call.max_attempts || 3}`;
+    const when = call.next_attempt_at ? `Next try: ${call.next_attempt_at}.` : 'No attempts are left for today.';
+    if (['No Answer or Rejected', 'Busy'].includes(lastAttempt.status)) {
+      return { title: 'Not picked up or rejected', text: `The phone network reports a rejected call and an unpicked call the same way, so each counts as a missed attempt (${attemptText}). ${when}` };
+    }
+    if (lastAttempt.status === 'Answered') {
+      return { title: 'Picked up, not confirmed', text: `The farmer answered but did not confirm they understood the weather (${attemptText}). ${when}` };
+    }
+    if (lastAttempt.status === 'Failed') {
+      return { title: 'Call could not be placed', text: `A provider or number problem. A failed call is retried once, then shown to the team (${attemptText}). ${when}` };
+    }
+    return null;
+  })();
+
   // Parse transcript array or text
   let transcriptItems = [];
   if (Array.isArray(call.transcript)) {
@@ -161,6 +179,16 @@ export const CallDetailDrawer = ({ call, onClose }) => {
                 Callback status: <strong>{call.callback_status || 'pending'}</strong>
                 {call.callback_requested_text ? ` (the farmer said: ${call.callback_requested_text})` : ''}. One call is placed at that time and it is not retried.
               </p>
+            </div>
+          )}
+
+          {/* Why the call is not finished yet */}
+          {retryNote && (
+            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-1">
+              <span className="text-[10px] font-bold tracking-wider text-amber-800 uppercase">
+                {retryNote.title}
+              </span>
+              <p className="text-xs text-amber-900 leading-relaxed">{retryNote.text}</p>
             </div>
           )}
 

@@ -8,7 +8,9 @@ Built with React 18, Vite and Tailwind CSS. No data is kept in the browser; it a
 ## What it shows
 
 - **Call Logs (Screen C01):** one row per farmer per day with the 4 weather values that were sent, status
-  (Completed, Callback Scheduled, Not Confirmed, Unanswered, Failed, Skipped), attempts, duration and callback time.
+  (Completed, Retrying, Callback Scheduled, Not Confirmed, Unanswered, Failed, Skipped), attempts (for example 2 of 3),
+  the next try time, duration and callback time. A rejected call and an unpicked one are shown the same way ("Not picked up or rejected"),
+  because the phone network reports them the same.
   Filters for date, district, language (Hindi, Kannada, Telugu, English) and status.
 - **Call detail panel:** the call result the agent recorded (summary, whether the farmer understood), the weather
   values, the attempt history and the dialogue transcript.

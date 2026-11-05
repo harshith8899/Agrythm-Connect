@@ -229,7 +229,7 @@ export const CallHistoryTable = ({
               const isSelected = selectedCallId === call.call_id;
               const hasCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested';
               const attemptNumber = call.attempts_log?.length || (call.retry_count ? call.retry_count + 1 : 1);
-              const attemptLabel = `Attempt ${attemptNumber}/3`;
+              const attemptLabel = `Attempt ${attemptNumber}/${call.max_attempts || 3}`;
 
               return (
                 <tr
@@ -321,6 +321,16 @@ export const CallHistoryTable = ({
                       {call.disposition && (
                         <span className="text-[10px] text-slate-500 font-medium">
                           {call.disposition}
+                        </span>
+                      )}
+                      {call.next_attempt_at && (
+                        <span className="text-[10px] text-amber-700 font-semibold">
+                          Next try {String(call.next_attempt_at).split(', ')[1] || call.next_attempt_at}
+                        </span>
+                      )}
+                      {call.status === 'Unanswered' && call.attempts_used > 0 && (
+                        <span className="text-[10px] text-slate-400">
+                          after {call.attempts_used} attempt{call.attempts_used > 1 ? 's' : ''}
                         </span>
                       )}
                     </div>
