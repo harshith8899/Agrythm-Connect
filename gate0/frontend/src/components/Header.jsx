@@ -19,17 +19,14 @@ export const Header = ({
         return 'Farmer Profiles Directory';
       case 'weather':
         return 'District Weather Advisories & Alerts';
-      case 'trust_ai':
-        return 'Trust AI Verification & Model Integrity';
-      case 'sync':
-        return 'Google Sheets Sync & Setup';
       case 'overview':
       default:
         return 'Screen C01: Agrythm Connect Call Overview';
     }
   };
 
-  const isAutoEnabled = autoDispatcher?.enabled ?? true;
+  const isAutoEnabled = autoDispatcher?.enabled ?? false;
+  const isLive = Boolean(autoDispatcher?.live);
 
   return (
     <header className="w-full bg-white border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 py-3 sticky top-0 z-30 shadow-2xs">
@@ -105,19 +102,21 @@ export const Header = ({
             }`}
             title={
               !isBackendOnline
-                ? "Backend server (http://localhost:8000) is offline. Start it with 'npm run backend' to run demo."
-                : "Execute immediate manual batch run across test numbers"
+                ? "The backend API is offline. Start it with 'npm run backend'."
+                : isLive
+                  ? "Send today's calls now to every eligible farmer (real calls)"
+                  : "Send today's calls now (simulated: no real calls are placed)"
             }
           >
             {triggeringDemo ? (
               <>
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
-                <span>Running Demo...</span>
+                <span>Sending...</span>
               </>
             ) : (
               <>
                 <Play className={`w-3.5 h-3.5 fill-current ${isBackendOnline ? 'text-emerald-400' : 'text-slate-400'}`} />
-                <span>Start Demo</span>
+                <span>Send now{isLive ? '' : ' (simulated)'}</span>
               </>
             )}
           </button>
@@ -143,7 +142,7 @@ export const Header = ({
             onClick={onRefresh}
             disabled={refreshing}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
-            title="Refresh Live Data from SQLite & Google Sheets"
+            title="Refresh live data from the backend"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-trust-navy' : ''}`} />
             <span className="hidden xl:inline">{refreshing ? 'Syncing...' : 'Refresh'}</span>

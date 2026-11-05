@@ -2,8 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   loadFarmersData, 
   loadCallLogsData, 
-  syncCallUpdateToGoogleSheet,
-  triggerDemoCalls,
+  sendCallsNow,
   getDispatcherStatus,
   updateDispatcherStatus,
   getFarmersReachedMetrics,
@@ -48,17 +47,7 @@ export const useVoiceAgentData = () => {
   const [languageFilter, setLanguageFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // Cloud Writeback settings
-  const [appsScriptUrl, setAppsScriptUrl] = useState(() => {
-    return localStorage.getItem('agrythm_apps_script_url') || '';
-  });
-  const [autoPollInterval, setAutoPollInterval] = useState(15); // in seconds, 0 = off
-
-  // Save Apps Script URL
-  const saveAppsScriptUrl = (url) => {
-    setAppsScriptUrl(url);
-    localStorage.setItem('agrythm_apps_script_url', url);
-  };
+  const autoPollInterval = 15; // seconds between refreshes (3 s while a send is running)
 
   // Primary Fetch Function
   const fetchAllData = useCallback(async (isSilent = false) => {
@@ -78,7 +67,7 @@ export const useVoiceAgentData = () => {
       setLastSynced(new Date());
 
       // Live Backend Health Detection:
-      // If callLogsRes is offline, the backend (http://localhost:8000) is unreachable.
+      // If callLogsRes is offline, the backend API is unreachable.
       const isOnline = callLogsRes.source === 'sqlite_live' || farmersRes.source === 'sqlite_live';
       setIsBackendOnline(isOnline);
       setSyncStatus(isOnline ? 'connected' : 'disconnected');
@@ -92,7 +81,7 @@ export const useVoiceAgentData = () => {
       }
 
       if (!isOnline) {
-        setErrorMessage("Backend server (http://localhost:8000) is offline. Run 'npm run backend' to enable SQLite persistence.");
+        setErrorMessage("Backend API is offline. Run 'npm run backend' to start it.");
       } else {
         setErrorMessage(null);
       }
@@ -121,16 +110,17 @@ export const useVoiceAgentData = () => {
     };
   }, [fetchAllData]);
 
-  // Periodic polling
+  // Periodic polling (faster while a send is running, so results appear as calls finish)
+  const sending = Boolean(autoDispatcher.running);
   useEffect(() => {
     if (!autoPollInterval || autoPollInterval <= 0) return;
 
     const timer = setInterval(() => {
       fetchAllData(true);
-    }, autoPollInterval * 1000);
+    }, (sending ? 3 : autoPollInterval) * 1000);
 
     return () => clearInterval(timer);
-  }, [autoPollInterval, fetchAllData]);
+  }, [autoPollInterval, sending, fetchAllData]);
 
   // Combined Farmer Map for fast lookup
   const farmersMap = useMemo(() => {
@@ -158,17 +148,15 @@ export const useVoiceAgentData = () => {
       const rainVal = call.weather_rainfall != null ? `${call.weather_rainfall}%` : weatherFallback.rainfall_chance;
       const humidityVal = call.weather_humidity != null ? `${call.weather_humidity}%` : weatherFallback.humidity;
 
-      // Status resolution
+      // Status resolution: the backend sends the dashboard's own status words
       const rawStatus = call.status || call.call_status || 'Completed';
-      let normalizedStatus = 'Completed';
-      const s = String(rawStatus).toLowerCase();
-      if (s === 'retrying') normalizedStatus = 'Retrying';
-      else if (s === 'failed') normalizedStatus = 'Failed';
-      else if (s === 'escalated' || s === 'requires escalation') normalizedStatus = 'Escalated';
-      else if (s === 'calling') normalizedStatus = 'Calling';
-      else if (s === 'scheduled') normalizedStatus = 'Scheduled';
-      else if (['unanswered', 'busy', 'no_answer'].includes(s)) normalizedStatus = 'Retrying';
-      else normalizedStatus = 'Completed';
+      const statusWords = {
+        'completed': 'Completed', 'answered': 'Completed', 'callback scheduled': 'Callback Scheduled',
+        'not confirmed': 'Not Confirmed', 'unanswered': 'Unanswered', 'busy': 'Unanswered', 'no_answer': 'Unanswered',
+        'retrying': 'Retrying', 'failed': 'Failed', 'skipped': 'Skipped', 'escalated': 'Escalated',
+        'requires escalation': 'Escalated', 'calling': 'Calling', 'scheduled': 'Scheduled',
+      };
+      const normalizedStatus = statusWords[String(rawStatus).toLowerCase()] || String(rawStatus);
 
       const retryCount = call.retry_count || 0;
       const attemptNumber = call.attempts_log?.length || (retryCount + 1);
@@ -217,7 +205,7 @@ export const useVoiceAgentData = () => {
         wind: windVal,
         rainfall_chance: rainVal,
         humidity: humidityVal,
-        weather_forecast: call.weather_forecast || (call.weather_rainfall >= 50 ? 'Rain Alert' : 'Partly Cloudy'),
+        weather_forecast: call.weather_forecast || (call.weather_rainfall == null ? 'No weather' : (call.weather_rainfall >= 50 ? 'Rain Alert' : 'Low rain chance')),
         advisory_summary: advisorySummary,
 
         // Status, Dispositions & Attempts
@@ -244,9 +232,9 @@ export const useVoiceAgentData = () => {
     return Array.from(set).sort();
   }, [farmers, enrichedCallLogs]);
 
-  // Supported voice agent languages (strictly Hindi and English)
+  // Supported voice agent languages
   const availableLanguages = useMemo(() => {
-    const langs = new Set(['English', 'Hindi', 'Kannada']);
+    const langs = new Set(['English', 'Hindi', 'Kannada', 'Telugu']);
     farmers.forEach(f => {
       if (f.preferred_language) langs.add(f.preferred_language);
       if (f.primary_language) langs.add(f.primary_language);
@@ -304,42 +292,18 @@ export const useVoiceAgentData = () => {
     });
   }, [enrichedCallLogs, searchQuery, districtFilter, languageFilter, statusFilter, dateFilter, customDate]);
 
-  // Summary Metrics calculations purely from SQLite and Sheet records
+  // Summary metrics calculated from the call records the backend returns
   const summaryMetrics = useMemo(() => {
     const totalCalls = enrichedCallLogs.length;
     const completedCount = enrichedCallLogs.filter(c => c.status === 'Completed').length;
-    const retryingCount = enrichedCallLogs.filter(c => c.status === 'Retrying').length;
+    const retryingCount = enrichedCallLogs.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length;
     const failedCount = enrichedCallLogs.filter(c => c.status === 'Failed').length;
-    const escalationCount = enrichedCallLogs.filter(c => c.status === 'Escalated' || c.disposition === 'Non-Weather Inquiry').length;
+    const needsAttentionCount = enrichedCallLogs.filter(c => ['Failed', 'Not Confirmed'].includes(c.status)).length;
+    const escalationCount = needsAttentionCount;
     const callbackCount = enrichedCallLogs.filter(c => Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested').length;
 
-    // Callbacks Scheduled logic:
-    // Tracks farmers who requested a callback and have not yet completed a follow-up call.
-    // If a farmer requests a callback, counter increments.
-    // If a subsequent call to that farmer completes (weather delivered), counter decrements.
-    const farmerCallbackState = new Map();
-    const sortedLogs = [...enrichedCallLogs].sort((a, b) => {
-      const timeA = new Date(a.created_at || a.call_date || 0).getTime();
-      const timeB = new Date(b.created_at || b.call_date || 0).getTime();
-      return timeA - timeB;
-    });
-
-    sortedLogs.forEach(c => {
-      const fid = c.farmer_id ? String(c.farmer_id).trim() : null;
-      if (!fid) return;
-
-      const hasCallbackRequest = Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested';
-      if (hasCallbackRequest) {
-        farmerCallbackState.set(fid, true);
-      } else if (c.status === 'Completed' && c.disposition === 'Weather Delivered') {
-        farmerCallbackState.set(fid, false);
-      }
-    });
-
-    let callbacksScheduled = 0;
-    farmerCallbackState.forEach(isPending => {
-      if (isPending) callbacksScheduled++;
-    });
+    // Callbacks still waiting to be placed (the backend places each one at the time the farmer asked for)
+    const callbacksScheduled = enrichedCallLogs.filter(c => c.callback_status === 'pending').length;
 
     // Unique farmers reached (answered weather or resolved callback/escalation)
     const reachedFarmerIds = new Set();
@@ -364,6 +328,7 @@ export const useVoiceAgentData = () => {
       retryingCount,
       failedCount,
       escalationCount,
+      needsAttentionCount,
       callbackCount,
       callbacksScheduled,
       severeWeatherAlerts,
@@ -372,16 +337,20 @@ export const useVoiceAgentData = () => {
     };
   }, [enrichedCallLogs, farmers]);
 
-  // Trigger immediate demo batch run across test numbers
+  // Send today's calls now to every eligible farmer
   const triggerDemo = async () => {
     if (!isBackendOnline) {
-      const msg = "Cannot trigger demo: Backend server (http://localhost:8000) is offline. Start it with 'npm run backend'.";
+      const msg = "Cannot send calls: the backend API is offline. Start it with 'npm run backend'.";
       setErrorMessage(msg);
       return;
     }
+    // Real calls cost credits and ring farmers' phones: ask first when calls are live
+    if (autoDispatcher.live && !window.confirm('This will place REAL calls to every eligible farmer today. Continue?')) {
+      return undefined;
+    }
     setTriggeringDemo(true);
     try {
-      const res = await triggerDemoCalls();
+      const res = await sendCallsNow();
       await fetchAllData(true);
       return res;
     } catch (err) {
@@ -399,6 +368,9 @@ export const useVoiceAgentData = () => {
   const toggleAutoDispatcher = async () => {
     try {
       const nextState = !autoDispatcher.enabled;
+      if (nextState && autoDispatcher.live && !window.confirm('Turn on automatic REAL calls every day at 9:00 AM IST?')) {
+        return;
+      }
       const res = await updateDispatcherStatus(nextState);
       setAutoDispatcher(prev => ({ ...prev, ...res }));
     } catch (err) {
@@ -406,31 +378,6 @@ export const useVoiceAgentData = () => {
       // Optimistic fallback toggle
       setAutoDispatcher(prev => ({ ...prev, enabled: !prev.enabled }));
     }
-  };
-
-  // Update Call Log (Local + Google Sheet Sync)
-  const updateCallLog = async (callId, updatedFields) => {
-    setCallLogs(prev => {
-      return prev.map(item => {
-        if (item.call_id === callId) {
-          return { ...item, ...updatedFields };
-        }
-        return item;
-      });
-    });
-
-    if (selectedCall && selectedCall.call_id === callId) {
-      setSelectedCall(prev => ({ ...prev, ...updatedFields }));
-    }
-
-    const payload = {
-      action: 'updateCall',
-      call_id: callId,
-      ...updatedFields,
-    };
-
-    const syncRes = await syncCallUpdateToGoogleSheet(appsScriptUrl, payload);
-    return syncRes;
   };
 
   // Reset all filters
@@ -477,12 +424,7 @@ export const useVoiceAgentData = () => {
     setLanguageFilter,
     statusFilter,
     setStatusFilter,
-    appsScriptUrl,
-    saveAppsScriptUrl,
-    autoPollInterval,
-    setAutoPollInterval,
     fetchAllData,
-    updateCallLog,
     resetFilters,
   };
 };

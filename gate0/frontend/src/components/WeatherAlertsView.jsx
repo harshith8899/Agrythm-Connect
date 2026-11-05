@@ -3,7 +3,7 @@ import {
   CloudRain, 
   ExternalLink 
 } from 'lucide-react';
-import { GOOGLE_SHEETS_CONFIG } from '../utils/constants';
+import { API_CONFIG } from '../utils/constants';
 
 export const WeatherAlertsView = ({ callLogs = [] }) => {
   // Aggregate real district reports from sheet call logs
@@ -49,7 +49,7 @@ export const WeatherAlertsView = ({ callLogs = [] }) => {
         </div>
         <div className="pt-2">
           <a
-            href={GOOGLE_SHEETS_CONFIG.callLogsApiUrl}
+            href={API_CONFIG.callLogsApiUrl}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors"

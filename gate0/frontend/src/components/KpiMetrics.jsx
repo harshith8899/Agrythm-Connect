@@ -13,7 +13,7 @@ export const KpiMetrics = ({ metrics }) => {
   const completedCount = metrics.completedCount || metrics.deliveredCount || 0;
   const callbacksScheduled = metrics.callbacksScheduled ?? metrics.callbackCount ?? 0;
   const retryingCount = metrics.retryingCount || 0;
-  const escalationCount = metrics.escalationCount || 0;
+  const needsAttention = metrics.needsAttentionCount || 0;
 
   const completionPct = totalCalls > 0 ? `${Math.round((completedCount / totalCalls) * 100)}%` : '0%';
 
@@ -48,20 +48,20 @@ export const KpiMetrics = ({ metrics }) => {
 
       {/* 4. Retrying (In Cycle) */}
       <OverviewCard
-        title="Retrying (In Cycle)"
+        title="Unanswered"
         value={retryingCount}
-        subtitle="Unanswered / Busy awaiting attempt 2 or 3"
+        subtitle="No answer or busy, awaiting a retry"
         icon={RefreshCw}
         badge={retryingCount > 0 ? `${retryingCount} Pending` : "Clear"}
       />
 
-      {/* 5. Agronomic Escalations */}
+      {/* 5. Needs attention */}
       <OverviewCard
-        title="Agronomic Escalations"
-        value={escalationCount}
-        subtitle="Escalated to human extension agent"
+        title="Needs Attention"
+        value={needsAttention}
+        subtitle="Failed calls or weather not confirmed by the farmer"
         icon={ShieldAlert}
-        badge={escalationCount > 0 ? `${escalationCount} Escalated` : "Guardrail Active"}
+        badge={needsAttention > 0 ? `${needsAttention} To Check` : "All Clear"}
       />
     </section>
   );

@@ -1,9 +1,46 @@
 import React, { useState } from 'react';
-import { Search, MapPin, Phone, PhoneCall, ExternalLink, Users } from 'lucide-react';
-import { GOOGLE_SHEETS_CONFIG } from '../utils/constants';
-import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage } from '../utils';
+import { Search, MapPin, Phone, PhoneCall, Upload, Users } from 'lucide-react';
+import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv } from '../utils';
 
-export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer }) => {
+// Upload a farmers CSV; the backend saves it (same Farmer ID updates the farmer) and the list reloads.
+const ImportCsvButton = ({ onImported }) => {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const handlePick = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await importFarmersCsv(file);
+      const noLocation = res.no_location && res.no_location.length > 0
+        ? ` No location found for: ${res.no_location.join(', ')} (they will be skipped).` : '';
+      setMessage({ ok: true, text: `Saved ${res.imported} farmers.${noLocation}` });
+      if (onImported) onImported();
+    } catch (err) {
+      setMessage({ ok: false, text: err.message });
+    } finally {
+      setBusy(false);
+      e.target.value = '';
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <label className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer ${busy ? 'opacity-60 pointer-events-none' : ''}`}>
+        <Upload className="w-3.5 h-3.5" />
+        <span>{busy ? 'Importing...' : 'Import farmers (CSV)'}</span>
+        <input type="file" accept=".csv,text/csv" className="hidden" onChange={handlePick} />
+      </label>
+      {message && (
+        <span className={`text-[11px] font-semibold ${message.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{message.text}</span>
+      )}
+    </div>
+  );
+};
+
+export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, onImported }) => {
   const [search, setSearch] = useState('');
 
   // Calculate call counts and today's engagement status purely per actual farmer in Sheet 1
@@ -42,19 +79,11 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer })
             No Farmer Profiles in Database Yet
           </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
-            The directory is connected live to your backend database (SQLite: <code>/api/farmers</code>). Add farmer records to the database or switch back to Google Sheet 1 anytime.
+            Import a CSV with Farmer ID, Farmer Name, Mobile Number, Village, District, State, Preferred Calling Language and Call Consent. Phone numbers are stored on the server and shown masked.
           </p>
         </div>
-        <div className="pt-2 flex items-center justify-center gap-2">
-          <a
-            href={GOOGLE_SHEETS_CONFIG.farmersApiUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors"
-          >
-            <span>Open Farmers API</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+        <div className="pt-2 flex items-center justify-center">
+          <ImportCsvButton onImported={onImported} />
         </div>
       </div>
     );
@@ -72,10 +101,12 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer })
             Farmer Profiles ({farmers.length})
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Loaded directly from Backend Database (SQLite)
+            Loaded from the backend database
           </p>
         </div>
 
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <ImportCsvButton onImported={onImported} />
         <div className="relative min-w-[280px]">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
@@ -85,6 +116,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer })
             placeholder="Search farmers by name, village, district..."
             className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-hidden focus:bg-white focus:border-trust-navy transition-all"
           />
+        </div>
         </div>
       </div>
 
@@ -116,15 +148,15 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer })
                     Talked Today
                   </span>
                 )}
-                {farmer.primary_language && (
+                {(farmer.primary_language || farmer.preferred_language) && (
                   <span
                     className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                      normalizeLanguage(farmer.primary_language) === 'English'
+                      normalizeLanguage(farmer.primary_language || farmer.preferred_language) === 'English'
                         ? 'bg-blue-50 text-blue-700 border-blue-200'
                         : 'bg-amber-50 text-amber-700 border-amber-200'
                     }`}
                   >
-                    {normalizeLanguage(farmer.primary_language)}
+                    {normalizeLanguage(farmer.primary_language || farmer.preferred_language)}
                   </span>
                 )}
               </div>

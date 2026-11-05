@@ -10,7 +10,6 @@ import {
   MessageSquare,
   Clock,
   Calendar,
-  ShieldAlert,
   AlertCircle,
   CheckCircle2,
   RefreshCw,
@@ -22,9 +21,9 @@ import {
 import { maskPhoneNumber, formatTranscriptText, hasIndicScript } from '../utils';
 
 export const CallDetailDrawer = ({ call, onClose }) => {
-  if (!call) return null;
-
   const [transcriptMode, setTranscriptMode] = useState('romanized'); // 'romanized' | 'translated' | 'original'
+
+  if (!call) return null;
 
   const rawTranscript = call.transcript_preview || call.transcript || '';
 
@@ -38,7 +37,6 @@ export const CallDetailDrawer = ({ call, onClose }) => {
   };
 
   const isCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested';
-  const isEscalated = call.status === 'Escalated' || call.disposition === 'Non-Weather Inquiry';
   const attempts = Array.isArray(call.attempts_log) ? call.attempts_log : [];
 
   // Parse transcript array or text
@@ -81,7 +79,7 @@ export const CallDetailDrawer = ({ call, onClose }) => {
               </span>
             </div>
             <p className="text-[11px] font-bold tracking-wider text-slate-500 uppercase mt-0.5">
-              Call Inspection & SQLite Persistence Telemetry
+              Call Inspection
             </p>
           </div>
 
@@ -160,22 +158,39 @@ export const CallDetailDrawer = ({ call, onClose }) => {
                 </span>
               </div>
               <p className="text-[11px] text-amber-700 leading-relaxed pt-0.5">
-                The farmer indicated unavailability during the morning run. An automated callback is queued in the SQLite orchestrator.
+                Callback status: <strong>{call.callback_status || 'pending'}</strong>
+                {call.callback_requested_text ? ` (the farmer said: ${call.callback_requested_text})` : ''}. One call is placed at that time and it is not retried.
               </p>
             </div>
           )}
 
-          {/* Agronomic Boundary Escalation Highlight (if present) */}
-          {isEscalated && (
-            <div className="p-4 rounded-2xl bg-purple-50 border border-purple-200 space-y-1.5">
-              <div className="flex items-center gap-2 text-purple-900 font-bold text-xs uppercase tracking-wider">
-                <ShieldAlert className="w-4 h-4 text-purple-700" />
-                <span>Agronomic Boundary Guardrail Enforced</span>
+          {/* What the voice agent recorded after the call */}
+          {(call.summary || call.understood_weather || call.note || call.call_mode) && (
+            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-2">
+              <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                Call Result
+              </span>
+              {call.summary && (
+                <p className="text-xs text-slate-700 leading-relaxed">{call.summary}</p>
+              )}
+              <div className="flex flex-wrap gap-2 text-[11px]">
+                {call.understood_weather && (
+                  <span className="px-2.5 py-0.5 rounded-full border bg-slate-50 border-slate-200 text-slate-700 font-semibold">
+                    Understood: {call.understood_weather}
+                  </span>
+                )}
+                {call.stop_calls_requested === 'yes' && (
+                  <span className="px-2.5 py-0.5 rounded-full border bg-rose-50 border-rose-200 text-rose-700 font-semibold">
+                    Asked to stop calls
+                  </span>
+                )}
+                {call.call_mode && (
+                  <span className="px-2.5 py-0.5 rounded-full border bg-slate-50 border-slate-200 text-slate-500 font-semibold">
+                    {call.call_mode}
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-purple-800 leading-relaxed">
-                Disposition: <strong>Non-Weather Inquiry</strong>. The farmer requested chemical/pesticide dosage advice.
-                Agrythm Connect strictly limits dialogue to meteorology; advice was declined and the case has been routed to field agronomists.
-              </p>
+              {call.note && <p className="text-[11px] text-slate-500 break-words">{call.note}</p>}
             </div>
           )}
 

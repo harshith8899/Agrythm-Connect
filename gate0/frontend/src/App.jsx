@@ -8,9 +8,7 @@ import {
   CallHistoryTable, 
   CallDetailDrawer, 
   FarmerDirectory, 
-  WeatherAlertsView, 
-  TrustAiAnalyticsView, 
-  CloudSyncSettings 
+  WeatherAlertsView
 } from './components';
 import { useVoiceAgentData } from './hooks';
 
@@ -50,12 +48,7 @@ function App() {
     setLanguageFilter,
     statusFilter,
     setStatusFilter,
-    appsScriptUrl,
-    saveAppsScriptUrl,
-    autoPollInterval,
-    setAutoPollInterval,
     fetchAllData,
-    updateCallLog,
     resetFilters,
   } = useVoiceAgentData();
 
@@ -109,10 +102,10 @@ function App() {
                 </div>
                 <div>
                   <div className="text-xs sm:text-sm font-bold text-rose-950">
-                    Backend Telemetry Server Disconnected (Port 8000)
+                    Backend API Disconnected
                   </div>
                   <div className="text-xs text-rose-700 mt-0.5 leading-relaxed">
-                    Cannot reach <code className="bg-rose-100 px-1 py-0.5 rounded font-mono font-bold text-rose-950">http://localhost:8000</code>. Run <code className="bg-rose-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-950">npm run backend</code> in your terminal to start SQLite persistence and live dispatch triggers.
+                    Cannot reach the API. Run <code className="bg-rose-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-950">npm run backend</code> in your terminal to start it.
                   </div>
                 </div>
               </div>
@@ -168,29 +161,12 @@ function App() {
               farmers={farmers}
               callLogs={callLogs}
               onSelectFarmer={handleSelectFarmerFromDirectory}
+              onImported={() => fetchAllData(false)}
             />
           )}
 
           {activeTab === 'weather' && (
             <WeatherAlertsView callLogs={callLogs} />
-          )}
-
-          {activeTab === 'trust_ai' && (
-            <TrustAiAnalyticsView callLogs={callLogs} />
-          )}
-
-          {activeTab === 'sync' && (
-            <CloudSyncSettings
-              syncStatus={syncStatus}
-              lastSynced={lastSynced}
-              refreshing={refreshing}
-              onRefresh={() => fetchAllData(false)}
-              autoPollInterval={autoPollInterval}
-              setAutoPollInterval={setAutoPollInterval}
-              appsScriptUrl={appsScriptUrl}
-              onSaveAppsScriptUrl={saveAppsScriptUrl}
-              callLogs={callLogs}
-            />
           )}
         </main>
       </div>
@@ -200,7 +176,6 @@ function App() {
         <CallDetailDrawer
           call={selectedCall}
           onClose={() => setSelectedCall(null)}
-          onUpdateCall={updateCallLog}
         />
       )}
     </div>

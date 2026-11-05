@@ -15,15 +15,11 @@ export const TRUST_AI_THEME = {
   card: 'bg-white rounded-2xl border border-slate-200/80 p-5 transition-all duration-200',
 };
 
-// Telemetry & Google Sheets Configuration
-export const GOOGLE_SHEETS_CONFIG = {
-  // SQLite Local API Endpoints (Backend Database)
-  farmersApiUrl: 'http://localhost:8000/api/farmers',
-  callLogsApiUrl: 'http://localhost:8000/api/calls',
+// Backend API. In development the address is empty and Vite proxies /api to the Python backend (see vite.config.js).
+// For a hosted dashboard set VITE_API_URL (for example https://api.example.com) when building.
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
-  // Google Sheets fallback / alternate source
-  farmersSheetId: '1WwdKz4dyAL2tgMaMqStDvm95TQmaYKJtKCMPXYKWFcg',
-  farmersCsvUrl: 'https://docs.google.com/spreadsheets/d/1WwdKz4dyAL2tgMaMqStDvm95TQmaYKJtKCMPXYKWFcg/export?format=csv',
-  callLogsSheetId: '14SwDi8WGten2dzqXDT-w29gbDLBpyDwjHQ8P-DnNds0',
-  callLogsCsvUrl: 'https://docs.google.com/spreadsheets/d/14SwDi8WGten2dzqXDT-w29gbDLBpyDwjHQ8P-DnNds0/export?format=csv',
+export const API_CONFIG = {
+  farmersApiUrl: `${API_BASE}/api/farmers`,
+  callLogsApiUrl: `${API_BASE}/api/calls`,
 };

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { API_BASE } from '../utils/constants';
 
 /**
  * Custom hook for managing dashboard telemetry, orchestrator status, and metrics state
@@ -20,7 +21,7 @@ export const useDashboardData = () => {
   const fetchStatus = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/api/orchestrator/status');
+      const res = await fetch(`${API_BASE}/api/orchestrator/status`);
       if (res.ok) {
         const data = await res.json();
         setOrchestratorStatus(data);

@@ -14,7 +14,7 @@ import {
   RefreshCw,
   PhoneCall
 } from 'lucide-react';
-import { GOOGLE_SHEETS_CONFIG } from '../utils/constants';
+import { API_CONFIG } from '../utils/constants';
 import { maskPhoneNumber } from '../utils';
 
 export const CallHistoryTable = ({ 
@@ -37,10 +37,30 @@ export const CallHistoryTable = ({
             <span>Completed</span>
           </span>
         );
-      case 'retrying':
+      case 'callback scheduled':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+            <Clock className="w-3 h-3 text-blue-600" />
+            <span>Callback Scheduled</span>
+          </span>
+        );
+      case 'not confirmed':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+            <AlertCircle className="w-3 h-3 text-amber-600" />
+            <span>Not Confirmed</span>
+          </span>
+        );
       case 'unanswered':
       case 'busy':
       case 'no_answer':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+            <PhoneOutgoing className="w-3 h-3 text-amber-600" />
+            <span>Unanswered</span>
+          </span>
+        );
+      case 'retrying':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
             <RefreshCw className="w-3 h-3 text-amber-600 animate-spin" />
@@ -105,10 +125,10 @@ export const CallHistoryTable = ({
           
           <div>
             <h3 className="text-base font-bold text-rose-900">
-              Backend Server Offline (Port 8000 Unreachable)
+              Backend API Offline
             </h3>
             <p className="text-xs text-rose-700 max-w-md mx-auto mt-1 leading-relaxed">
-              Unable to query the SQLite persistence layer at <code className="bg-rose-100 px-1 py-0.5 rounded font-mono font-bold text-rose-950">http://localhost:8000/api/calls</code>.
+              Unable to reach <code className="bg-rose-100 px-1 py-0.5 rounded font-mono font-bold text-rose-950">{API_CONFIG.callLogsApiUrl}</code>.
               Run <code className="bg-rose-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-950">npm run backend</code> in your terminal to start the orchestrator and load call logs.
             </p>
           </div>
@@ -134,12 +154,12 @@ export const CallHistoryTable = ({
         
         <div>
           <h3 className="text-base font-bold text-slate-900">
-            {isFiltered ? 'No Matching Call Records' : 'No Call Records in SQLite Persistence Layer Yet'}
+            {isFiltered ? 'No Matching Call Records' : 'No Call Records Yet'}
           </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
             {isFiltered 
               ? 'No voice call logs match the selected search or filter criteria. Try adjusting your filters.'
-              : 'Click "Start Demo" in the header to execute an immediate test batch across test numbers, or wait for the automated 9:00 AM dispatcher.'}
+              : 'Import farmers in the Farmer Directory, then click "Send now" in the header to place today\'s calls.'}
           </p>
         </div>
 
@@ -155,12 +175,12 @@ export const CallHistoryTable = ({
         ) : (
           <div className="pt-2">
             <a
-              href={GOOGLE_SHEETS_CONFIG.callLogsApiUrl}
+              href={API_CONFIG.callLogsApiUrl}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition-colors"
             >
-              <span>View Live SQLite API (/api/calls)</span>
+              <span>View live API (/api/calls)</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           </div>
@@ -183,7 +203,7 @@ export const CallHistoryTable = ({
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>Showing real-time records from SQLite Persistence</span>
+          <span>Showing live records from the backend database</span>
         </div>
       </div>
 

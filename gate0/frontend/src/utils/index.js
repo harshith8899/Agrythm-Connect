@@ -1,6 +1,6 @@
 export * from './constants';
 export * from './csvParser';
-export * from './googleSheets';
+export * from './api';
 export * from './callAnalytics';
 export * from './transcriptTranslation';
 
@@ -45,9 +45,9 @@ export const maskPhoneNumber = (phone) => {
 };
 
 /**
- * Normalizes language codes/names to clearly state only Hindi or English
+ * Normalizes language codes/names to Hindi, Kannada, Telugu or English
  * @param {string} lang 
- * @returns {'Hindi'|'English'}
+ * @returns {'Hindi'|'Kannada'|'Telugu'|'English'}
  */
 export const normalizeLanguage = (lang) => {
   if (!lang) return 'Hindi';
@@ -57,6 +57,9 @@ export const normalizeLanguage = (lang) => {
   }
   if (l.startsWith('kan') || l.startsWith('kn') || l === 'ಕನ್ನಡ') {
     return 'Kannada';
+  }
+  if (l.startsWith('tel') || l === 'te' || l.startsWith('te-') || l === 'తెలుగు') {
+    return 'Telugu';
   }
   return 'Hindi';
 };
