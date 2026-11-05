@@ -1,137 +1,143 @@
-"""Simple local API server streaming Gate Zero SQLite call logs and farmer directory to the React dashboard."""
+"""HTTP API for the React dashboard. Same routes the dashboard already calls, served from the real backend service.
+
+    cd gate0/backend
+    python -m weathercall.server            listens on http://127.0.0.1:8000  (PORT / GATE0_API_HOST to change)
+
+    GET  /api/health                         GET  /api/orchestrator/status
+    GET  /api/calls   GET /api/calls/<id>    POST /api/orchestrator/auto-dispatch   {"enabled": true|false}
+    GET  /api/farmers                        POST /api/orchestrator/run-now         send today's calls now
+    POST /api/farmers/import   (CSV text)    POST /api/calls/send-now               (same; /trigger-demo kept as alias)
+    GET  /api/callbacks                      GET  /api/weather?lat=..&lon=..
+
+Phone numbers are masked in every response and never logged. CORS allows only the origins in GATE0_CORS_ORIGINS
+(default: the local dashboard); set it to the hosted dashboard's address in production. There is no login yet.
+"""
+from __future__ import annotations
+
 import json
 import os
-import sqlite3
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-# Points to gate0/gate0.db or the path set in GATE0_DB
-DEFAULT_DB = Path(__file__).resolve().parent.parent / "database" / "agrythm_connect.db"
-DB_PATH = os.environ.get("GATE0_DB", str(DEFAULT_DB))
+from .cli import ENV_FILE, load_env_file
+from .service import DashboardService
+
+MAX_BODY = 2 * 1024 * 1024
+DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
 
-def init_farmers_table(conn):
-    """Ensures farmers table exists and has default demo records in SQLite."""
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS farmers (
-        farmer_id TEXT PRIMARY KEY,
-        farmer_name TEXT,
-        phone_number TEXT,
-        village TEXT,
-        district TEXT,
-        state TEXT,
-        primary_language TEXT,
-        call_consent TEXT,
-        active TEXT
-    );
-    """)
-    count = cur.execute("SELECT COUNT(*) FROM farmers").fetchone()[0]
-    if count == 0:
-        demo_data = [
-            ("F001", "Ramesh", "+91 98450 12001", "Mandya", "Mandya", "Karnataka", "Hindi", "Yes", "Yes"),
-            ("F002", "Lakshmi", "+91 98450 12002", "Mysuru", "Mysuru", "Karnataka", "English", "Yes", "Yes"),
-            ("F003", "Suresh", "+91 98450 12003", "Hassan", "Hassan", "Karnataka", "Hindi", "Yes", "Yes"),
-            ("F004", "Anita", "+91 98450 12004", "Mandya", "Mandya", "Karnataka", "Hindi", "Yes", "Yes"),
-            ("F005", "Manjunath", "+91 98450 12005", "Hassan", "Hassan", "Karnataka", "Hindi", "Yes", "Yes"),
-            ("F006", "Geeta", "+91 98450 12006", "Mysuru", "Mysuru", "Karnataka", "English", "Yes", "Yes"),
-            ("F007", "Prakash", "+91 98450 12007", "Nowhere", "Bidar", "Karnataka", "Hindi", "Yes", "Yes"),
-            ("F008", "Savitha", "+91 98450 12008", "Mandya", "Mandya", "Karnataka", "Hindi", "No", "Yes"),
-            ("F009", "Basavaraj", "+91 98450 12009", "Mysuru", "Mysuru", "Karnataka", "Hindi", "Yes", "No"),
-            ("F010", "Kavya", "+91 98450 12010", "Hassan", "Hassan", "Karnataka", "English", "Yes", "Yes"),
-        ]
-        cur.executemany("INSERT INTO farmers VALUES (?,?,?,?,?,?,?,?,?)", demo_data)
-        conn.commit()
+def make_handler(service: DashboardService, origins: set[str]):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):            # no request logging: URLs and bodies could hold farmer data
+            pass
 
+        def _cors(self):
+            origin = self.headers.get("Origin", "")
+            if "*" in origins or origin in origins:
+                self.send_header("Access-Control-Allow-Origin", "*" if "*" in origins else origin)
+                self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
 
-class TelemetryHandler(BaseHTTPRequestHandler):
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "*")
-        self.end_headers()
+        def _send(self, code: int, body) -> None:
+            data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self._cors()
+            self.end_headers()
+            self.wfile.write(data)
 
-    def do_GET(self):
-        if self.path.startswith("/api/calls"):
-            if not os.path.exists(DB_PATH):
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(b"[]")
-                return
+        def _body(self) -> str:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > MAX_BODY:
+                raise ValueError("request body is too large")
+            return self.rfile.read(n).decode("utf-8-sig") if n else ""
 
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                conn.row_factory = sqlite3.Row
-                cur = conn.cursor()
-
-                # Joined query: day_results joined with the latest attempt record
-                query = """
-                SELECT 
-                    COALESCE(a.provider_call_id, d.farmer_id || '-' || d.call_date || '-' || COALESCE(a.attempt_no, 1)) AS call_id,
-                    d.farmer_id,
-                    d.call_date,
-                    COALESCE(a.attempt_no, d.attempts) AS attempt_no,
-                    a.status AS attempt_status,
-                    d.result AS call_status,
-                    d.skip_reason,
-                    a.language,
-                    COALESCE(a.duration_s, 0) AS duration_sec,
-                    COALESCE(a.message_text, '') AS message_text,
-                    COALESCE(a.error, '') AS error,
-                    a.weather_source
-                FROM day_results d
-                LEFT JOIN attempts a 
-                    ON d.farmer_id = a.farmer_id 
-                    AND d.call_date = a.call_date
-                ORDER BY d.call_date DESC, a.attempt_no DESC;
-                """
-                rows = [dict(r) for r in cur.execute(query).fetchall()]
-                conn.close()
-
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps(rows).encode("utf-8"))
-            except Exception as e:
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
-
-        elif self.path.startswith("/api/farmers"):
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                conn.row_factory = sqlite3.Row
-                init_farmers_table(conn)
-                cur = conn.cursor()
-                rows = [dict(r) for r in cur.execute("SELECT * FROM farmers ORDER BY farmer_id ASC").fetchall()]
-                conn.close()
-
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps(rows).encode("utf-8"))
-            except Exception as e:
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
-        else:
-            self.send_response(404)
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self._cors()
             self.end_headers()
 
+        def do_GET(self):
+            u = urllib.parse.urlparse(self.path)
+            q = urllib.parse.parse_qs(u.query)
+            path = u.path.rstrip("/")
+            try:
+                if path == "/api/health":
+                    return self._send(200, {"status": "ok", "service": "Agrythm Connect API"})
+                if path == "/api/calls":
+                    calls = service.calls()
+                    limit = int(q["limit"][0]) if "limit" in q else None
+                    return self._send(200, calls[:limit] if limit else calls)
+                if path.startswith("/api/calls/"):
+                    call = service.call(urllib.parse.unquote(path[len("/api/calls/"):]))
+                    return self._send(200, call) if call else self._send(404, {"error": "Call not found"})
+                if path == "/api/farmers":
+                    return self._send(200, service.farmers())
+                if path == "/api/callbacks":
+                    return self._send(200, service.callbacks())
+                if path == "/api/orchestrator/status":
+                    return self._send(200, service.status())
+                if path == "/api/weather":
+                    w = service.weather_for(float(q["lat"][0]), float(q["lon"][0]))
+                    return self._send(200, w) if w else self._send(404, {"error": "No weather for these coordinates"})
+            except (KeyError, ValueError):
+                return self._send(400, {"error": "bad request"})
+            except Exception:
+                return self._send(500, {"error": "server error"})
+            self._send(404, {"error": "not found"})
 
-def run(port=8000):
-    server = HTTPServer(("0.0.0.0", port), TelemetryHandler)
-    print(f"Gate Zero SQLite Telemetry API live on http://localhost:{port}/api/calls & /api/farmers")
-    server.serve_forever()
+        def do_POST(self):
+            path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            try:
+                body = self._body()
+                if path == "/api/farmers/import":
+                    try:
+                        return self._send(200, service.import_csv(body))
+                    except ValueError as exc:         # messages name rows and IDs, never phone numbers
+                        return self._send(400, {"error": str(exc)})
+                if path in ("/api/calls/send-now", "/api/calls/trigger-demo", "/api/orchestrator/run-now"):
+                    day = service._now().date()
+                    if not service.start_fire(day):
+                        return self._send(409, {"error": "a send is already in progress"})
+                    return self._send(202, {"started": True, "date": day.isoformat(), "callMode": service.dialler.mode})
+                if path == "/api/orchestrator/auto-dispatch":
+                    enabled = json.loads(body or "{}").get("enabled")
+                    if enabled is None:
+                        return self._send(400, {"error": 'Field "enabled" (boolean) is required'})
+                    return self._send(200, service.set_auto_dispatch(bool(enabled)))
+            except json.JSONDecodeError:
+                return self._send(400, {"error": "invalid JSON"})
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
+            except Exception:
+                return self._send(500, {"error": "server error"})
+            self._send(404, {"error": "not found"})
+
+    return Handler
+
+
+def run(port: int | None = None) -> None:
+    load_env_file(ENV_FILE)
+    db = os.environ.get("GATE0_DB") or str(Path(__file__).resolve().parent.parent / "weathercall.db")
+    service = DashboardService(db)
+    origins = {o.strip() for o in os.environ.get("GATE0_CORS_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()}
+    host = os.environ.get("GATE0_API_HOST", "127.0.0.1")
+    port = port or int(os.environ.get("PORT", 8000))
+    server = ThreadingHTTPServer((host, port), make_handler(service, origins))
+    threading.Thread(target=service.scheduler_loop, daemon=True).start()   # callbacks, and the daily send if switched on
+    print(f"Agrythm Connect API on http://{host}:{port}  (calls: {service.dialler.mode}; "
+          f"weather: {'open-meteo' if service.real_weather else 'mock'}; daily auto-send: "
+          f"{'ON' if service.auto_dispatch_enabled() else 'off'})" + (f"\n  note: {service.note}" if service.note else ""))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nAPI stopped.")
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":
