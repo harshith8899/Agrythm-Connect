@@ -214,8 +214,66 @@ export const CallHistoryTable = ({
         </div>
       </div>
 
-      {/* Responsive Table */}
-      <div className="overflow-x-auto">
+      {/* Phones: one card per call */}
+      <div className="md:hidden divide-y divide-slate-100">
+        {callLogs.map((call) => {
+          const attemptNumber = call.attempts_log?.length || (call.retry_count ? call.retry_count + 1 : 1);
+          const attemptLabel = call.is_test ? 'Test call' : `Attempt ${attemptNumber}/${call.max_attempts || 3}`;
+          const hasCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested';
+          return (
+            <button
+              key={call.call_id}
+              type="button"
+              onClick={() => onSelectCall(call)}
+              className={`w-full text-left p-4 space-y-2 cursor-pointer ${selectedCallId === call.call_id ? 'bg-blue-50/70' : 'active:bg-slate-50'}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-bold text-sm text-slate-900 truncate">{call.farmer_name}</div>
+                  <div className="text-[11px] text-slate-500 font-mono">{maskPhoneNumber(call.phone_number || call.phone)}</div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {getStatusBadge(call.status, call.disposition, call.skip_reason)}
+                  {call.is_test && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200">TEST</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />{call.displayDateTime || call.call_timestamp || 'Just now'}</span>
+                <span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{[call.village, call.district].filter(Boolean).join(', ') || 'N/A'}</span>
+                {call.language && <span>{call.language}</span>}
+                <span className="font-mono font-semibold text-slate-700">{attemptLabel}</span>
+                <span className="font-mono">{formatDuration(call.duration_seconds || call.duration_sec)}</span>
+              </div>
+              {(call.weather_temp != null || call.temperature) && (
+                <div className="text-[11px] text-slate-600">
+                  {call.weather_temp != null ? `${call.weather_temp}°C` : call.temperature}
+                  {call.weather_windspeed != null && ` · wind ${call.weather_windspeed} km/h`}
+                  {call.weather_rainfall != null && ` · rain ${call.weather_rainfall}%`}
+                  {call.weather_humidity != null && ` · humidity ${call.weather_humidity}%`}
+                </div>
+              )}
+              {(call.disposition || call.next_attempt_at || hasCallback) && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                  {call.disposition && <span className="text-slate-500 font-medium">{call.disposition}</span>}
+                  {call.next_attempt_at && (
+                    <span className="text-amber-700 font-semibold">Next try {String(call.next_attempt_at).split(', ')[1] || call.next_attempt_at}</span>
+                  )}
+                  {hasCallback && (
+                    <span className="inline-flex items-center gap-1 text-amber-900 font-semibold">
+                      <Calendar className="w-3 h-3 text-amber-600" />{call.scheduled_callback_time || 'Callback pending'}
+                    </span>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Larger screens: the full table */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50/80 text-[11px] font-bold tracking-wider text-slate-500 uppercase border-b border-slate-200/80">
             <tr>

@@ -1,10 +1,10 @@
 import React from 'react';
 
-export const OverviewCard = ({ title, value, subtitle, icon: Icon, badge, trend }) => {
+export const OverviewCard = ({ title, value, subtitle, icon: Icon, badge, trend, className = '' }) => {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 p-5 transition-all hover:border-slate-300">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+    <div className={`bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-5 transition-all hover:border-slate-300 ${className}`}>
+      <div className="flex items-center justify-between gap-1 mb-2 sm:mb-3">
+        <span className="text-[10px] sm:text-[11px] font-bold tracking-wider text-slate-500 uppercase">
           {title}
         </span>
         {Icon && (
@@ -14,7 +14,7 @@ export const OverviewCard = ({ title, value, subtitle, icon: Icon, badge, trend 
         )}
       </div>
 
-      <div className="flex items-baseline justify-between mt-1">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 mt-1">
         <div className="text-2xl font-bold text-slate-900 tracking-tight">
           {value}
         </div>
@@ -26,7 +26,7 @@ export const OverviewCard = ({ title, value, subtitle, icon: Icon, badge, trend 
       </div>
 
       {(subtitle || trend) && (
-        <div className="mt-2 text-xs text-slate-500 flex items-center gap-1.5">
+        <div className="mt-2 text-xs text-slate-500 hidden sm:flex items-center gap-1.5">
           {trend && <span className="font-medium text-trust-green">{trend}</span>}
           {subtitle && <span>{subtitle}</span>}
         </div>

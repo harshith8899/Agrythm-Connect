@@ -113,7 +113,7 @@ export const Header = ({
             ) : (
               <>
                 <Play className={`w-3.5 h-3.5 fill-current ${isBackendOnline ? 'text-emerald-400' : 'text-slate-400'}`} />
-                <span>Send now{isLive ? '' : ' (simulated)'}</span>
+                <span>Send now<span className="hidden sm:inline">{isLive ? '' : ' (simulated)'}</span></span>
               </>
             )}
           </button>

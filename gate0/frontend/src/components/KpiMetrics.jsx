@@ -18,7 +18,7 @@ export const KpiMetrics = ({ metrics }) => {
   const completionPct = totalCalls > 0 ? `${Math.round((completedCount / totalCalls) * 100)}%` : '0%';
 
   return (
-    <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+    <section className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
       {/* 1. Total Voice Calls */}
       <OverviewCard
         title="Total Voice Calls"
@@ -62,6 +62,7 @@ export const KpiMetrics = ({ metrics }) => {
         subtitle="Failed calls or weather not confirmed by the farmer"
         icon={ShieldAlert}
         badge={needsAttention > 0 ? `${needsAttention} To Check` : "All Clear"}
+        className="col-span-2 lg:col-span-1"
       />
     </section>
   );
