@@ -18,6 +18,7 @@ import time
 from datetime import date, datetime
 
 from ..contracts import WeatherReport
+from ..db import connect, table_columns
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS weather(
@@ -35,9 +36,9 @@ class StoredWeather:
         self.inner = inner
         self.retry_minutes = tuple(retry_minutes)
         self._sleep, self._today = sleep, today
-        self.db = sqlite3.connect(path)
+        self.db = connect(path)
         self.db.executescript(_SCHEMA)
-        have = {r[1] for r in self.db.execute("PRAGMA table_info(weather)")}
+        have = table_columns(self.db, "weather")
         for col in ("wind_kmh", "humidity_pct"):          # older files: those rows stay unusable (NULL) as fallback
             if col not in have:
                 self.db.execute(f"ALTER TABLE weather ADD COLUMN {col} INT")

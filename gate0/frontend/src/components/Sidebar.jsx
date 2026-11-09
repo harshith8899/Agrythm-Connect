@@ -2,7 +2,6 @@ import React from 'react';
 import {
   PhoneCall,
   Users,
-  CloudRain,
   ShieldCheck,
   X
 } from 'lucide-react';
@@ -12,7 +11,6 @@ export const Sidebar = ({
   setActiveTab,
   isOpen,
   setIsOpen,
-  weatherAlertsCount = 0
 }) => {
   const navItems = [
     {
@@ -25,17 +23,6 @@ export const Sidebar = ({
       id: 'farmers',
       label: 'Farmer Directory',
       icon: Users,
-    },
-    {
-      id: 'weather',
-      label: 'Weather Advisories',
-      icon: CloudRain,
-      badge: weatherAlertsCount > 0
-        ? `${weatherAlertsCount} Alert${weatherAlertsCount > 1 ? 's' : ''}`
-        : '0 Alerts',
-      badgeColor: weatherAlertsCount > 0
-        ? 'bg-amber-100 text-amber-800 border border-amber-200'
-        : 'bg-slate-100 text-slate-500 border border-slate-200',
     },
     {
       id: 'system',
@@ -56,7 +43,7 @@ export const Sidebar = ({
 
       {/* Sidebar container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-white border-r border-slate-200/80 flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:z-auto ${isOpen ? 'translate-x-0' : '-translate-x-full'
+        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-white border-r border-slate-200/80 flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 lg:sticky lg:top-0 lg:h-screen lg:shrink-0 lg:z-auto ${isOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
       >
         {/* Brand Header with Agrythm Logo */}

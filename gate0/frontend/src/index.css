@@ -8,3 +8,9 @@
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
 }
+
+/* Phones: 16px form text stops iOS from zooming the page when a field is focused; bigger tap targets */
+@media (max-width: 640px) {
+  input, select, textarea { font-size: 16px !important; }
+  button, [role="button"] { min-height: 40px; }
+}

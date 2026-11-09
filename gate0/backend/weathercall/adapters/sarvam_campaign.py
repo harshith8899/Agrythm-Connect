@@ -21,6 +21,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 
+from ..db import connect
 from .sarvam_agent import BASE, _STATUS, to_e164
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -161,7 +162,7 @@ CREATE TABLE IF NOT EXISTS call_details(
 
 class CampaignStore:
     def __init__(self, path: str = ":memory:"):
-        self.db = sqlite3.connect(path)
+        self.db = connect(path)
         self.db.executescript(_SCHEMA)
 
     def save_campaign(self, campaign_id: str, start: date, days: int, call_time: str, window_end: str) -> None:

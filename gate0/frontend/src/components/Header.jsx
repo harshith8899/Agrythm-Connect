@@ -1,8 +1,7 @@
 import React from 'react';
-import { Menu, RefreshCw, Play, Clock } from 'lucide-react';
+import { RefreshCw, Play, Clock } from 'lucide-react';
 
 export const Header = ({ 
-  onToggleSidebar, 
   onRefresh, 
   refreshing, 
   syncStatus, 
@@ -17,8 +16,6 @@ export const Header = ({
     switch (activeTab) {
       case 'farmers':
         return 'Farmer Profiles Directory';
-      case 'weather':
-        return 'District Weather Advisories & Alerts';
       case 'system':
         return 'System Status & Sarvam Usage';
       case 'overview':
@@ -31,17 +28,10 @@ export const Header = ({
   const isLive = Boolean(autoDispatcher?.live);
 
   return (
-    <header className="w-full bg-white border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 py-3 sticky top-0 z-30 shadow-2xs">
+    <header className="w-full bg-white border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 py-3 sm:sticky sm:top-0 z-30 shadow-2xs">
       <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Left: Mobile Toggle & Active Title */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={onToggleSidebar}
-            className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-            aria-label="Toggle Navigation Menu"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
 
           <img
             src="/agrythm-logo.png"
@@ -115,7 +105,7 @@ export const Header = ({
             ) : (
               <>
                 <Play className={`w-3.5 h-3.5 fill-current ${isBackendOnline ? 'text-emerald-400' : 'text-slate-400'}`} />
-                <span>Send now{isLive ? '' : ' (simulated)'}</span>
+                <span>Send now<span className="hidden sm:inline">{isLive ? '' : ' (simulated)'}</span></span>
               </>
             )}
           </button>

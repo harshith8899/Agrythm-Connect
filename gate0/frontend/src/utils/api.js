@@ -76,6 +76,10 @@ export const addFarmer = (fields) => sendJson('POST', '/api/farmers', fields);
 /** Changes the fields sent for one farmer (name, phone, language, place, call_consent, active). */
 export const updateFarmer = (farmerId, fields) => sendJson('PUT', `/api/farmers/${encodeURIComponent(farmerId)}`, fields);
 
+/** Places a call now for one farmer. mode 'retry' follows the retry rules (first call or next attempt); 'test' is a one-off test row outside them. Returns at once. */
+export const callFarmer = (farmerId, mode = 'retry') =>
+  postJson(`/api/farmers/${encodeURIComponent(farmerId)}/call`, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+
 /** Uploads a farmers CSV (Farmer ID, Farmer Name, Mobile Number, Village, District, State, Language, Consent). */
 export const importFarmersCsv = async (file) =>
   postJson('/api/farmers/import', { headers: { 'Content-Type': 'text/csv' }, body: await file.text() });

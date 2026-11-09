@@ -5,7 +5,7 @@ import {
   sendCallsNow,
   getDispatcherStatus,
   updateDispatcherStatus,
-  getFarmersReachedMetrics,
+  confirmDialog,
   isCallOnDate,
   getCallDate,
   getCallTime,
@@ -160,7 +160,7 @@ export const useVoiceAgentData = () => {
 
       const retryCount = call.retry_count || 0;
       const attemptNumber = call.attempts_log?.length || (retryCount + 1);
-      const attemptDisplay = `Attempt ${attemptNumber}/3`;
+      const attemptDisplay = call.is_test ? 'Test' : `Attempt ${attemptNumber}/3`;
 
       // Parse transcript
       let parsedTranscript = call.transcript;
@@ -292,50 +292,30 @@ export const useVoiceAgentData = () => {
     });
   }, [enrichedCallLogs, searchQuery, districtFilter, languageFilter, statusFilter, dateFilter, customDate]);
 
-  // Summary metrics calculated from the call records the backend returns
+  // Summary cards: one row per farmer per day, for the date picked in the filter bar (all dates when none is picked).
+  // Skipped farmers (no consent, inactive, no weather) are not calls, and test calls never count.
   const summaryMetrics = useMemo(() => {
-    const totalCalls = enrichedCallLogs.length;
-    const completedCount = enrichedCallLogs.filter(c => c.status === 'Completed').length;
-    const retryingCount = enrichedCallLogs.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length;
-    const failedCount = enrichedCallLogs.filter(c => c.status === 'Failed').length;
-    const needsAttentionCount = enrichedCallLogs.filter(c => ['Failed', 'Not Confirmed'].includes(c.status)).length;
-    const escalationCount = needsAttentionCount;
-    const callbackCount = enrichedCallLogs.filter(c => Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested').length;
-
-    // Callbacks still waiting to be placed (the backend places each one at the time the farmer asked for)
-    const callbacksScheduled = enrichedCallLogs.filter(c => c.callback_status === 'pending').length;
-
-    // Unique farmers reached (answered weather or resolved callback/escalation)
-    const reachedFarmerIds = new Set();
-    enrichedCallLogs.forEach(c => {
-      if (['Completed', 'Escalated'].includes(c.status) || ['Weather Delivered', 'Callback Requested', 'Non-Weather Inquiry'].includes(c.disposition)) {
-        if (c.farmer_id) reachedFarmerIds.add(String(c.farmer_id).trim());
-      }
-    });
-    const farmersReached = reachedFarmerIds.size;
-
-    const severeWeatherAlerts = enrichedCallLogs.filter(c => {
-      const chance = parseInt(String(c.rainfall_chance || c.weather_rainfall || '0').replace('%', ''), 10) || 0;
-      const forecast = String(c.weather_forecast || '').toLowerCase();
-      return chance >= 60 || forecast.includes('heavy') || forecast.includes('alert') || forecast.includes('storm');
-    }).length;
+    const inScope = (c) => {
+      if (dateFilter === 'all' || !customDate) return true;
+      const raw = getCallDate(c);
+      return Boolean(raw) && isCallOnDate(raw, customDate);
+    };
+    const scoped = enrichedCallLogs.filter(c => !c.is_test && inScope(c));
+    const called = scoped.filter(c => c.status !== 'Skipped');
+    const scopeLabel = dateFilter === 'today' ? 'Today' : dateFilter === 'yesterday' ? 'Yesterday'
+      : customDate ? customDate : 'All dates';
 
     return {
-      totalCalls,
-      completedCount,
-      deliveredCount: completedCount,
-      farmersReached,
-      retryingCount,
-      failedCount,
-      escalationCount,
-      needsAttentionCount,
-      callbackCount,
-      callbacksScheduled,
-      severeWeatherAlerts,
-      totalRegisteredFarmers: farmers.length,
-      confidenceRate: '98.5%'
+      scopeLabel,
+      totalCalls: called.length,
+      completedCount: called.filter(c => c.status === 'Completed').length,
+      retryingCount: called.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length,
+      needsAttentionCount: called.filter(c => ['Failed', 'Not Confirmed'].includes(c.status)).length,
+      declinedCount: called.filter(c => c.status === 'Declined').length,
+      callbacksScheduled: scoped.filter(c => c.callback_status === 'pending').length,
+      skippedCount: scoped.length - called.length,
     };
-  }, [enrichedCallLogs, farmers]);
+  }, [enrichedCallLogs, dateFilter, customDate]);
 
   // Send today's calls now to every eligible farmer
   const triggerDemo = async () => {
@@ -345,7 +325,12 @@ export const useVoiceAgentData = () => {
       return;
     }
     // Real calls cost credits and ring farmers' phones: ask first when calls are live
-    if (autoDispatcher.live && !window.confirm('This will place REAL calls to every eligible farmer today. Continue?')) {
+    if (autoDispatcher.live && !(await confirmDialog({
+      title: "Send today's calls now?",
+      message: 'This will place REAL calls to every eligible farmer today and uses Sarvam credits.',
+      confirmLabel: 'Send now',
+      tone: 'danger',
+    }))) {
       return undefined;
     }
     setTriggeringDemo(true);
@@ -368,7 +353,12 @@ export const useVoiceAgentData = () => {
   const toggleAutoDispatcher = async () => {
     try {
       const nextState = !autoDispatcher.enabled;
-      if (nextState && autoDispatcher.live && !window.confirm('Turn on automatic REAL calls every day at 9:00 AM IST?')) {
+      if (nextState && autoDispatcher.live && !(await confirmDialog({
+        title: 'Turn on the daily 9:00 AM calls?',
+        message: 'Real calls will be placed to every eligible farmer every day at 9:00 AM IST.',
+        confirmLabel: 'Turn on',
+        tone: 'danger',
+      }))) {
         return;
       }
       const res = await updateDispatcherStatus(nextState);

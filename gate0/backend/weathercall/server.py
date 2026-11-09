@@ -6,6 +6,8 @@
     GET  /api/health                         GET  /api/orchestrator/status
     GET  /api/calls   GET /api/calls/<id>    POST /api/orchestrator/auto-dispatch   {"enabled": true|false}
     GET  /api/farmers                        POST /api/orchestrator/run-now         send today's calls now
+    POST /api/farmers/<id>/call  place a call now for one farmer; body {"mode": "retry"} follows the retry rules (default),
+                                 {"mode": "test"} is a test call kept as its own row, outside the retry rules
     POST /api/farmers          add one farmer;  PUT/PATCH /api/farmers/<id>  edit one (also active and consent)
     POST /api/farmers/import   (CSV text)    POST /api/calls/send-now               (same; /trigger-demo kept as alias)
     GET  /api/callbacks                      GET  /api/weather?lat=..&lon=..
@@ -18,6 +20,7 @@ Phone numbers are masked in every response and never logged. CORS allows only th
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import threading
@@ -26,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .cli import ENV_FILE, load_env_file
+from .db import is_postgres
 from .service import DashboardService
 from .system import SystemChecks
 
@@ -33,8 +37,10 @@ MAX_BODY = 2 * 1024 * 1024
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
 
-def make_handler(service: DashboardService, origins: set[str], system: SystemChecks | None = None):
+def make_handler(service: DashboardService, origins: set[str], system: SystemChecks | None = None, token: str = ""):
+    """token: when set, every /api call except /api/health must send it as the X-API-Token header."""
     system = system or SystemChecks(service)
+    token_bytes = token.encode("utf-8")
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):            # no request logging: URLs and bodies could hold farmer data
@@ -46,7 +52,17 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
                 self.send_header("Access-Control-Allow-Origin", "*" if "*" in origins else origin)
                 self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-API-Token")
+
+        def _denied(self, path: str) -> bool:
+            """True (after answering 401) when a token is required and the request does not carry it."""
+            if not token or path == "/api/health":
+                return False
+            sent = self.headers.get("X-API-Token", "").encode("utf-8")
+            if hmac.compare_digest(sent, token_bytes):
+                return False
+            self._send(401, {"error": "unauthorized"})
+            return True
 
         def _send(self, code: int, body) -> None:
             data = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -72,6 +88,8 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
             u = urllib.parse.urlparse(self.path)
             q = urllib.parse.parse_qs(u.query)
             path = u.path.rstrip("/")
+            if self._denied(path):
+                return
             try:
                 if path == "/api/health":
                     return self._send(200, {"status": "ok", "service": "Agrythm Connect API"})
@@ -105,6 +123,8 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
 
         def do_PUT(self):
             path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            if self._denied(path):
+                return
             try:
                 body = self._body()
                 if path.startswith("/api/farmers/") and path != "/api/farmers/import":
@@ -126,8 +146,15 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
 
         def do_POST(self):
             path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            if self._denied(path):
+                return
             try:
                 body = self._body()
+                if path.startswith("/api/farmers/") and path.endswith("/call"):
+                    fid = urllib.parse.unquote(path[len("/api/farmers/"):-len("/call")])
+                    fields = json.loads(body or "{}")
+                    mode = fields.get("mode", "retry") if isinstance(fields, dict) else "retry"
+                    return self._send(202, service.manual_call(fid, mode))
                 if path == "/api/farmers":
                     fields = json.loads(body or "{}")
                     if not isinstance(fields, dict):
@@ -153,6 +180,8 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
                     if enabled is None:
                         return self._send(400, {"error": 'Field "enabled" (boolean) is required'})
                     return self._send(200, service.set_auto_dispatch(bool(enabled)))
+            except KeyError:
+                return self._send(404, {"error": "Farmer not found"})
             except json.JSONDecodeError:
                 return self._send(400, {"error": "invalid JSON"})
             except ValueError as exc:
@@ -166,14 +195,19 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
 
 def run(port: int | None = None) -> None:
     load_env_file(ENV_FILE)
-    db = os.environ.get("GATE0_DB") or str(Path(__file__).resolve().parent.parent / "weathercall.db")
+    # GATE0_DATABASE_URL (a postgres:// address, Supabase) wins; otherwise the SQLite file in GATE0_DB
+    db = (os.environ.get("GATE0_DATABASE_URL") or os.environ.get("GATE0_DB")
+          or str(Path(__file__).resolve().parent.parent / "weathercall.db"))
+    token = os.environ.get("GATE0_API_TOKEN", "")
+    host = os.environ.get("GATE0_API_HOST", "127.0.0.1")
+    if host not in ("127.0.0.1", "localhost", "::1") and not token:
+        raise SystemExit("GATE0_API_TOKEN must be set when the API listens on a public address (GATE0_API_HOST).")
     service = DashboardService(db)
     origins = {o.strip() for o in os.environ.get("GATE0_CORS_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()}
-    host = os.environ.get("GATE0_API_HOST", "127.0.0.1")
     port = port or int(os.environ.get("PORT", 8000))
-    server = ThreadingHTTPServer((host, port), make_handler(service, origins))
+    server = ThreadingHTTPServer((host, port), make_handler(service, origins, token=token))
     threading.Thread(target=service.scheduler_loop, daemon=True).start()   # callbacks, and the daily send if switched on
-    print(f"Agrythm Connect API on http://{host}:{port}  (calls: {service.dialler.mode}; "
+    print(f"Agrythm Connect API on http://{host}:{port}  (database: {'Postgres (Supabase)' if is_postgres(db) else 'SQLite file'}; calls: {service.dialler.mode}; "
           f"weather: {'open-meteo' if service.real_weather else 'mock'}; daily auto-send: "
           f"{'ON' if service.auto_dispatch_enabled() else 'off'})" + (f"\n  note: {service.note}" if service.note else ""))
     try:

@@ -8,8 +8,9 @@ import {
   CallHistoryTable, 
   CallDetailDrawer, 
   FarmerDirectory, 
-  WeatherAlertsView,
-  SystemStatusView
+  SystemStatusView,
+  ConfirmHost,
+  MobileNav
 } from './components';
 import { useVoiceAgentData } from './hooks';
 
@@ -69,14 +70,12 @@ function App() {
         setActiveTab={setActiveTab}
         isOpen={sidebarOpen}
         setIsOpen={setSidebarOpen}
-        weatherAlertsCount={summaryMetrics.severeWeatherAlerts}
       />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Sticky Header with Triggers */}
         <Header
-          onToggleSidebar={() => setSidebarOpen(true)}
           onRefresh={() => fetchAllData(false)}
           refreshing={refreshing}
           syncStatus={syncStatus}
@@ -89,7 +88,7 @@ function App() {
         />
 
         {/* Tab Content */}
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 space-y-6">
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 md:py-8 pb-24 lg:pb-8 space-y-4 sm:space-y-6">
           {/* Global Backend Offline Alert Banner */}
           {!isBackendOnline && (
             <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-900 shadow-xs animate-in fade-in duration-200">
@@ -159,11 +158,8 @@ function App() {
               callLogs={callLogs}
               onSelectFarmer={handleSelectFarmerFromDirectory}
               onImported={() => fetchAllData(false)}
+              isLive={Boolean(autoDispatcher?.live)}
             />
-          )}
-
-          {activeTab === 'weather' && (
-            <WeatherAlertsView callLogs={callLogs} />
           )}
 
           {activeTab === 'system' && (
@@ -171,6 +167,9 @@ function App() {
           )}
         </main>
       </div>
+
+      <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      <ConfirmHost />
 
       {/* Slide-over Inspection Drawer for Call Details */}
       {selectedCall && (
