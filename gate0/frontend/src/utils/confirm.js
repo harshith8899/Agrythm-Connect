@@ -9,5 +9,6 @@ export const registerConfirmHost = (fn) => {
   };
 };
 
-/** options: { title, message, confirmLabel, cancelLabel, tone: 'danger' | 'default' } */
+/** options: { title, message, confirmLabel, cancelLabel, tone: 'danger' | 'default', choices?: [{ value, label, description, disabledReason? }] }
+ *  Resolves true/false; with choices it resolves the chosen value (a string) or false. */
 export const confirmDialog = (options) => (host ? host(options) : Promise.resolve(window.confirm(options.message)));

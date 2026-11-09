@@ -6,8 +6,13 @@ import { registerConfirmHost } from '../utils/confirm';
 export const ConfirmHost = () => {
   const [request, setRequest] = useState(null); // { options, resolve }
   const confirmRef = useRef(null);
+  const [picked, setPicked] = useState('');
 
-  useEffect(() => registerConfirmHost((options) => new Promise((resolve) => setRequest({ options, resolve }))), []);
+  useEffect(() => registerConfirmHost((options) => new Promise((resolve) => {
+    const first = (options.choices || []).find((c) => !c.disabledReason);
+    setPicked(first ? first.value : '');
+    setRequest({ options, resolve });
+  })), []);
 
   const close = useCallback((answer) => {
     setRequest((current) => {
@@ -27,8 +32,9 @@ export const ConfirmHost = () => {
   }, [request, close]);
 
   if (!request) return null;
-  const { title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', tone = 'default' } = request.options;
+  const { title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', tone = 'default', choices } = request.options;
   const danger = tone === 'danger';
+  const answer = choices ? picked || false : true;
 
   return (
     <div
@@ -50,6 +56,33 @@ export const ConfirmHost = () => {
             <p className="text-sm text-slate-600 mt-1 leading-relaxed">{message}</p>
           </div>
         </div>
+        {choices && (
+          <div className="space-y-2" role="radiogroup">
+            {choices.map((c) => {
+              const disabled = Boolean(c.disabledReason);
+              const on = picked === c.value;
+              return (
+                <button
+                  key={c.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  disabled={disabled}
+                  onClick={() => setPicked(c.value)}
+                  className={`w-full text-left p-3 rounded-xl border transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${
+                    on ? 'border-trust-navy bg-slate-50' : 'border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <span className={`w-3.5 h-3.5 rounded-full border-2 ${on ? 'border-trust-navy bg-trust-navy' : 'border-slate-300'}`} />
+                    {c.label}
+                  </span>
+                  <span className="block text-xs text-slate-600 mt-1 pl-5.5 leading-relaxed">{disabled ? c.disabledReason : c.description}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="flex justify-end gap-2">
           <button
             type="button"
@@ -61,8 +94,9 @@ export const ConfirmHost = () => {
           <button
             ref={confirmRef}
             type="button"
-            onClick={() => close(true)}
-            className={`px-4 py-2 rounded-xl text-white text-xs font-semibold cursor-pointer ${danger ? 'bg-amber-600 hover:bg-amber-700' : 'bg-trust-navy hover:bg-slate-800'}`}
+            onClick={() => close(answer)}
+            disabled={!answer}
+            className={`px-4 py-2 rounded-xl text-white text-xs font-semibold cursor-pointer disabled:opacity-50 ${danger ? 'bg-amber-600 hover:bg-amber-700' : 'bg-trust-navy hover:bg-slate-800'}`}
           >
             {confirmLabel}
           </button>

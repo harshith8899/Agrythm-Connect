@@ -50,16 +50,18 @@ const RETRYABLE = ['Retrying', 'Unanswered', 'Not Confirmed', 'Failed'];
 const callAction = (farmer, todayCall) => {
   if (farmer.active === 'No') return { disabled: true, label: 'Call', why: 'Inactive farmer' };
   if (farmer.call_consent === 'No') return { disabled: true, label: 'Call', why: 'No call consent' };
-  if (!todayCall) return { label: 'Call now', first: true };
+  // retryWhy: why "follow the retry rules" is not possible right now (a test call always is)
+  if (!todayCall) return { label: 'Call', hint: 'No call yet today', first: true };
   const used = Number(todayCall.attempts_used || 0);
   const max = Number(todayCall.max_attempts || 3);
   if (RETRYABLE.includes(todayCall.status)) {
     return used < max
-      ? { label: `Retry now (${used + 1} of ${max})` }
-      : { disabled: true, label: 'Call', why: `All ${max} attempts used today` };
+      ? { label: 'Call', hint: `Next attempt: ${used + 1} of ${max}`, next: used + 1, max }
+      : { label: 'Call', hint: `All ${max} attempts used`, retryWhy: `All ${max} attempts are used today.` };
   }
-  const reasons = { Completed: 'Already completed today', Declined: 'Said they do not need it today', 'Callback Scheduled': 'A callback is booked', Skipped: 'Skipped today' };
-  return { disabled: true, label: 'Call', why: reasons[todayCall.status] || 'Not available now' };
+  const reasons = { Completed: 'Already completed today.', Declined: 'The farmer said they do not need it today.', 'Callback Scheduled': 'A callback is booked.', Skipped: 'Skipped today.' };
+  const why = reasons[todayCall.status] || 'Not available now.';
+  return { label: 'Call', hint: why.replace(/\.$/, ''), retryWhy: why };
 };
 
 const LANGUAGES = ['Hindi', 'Kannada', 'Telugu', 'English'];
@@ -160,21 +162,34 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
   const [calling, setCalling] = useState({});
 
   const placeCall = async (farmer, action) => {
-    const what = action.first ? 'a call' : 'the next attempt';
-    const ok = await confirmDialog({
-      title: action.first ? `Call ${farmer.farmer_name} now?` : `Place the next attempt for ${farmer.farmer_name}?`,
-      message: isLive
-        ? `This will place ${what} now. It is a real call and uses Sarvam credits.`
-        : `This will place ${what} now. Calls are simulated, so no real call is made.`,
-      confirmLabel: action.first ? 'Call now' : 'Retry now',
+    const max = action.max || 3;
+    const mode = await confirmDialog({
+      title: `Call ${farmer.farmer_name} now?`,
+      message: isLive ? 'This places a real call and uses Sarvam credits.' : 'Calls are simulated, so no real call is made.',
+      confirmLabel: 'Call now',
       tone: isLive ? 'danger' : 'default',
+      choices: [
+        {
+          value: 'retry',
+          label: action.first ? 'Follow the retry rules: the first call of the day' : `Follow the retry rules: attempt ${action.next || '?'} of ${max}`,
+          description: action.first
+            ? 'Counts as today\'s first attempt. If it is not picked up, the usual retries follow (30 minutes, then 1 hour).'
+            : 'Counts as the next attempt and replaces the waiting retry. Later retries follow the usual gaps.',
+          disabledReason: action.retryWhy,
+        },
+        {
+          value: 'test',
+          label: 'Test call: ignore the retry rules',
+          description: 'A one-off call that does not count as an attempt and does not change today\'s result, retries or callbacks. It shows as a Test row in Call Logs and can be repeated.',
+        },
+      ],
     });
-    if (!ok) return;
+    if (!mode) return;
     setCalling((c) => ({ ...c, [farmer.farmer_id]: true }));
     setCallNote((n) => ({ ...n, [farmer.farmer_id]: null }));
     try {
-      await callFarmer(farmer.farmer_id);
-      setCallNote((n) => ({ ...n, [farmer.farmer_id]: { ok: true, text: 'Call started. The result appears in Call Logs.' } }));
+      await callFarmer(farmer.farmer_id, mode);
+      setCallNote((n) => ({ ...n, [farmer.farmer_id]: { ok: true, text: mode === 'test' ? 'Test call started. It appears as a Test row in Call Logs.' : 'Call started. The result appears in Call Logs.' } }));
       [3000, 10000, 25000].forEach((ms) => setTimeout(() => onImported && onImported(), ms));
     } catch (err) {
       setCallNote((n) => ({ ...n, [farmer.farmer_id]: { ok: false, text: err.message } }));
@@ -195,7 +210,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
 
   // Calculate call counts and today's engagement status purely per actual farmer in Sheet 1
   const farmerStats = farmers.map(f => {
-    const farmerCalls = callLogs.filter(c => String(c.farmer_id).trim() === String(f.farmer_id).trim());
+    const farmerCalls = callLogs.filter(c => !c.is_test && String(c.farmer_id).trim() === String(f.farmer_id).trim());
     const talkedToday = farmerCalls.some(c => isCallToday(getCallTimestamp(c)) && didFarmerPickUpAndTalk(c));
     const todayCall = farmerCalls.find(c => c.call_date === todayStr());
     return {
@@ -359,13 +374,13 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
               <button
                 onClick={() => placeCall(farmer, farmer.action)}
                 disabled={farmer.action.disabled || calling[farmer.farmer_id]}
-                title={farmer.action.why || (farmer.action.first ? 'Place a call now' : 'Place the next attempt now')}
+                title={farmer.action.why || 'Place a call now'}
                 className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
               >
                 <PhoneIcon className="w-3.5 h-3.5" />
                 <span>{calling[farmer.farmer_id] ? 'Calling...' : farmer.action.label}</span>
               </button>
-              {farmer.action.why && <p className="text-[11px] text-slate-500 text-center">{farmer.action.why}</p>}
+              {(farmer.action.why || farmer.action.hint) && <p className="text-[11px] text-slate-500 text-center">{farmer.action.why || farmer.action.hint}</p>}
               {callNote[farmer.farmer_id] && (
                 <p className={`text-[11px] font-semibold text-center ${callNote[farmer.farmer_id].ok ? 'text-emerald-700' : 'text-rose-700'}`}>
                   {callNote[farmer.farmer_id].text}

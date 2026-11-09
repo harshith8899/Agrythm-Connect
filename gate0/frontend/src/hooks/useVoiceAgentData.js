@@ -160,7 +160,7 @@ export const useVoiceAgentData = () => {
 
       const retryCount = call.retry_count || 0;
       const attemptNumber = call.attempts_log?.length || (retryCount + 1);
-      const attemptDisplay = `Attempt ${attemptNumber}/3`;
+      const attemptDisplay = call.is_test ? 'Test' : `Attempt ${attemptNumber}/3`;
 
       // Parse transcript
       let parsedTranscript = call.transcript;
@@ -294,20 +294,21 @@ export const useVoiceAgentData = () => {
 
   // Summary metrics calculated from the call records the backend returns
   const summaryMetrics = useMemo(() => {
-    const totalCalls = enrichedCallLogs.length;
-    const completedCount = enrichedCallLogs.filter(c => c.status === 'Completed').length;
-    const retryingCount = enrichedCallLogs.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length;
-    const failedCount = enrichedCallLogs.filter(c => c.status === 'Failed').length;
-    const needsAttentionCount = enrichedCallLogs.filter(c => ['Failed', 'Not Confirmed'].includes(c.status)).length;
+    const realLogs = enrichedCallLogs.filter(c => !c.is_test); // test calls never count in the summary
+    const totalCalls = realLogs.length;
+    const completedCount = realLogs.filter(c => c.status === 'Completed').length;
+    const retryingCount = realLogs.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length;
+    const failedCount = realLogs.filter(c => c.status === 'Failed').length;
+    const needsAttentionCount = realLogs.filter(c => ['Failed', 'Not Confirmed'].includes(c.status)).length;
     const escalationCount = needsAttentionCount;
-    const callbackCount = enrichedCallLogs.filter(c => Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested').length;
+    const callbackCount = realLogs.filter(c => Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested').length;
 
     // Callbacks still waiting to be placed (the backend places each one at the time the farmer asked for)
-    const callbacksScheduled = enrichedCallLogs.filter(c => c.callback_status === 'pending').length;
+    const callbacksScheduled = realLogs.filter(c => c.callback_status === 'pending').length;
 
     // Unique farmers reached (answered weather or resolved callback/escalation)
     const reachedFarmerIds = new Set();
-    enrichedCallLogs.forEach(c => {
+    realLogs.forEach(c => {
       if (['Completed', 'Escalated'].includes(c.status) || ['Weather Delivered', 'Callback Requested', 'Non-Weather Inquiry'].includes(c.disposition)) {
         if (c.farmer_id) reachedFarmerIds.add(String(c.farmer_id).trim());
       }

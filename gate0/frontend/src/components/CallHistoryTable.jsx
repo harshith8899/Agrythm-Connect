@@ -236,7 +236,7 @@ export const CallHistoryTable = ({
               const isSelected = selectedCallId === call.call_id;
               const hasCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested';
               const attemptNumber = call.attempts_log?.length || (call.retry_count ? call.retry_count + 1 : 1);
-              const attemptLabel = `Attempt ${attemptNumber}/${call.max_attempts || 3}`;
+              const attemptLabel = call.is_test ? 'Test call' : `Attempt ${attemptNumber}/${call.max_attempts || 3}`;
 
               return (
                 <tr
@@ -324,7 +324,12 @@ export const CallHistoryTable = ({
                   {/* Status & Disposition */}
                   <td className="px-4 py-3.5 whitespace-nowrap">
                     <div className="flex flex-col gap-1 items-start">
-                      {getStatusBadge(call.status, call.disposition, call.skip_reason)}
+                      <div className="flex items-center gap-1.5">
+                        {getStatusBadge(call.status, call.disposition, call.skip_reason)}
+                        {call.is_test && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200">TEST</span>
+                        )}
+                      </div>
                       {call.disposition && (
                         <span className="text-[10px] text-slate-500 font-medium">
                           {call.disposition}
