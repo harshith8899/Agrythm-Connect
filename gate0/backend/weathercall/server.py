@@ -28,6 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .cli import ENV_FILE, load_env_file
+from .db import is_postgres
 from .service import DashboardService
 from .system import SystemChecks
 
@@ -175,14 +176,16 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
 
 def run(port: int | None = None) -> None:
     load_env_file(ENV_FILE)
-    db = os.environ.get("GATE0_DB") or str(Path(__file__).resolve().parent.parent / "weathercall.db")
+    # GATE0_DATABASE_URL (a postgres:// address, Supabase) wins; otherwise the SQLite file in GATE0_DB
+    db = (os.environ.get("GATE0_DATABASE_URL") or os.environ.get("GATE0_DB")
+          or str(Path(__file__).resolve().parent.parent / "weathercall.db"))
     service = DashboardService(db)
     origins = {o.strip() for o in os.environ.get("GATE0_CORS_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()}
     host = os.environ.get("GATE0_API_HOST", "127.0.0.1")
     port = port or int(os.environ.get("PORT", 8000))
     server = ThreadingHTTPServer((host, port), make_handler(service, origins))
     threading.Thread(target=service.scheduler_loop, daemon=True).start()   # callbacks, and the daily send if switched on
-    print(f"Agrythm Connect API on http://{host}:{port}  (calls: {service.dialler.mode}; "
+    print(f"Agrythm Connect API on http://{host}:{port}  (database: {'Postgres (Supabase)' if is_postgres(db) else 'SQLite file'}; calls: {service.dialler.mode}; "
           f"weather: {'open-meteo' if service.real_weather else 'mock'}; daily auto-send: "
           f"{'ON' if service.auto_dispatch_enabled() else 'off'})" + (f"\n  note: {service.note}" if service.note else ""))
     try:

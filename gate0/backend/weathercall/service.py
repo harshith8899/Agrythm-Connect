@@ -28,6 +28,7 @@ from .adapters.sarvam_campaign import IST, scrub
 from .adapters.sheet import _ALIASES, _LANG, _key, _read_rows, load_farmers
 from .adapters.weather_store import StoredWeather
 from .config import Settings
+from .db import IntegrityError, OperationalError, connect, table_columns
 from .contracts import (AttemptStatus, CallAttempt, CallRequest, FarmerContext, FarmerDayResult, Language,
                         ProviderCallResult)
 from .engine import Ports, final_result, prepare_call
@@ -141,13 +142,11 @@ class DashboardService:
         import os
         self.db_path = db_path
         self._now = now or (lambda: datetime.now(IST))
-        self.db = sqlite3.connect(db_path, check_same_thread=False)
+        self.db = connect(db_path, check_same_thread=False)
         self.lock = threading.Lock()
         self.db.executescript(_SCHEMA)
-        try:                                                    # databases made before the reschedule limit
+        if "reschedules" not in table_columns(self.db, "dash_callbacks"):      # databases made before the reschedule limit
             self.db.execute("ALTER TABLE dash_callbacks ADD COLUMN reschedules INT DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass
         self.settings = Settings.from_env()
         self.dialler, self.note = (dialler, note) if dialler else make_dialler(env)
         e = env if env is not None else os.environ
@@ -461,11 +460,11 @@ class DashboardService:
 
     def _attempt_errors(self, fid: str, day: date) -> list[str]:
         """The error text of each attempt recorded for that farmer and day, in order."""
-        conn = sqlite3.connect(self.db_path)
+        conn = connect(self.db_path)
         try:
             return [r[0] or "" for r in conn.execute("SELECT error FROM attempts WHERE farmer_id=? AND call_date=? "
                                                      "ORDER BY attempt_no", (fid, day.isoformat()))]
-        except sqlite3.OperationalError:
+        except OperationalError:
             return []
         finally:
             conn.close()
@@ -548,7 +547,7 @@ class DashboardService:
                 farmer_id=fid, call_date=day, attempt_no=attempt_no, status=res.status, language=farmer.language,
                 message_text="(retry)", provider_call_id=res.provider_call_id, duration_s=res.duration_s,
                 error=res.error, weather_source=w.source))
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             ports.ledger.db.rollback()          # a failed insert must not keep the database locked
         ports.ledger.db.execute("UPDATE day_results SET result=?, attempts=? WHERE farmer_id=? AND call_date=?",
                                 (final_result(res.status).value, attempt_no, fid, day.isoformat()))
@@ -795,7 +794,7 @@ class DashboardService:
                 if due_day != source_day:                   # a new day: this call is that day's one call
                     ports.ledger.record_day_result(FarmerDayResult(fid, due_day, final_result(res.status), 1))
                 break
-            except sqlite3.IntegrityError:
+            except IntegrityError:
                 ports.ledger.db.rollback()
                 continue
         out: dict = {}
@@ -853,11 +852,11 @@ class DashboardService:
 
     # -- reading results for the dashboard -------------------------------------------------------------------------
     def _attempts(self, fid: str, call_date: str) -> list[dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = connect(self.db_path)
         try:
             rows = conn.execute("SELECT attempt_no, status, duration_s, error FROM attempts WHERE farmer_id=? "
                                 "AND call_date=? ORDER BY attempt_no", (fid, call_date)).fetchall()
-        except sqlite3.OperationalError:
+        except OperationalError:
             rows = []
         finally:
             conn.close()

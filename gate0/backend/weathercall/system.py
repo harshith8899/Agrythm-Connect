@@ -16,6 +16,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 
 from .adapters.open_meteo import OpenMeteoWeather
+from .db import is_postgres
 from .adapters.sarvam_campaign import IST, scrub
 from .adapters.sarvam_usage import make_usage
 
@@ -154,8 +155,9 @@ class SystemChecks:
                     saved = self.service.db.execute("SELECT COUNT(*) FROM weather").fetchone()[0]
                 except Exception:
                     saved = 0
+            kind = "Postgres (Supabase)" if is_postgres(self.service.db_path) else "SQLite file"
             return self._check("database", "Database", "ok",
-                               f"{farmers} farmers, {calls} call records, {saved} saved forecast days.", t)
+                               f"{kind}: {farmers} farmers, {calls} call records, {saved} saved forecast days.", t)
         except Exception as exc:
             return self._check("database", "Database", "fail", f"Cannot read the database ({type(exc).__name__}).", t)
 
