@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Search, MapPin, Phone, PhoneCall, Upload, Users, Plus, Pencil, X, Phone as PhoneIcon } from 'lucide-react';
-import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, callFarmer } from '../utils';
+import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, callFarmer, confirmDialog } from '../utils';
 
 // Upload a farmers CSV; the backend saves it (same Farmer ID updates the farmer) and the list reloads.
 const ImportCsvButton = ({ onImported }) => {
@@ -161,10 +161,15 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
 
   const placeCall = async (farmer, action) => {
     const what = action.first ? 'a call' : 'the next attempt';
-    const text = isLive
-      ? `Place ${what} to ${farmer.farmer_name} now? This is a real call and uses Sarvam credits.`
-      : `Place ${what} to ${farmer.farmer_name} now? Calls are simulated, so no real call is made.`;
-    if (!window.confirm(text)) return;
+    const ok = await confirmDialog({
+      title: action.first ? `Call ${farmer.farmer_name} now?` : `Place the next attempt for ${farmer.farmer_name}?`,
+      message: isLive
+        ? `This will place ${what} now. It is a real call and uses Sarvam credits.`
+        : `This will place ${what} now. Calls are simulated, so no real call is made.`,
+      confirmLabel: action.first ? 'Call now' : 'Retry now',
+      tone: isLive ? 'danger' : 'default',
+    });
+    if (!ok) return;
     setCalling((c) => ({ ...c, [farmer.farmer_id]: true }));
     setCallNote((n) => ({ ...n, [farmer.farmer_id]: null }));
     try {

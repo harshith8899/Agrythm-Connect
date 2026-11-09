@@ -6,4 +6,5 @@ export * from './KpiMetrics';
 export * from './CallHistoryTable';
 export * from './CallDetailDrawer';
 export * from './FarmerDirectory';
+export * from './ConfirmHost';
 export * from './SystemStatusView';

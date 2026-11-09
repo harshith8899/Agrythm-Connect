@@ -1,6 +1,7 @@
 export * from './constants';
 export * from './csvParser';
 export * from './api';
+export * from './confirm';
 export * from './callAnalytics';
 export * from './transcriptTranslation';
 

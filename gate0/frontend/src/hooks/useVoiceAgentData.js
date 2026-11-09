@@ -5,7 +5,7 @@ import {
   sendCallsNow,
   getDispatcherStatus,
   updateDispatcherStatus,
-  getFarmersReachedMetrics,
+  confirmDialog,
   isCallOnDate,
   getCallDate,
   getCallTime,
@@ -338,7 +338,12 @@ export const useVoiceAgentData = () => {
       return;
     }
     // Real calls cost credits and ring farmers' phones: ask first when calls are live
-    if (autoDispatcher.live && !window.confirm('This will place REAL calls to every eligible farmer today. Continue?')) {
+    if (autoDispatcher.live && !(await confirmDialog({
+      title: "Send today's calls now?",
+      message: 'This will place REAL calls to every eligible farmer today and uses Sarvam credits.',
+      confirmLabel: 'Send now',
+      tone: 'danger',
+    }))) {
       return undefined;
     }
     setTriggeringDemo(true);
@@ -361,7 +366,12 @@ export const useVoiceAgentData = () => {
   const toggleAutoDispatcher = async () => {
     try {
       const nextState = !autoDispatcher.enabled;
-      if (nextState && autoDispatcher.live && !window.confirm('Turn on automatic REAL calls every day at 9:00 AM IST?')) {
+      if (nextState && autoDispatcher.live && !(await confirmDialog({
+        title: 'Turn on the daily 9:00 AM calls?',
+        message: 'Real calls will be placed to every eligible farmer every day at 9:00 AM IST.',
+        confirmLabel: 'Turn on',
+        tone: 'danger',
+      }))) {
         return;
       }
       const res = await updateDispatcherStatus(nextState);

@@ -8,7 +8,8 @@ import {
   CallHistoryTable, 
   CallDetailDrawer, 
   FarmerDirectory, 
-  SystemStatusView
+  SystemStatusView,
+  ConfirmHost
 } from './components';
 import { useVoiceAgentData } from './hooks';
 
@@ -166,6 +167,8 @@ function App() {
           )}
         </main>
       </div>
+
+      <ConfirmHost />
 
       {/* Slide-over Inspection Drawer for Call Details */}
       {selectedCall && (
