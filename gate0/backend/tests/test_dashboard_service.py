@@ -803,3 +803,15 @@ def test_api_call_button_modes(api):
     assert code == 202 and body["kind"] == "test"
     wait_idle(s)
     assert any(c.get("is_test") for c in s.calls())
+
+
+def test_a_second_send_keeps_the_real_failure_reason(tmp_path):
+    d = Scripted((A.FAILED,))
+    s, _ = timed(tmp_path, d, start=datetime(2026, 11, 5, 21, 45, tzinfo=IST))      # no retry fits before 22:00
+    s.import_csv(ONE)
+    s.fire(D)
+    first = s.calls()[0]
+    s.fire(D)
+    again = s.calls()[0]
+    assert again["status"] == "Failed" and again["note"] == first["note"] and "already called" not in again["note"]
+    assert again["disposition"] == first["disposition"]

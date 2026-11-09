@@ -399,6 +399,8 @@ class DashboardService:
                                           (fid, day.isoformat())).fetchone()
                     if row and row[0] == "skipped":         # skipped earlier: keep its own reason (no consent, ...)
                         return row[1] or reason
+                    if row and row[0] in ("failed", "error"):   # keep the real failure reason, do not bury it
+                        return reason
                     self.db.execute("UPDATE dash_results SET note=? WHERE farmer_id=? AND call_date=?",
                                     (ALREADY_NOTE, fid, day.isoformat()))
                     self.db.commit()
@@ -460,14 +462,13 @@ class DashboardService:
 
     def _attempt_errors(self, fid: str, day: date) -> list[str]:
         """The error text of each attempt recorded for that farmer and day, in order."""
-        conn = connect(self.db_path)
-        try:
-            return [r[0] or "" for r in conn.execute("SELECT error FROM attempts WHERE farmer_id=? AND call_date=? "
-                                                     "ORDER BY attempt_no", (fid, day.isoformat()))]
-        except OperationalError:
-            return []
-        finally:
-            conn.close()
+        with self.lock:
+            try:
+                rows = self.db.execute("SELECT error FROM attempts WHERE farmer_id=? AND call_date=? ORDER BY attempt_no",
+                                       (fid, day.isoformat())).fetchall()
+            except OperationalError:
+                return []
+        return [r[0] or "" for r in rows]
 
     def _plan_retry(self, fid: str, day: date, attempt_no: int, status: AttemptStatus, out: dict, error: str = "") -> bool:
         """Plans the next call; False when none is due (so the caller can alert on a failed call). attempt_no is the
@@ -851,18 +852,20 @@ class DashboardService:
             _t.sleep(every)
 
     # -- reading results for the dashboard -------------------------------------------------------------------------
-    def _attempts(self, fid: str, call_date: str) -> list[dict]:
-        conn = connect(self.db_path)
-        try:
-            rows = conn.execute("SELECT attempt_no, status, duration_s, error FROM attempts WHERE farmer_id=? "
-                                "AND call_date=? ORDER BY attempt_no", (fid, call_date)).fetchall()
-        except OperationalError:
-            rows = []
-        finally:
-            conn.close()
+    def _all_attempts(self) -> dict[tuple[str, str], list[dict]]:
+        """Every attempt, grouped by (farmer, day), in one query (one round trip, however many calls are listed)."""
+        with self.lock:
+            try:
+                rows = self.db.execute("SELECT farmer_id, call_date, attempt_no, status, duration_s, error FROM attempts "
+                                       "ORDER BY farmer_id, call_date, attempt_no").fetchall()
+            except OperationalError:
+                rows = []
         label = {"answered": "Answered", "no_answer": "No Answer or Rejected", "busy": "Busy", "failed": "Failed"}
-        return [{"attempt_number": r[0], "status": label.get(r[1], r[1]), "duration_seconds": r[2] or 0,
-                 "error_message": r[3] or ""} for r in rows]
+        out: dict[tuple[str, str], list[dict]] = {}
+        for fid, day, n, status, dur, err in rows:
+            out.setdefault((fid, day), []).append({"attempt_number": n, "status": label.get(status, status),
+                                                   "duration_seconds": dur or 0, "error_message": err or ""})
+        return out
 
     @staticmethod
     def _status_for(status: str, understood: str, has_callback: bool, retry_pending: bool = False) -> tuple[str, str]:
@@ -897,6 +900,7 @@ class DashboardService:
             rts = self.db.execute("SELECT farmer_id, call_date, due_at FROM dash_retries "
                                   "WHERE status IN ('pending','calling')").fetchall()
         retry_due = {(fid, day): due for fid, day, due in rts}
+        all_attempts = self._all_attempts()
         by_day: dict[tuple[str, str], tuple[str, str]] = {}
         for fid, src, due, st in cbs:
             by_day[(fid, src)] = (due, st)
@@ -906,7 +910,7 @@ class DashboardService:
             cb = by_day.get((fid, day))
             retry_at = retry_due.get((fid, day))
             dash_status, disposition = self._status_for(status, understood or "", cb is not None, retry_at is not None)
-            attempts = self._attempts(fid, day)
+            attempts = all_attempts.get((fid, day), [])
             if status == "skipped":
                 disposition = (note or "skipped").replace("_", " ").title()
             elif status == "failed" and note:
