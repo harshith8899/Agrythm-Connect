@@ -730,3 +730,76 @@ def test_api_call_button(api):
     wait_idle(s)
     assert call("/api/farmers/F1/call", b"{}")[0] == 400               # already completed today (simulated call understood)
     assert call("/api/farmers/zzz/call", b"{}")[0] == 404
+
+
+# ---- test calls: the Call button with "ignore the retry rules" ------------------------------------------------------------
+def test_a_test_call_is_its_own_row_and_never_touches_the_real_day(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED, A.ANSWERED), understood="yes")
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)                                                          # a real first call: not picked up, retry waiting
+    real = s.calls()[0]
+    assert real["status"] == "Retrying" and real["attempts_used"] == 1 and real["next_attempt_at"] == "05 Nov, 09:30 AM"
+    assert s.manual_call("F1", "test")["kind"] == "test"
+    wait_idle(s)
+    rows = s.calls()
+    test = next(c for c in rows if c.get("is_test"))
+    assert test["status"] == "Completed" and test["disposition"].startswith("Test call") and test["farmer_name"] == "Ramesh"
+    assert test["call_id"].startswith("TEST") and test["attempts_used"] == 0 and test["next_attempt_at"] is None
+    day = next(c for c in rows if not c.get("is_test"))
+    assert (day["status"], day["attempts_used"], day["next_attempt_at"]) == ("Retrying", 1, "05 Nov, 09:30 AM")   # untouched
+    assert s.call(test["call_id"])["is_test"] is True
+    assert s.alerts() == [] and s.callbacks() == []
+
+
+def test_a_test_call_can_be_repeated_even_when_the_day_is_complete_or_attempts_are_used(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED, A.ANSWERED), understood="yes")
+    s, _ = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)                                                          # completed today: "retry" mode is refused
+    with pytest.raises(ValueError, match="already completed"):
+        s.manual_call("F1")
+    for _ in range(2):
+        s.manual_call("F1", "test")
+        wait_idle(s)
+    assert len(d.calls) == 3 and sum(1 for c in s.calls() if c.get("is_test")) == 2
+    assert next(c for c in s.calls() if not c.get("is_test"))["attempts_used"] == 1
+
+
+def test_a_test_call_records_no_stop_decline_or_callback(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED), callback_text="17:30", stop="yes")
+    s, _ = timed(tmp_path, d)
+    s.import_csv(ONE)
+    for _ in range(2):
+        s.manual_call("F1", "test")
+        wait_idle(s)
+    assert s.callbacks() == [] and not s._is_paused("F1") and s.alerts() == []
+
+
+@pytest.mark.parametrize("setup, message", [("inactive", "inactive"), ("noconsent", "consent"), ("paused", "stopped"),
+                                            ("night", "between 05:00 and 22:00")])
+def test_a_test_call_keeps_the_safety_checks(tmp_path, setup, message):
+    d = Scripted((A.ANSWERED,))
+    s, _ = timed(tmp_path, d, start=datetime(2026, 11, 5, 23, 0, tzinfo=IST) if setup == "night" else T0)
+    s.import_csv(ONE)
+    if setup == "inactive":
+        s.update_farmer("F1", {"active": False})
+    elif setup == "noconsent":
+        s.update_farmer("F1", {"call_consent": False})
+    elif setup == "paused":
+        s._note_stop("F1", D - timedelta(days=1))
+        s._note_stop("F1", D)
+    with pytest.raises(ValueError, match=message):
+        s.manual_call("F1", "test")
+    assert d.calls == []
+
+
+def test_api_call_button_modes(api):
+    call, s = api
+    s._now = lambda: T0
+    s.import_csv(ONE)
+    assert call("/api/farmers/F1/call", json.dumps({"mode": "nonsense"}).encode())[0] == 400
+    code, body, _ = call("/api/farmers/F1/call", json.dumps({"mode": "test"}).encode())
+    assert code == 202 and body["kind"] == "test"
+    wait_idle(s)
+    assert any(c.get("is_test") for c in s.calls())

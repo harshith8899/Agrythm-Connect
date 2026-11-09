@@ -6,7 +6,8 @@
     GET  /api/health                         GET  /api/orchestrator/status
     GET  /api/calls   GET /api/calls/<id>    POST /api/orchestrator/auto-dispatch   {"enabled": true|false}
     GET  /api/farmers                        POST /api/orchestrator/run-now         send today's calls now
-    POST /api/farmers/<id>/call  place a call now for one farmer (the day's first call, or the next retry)
+    POST /api/farmers/<id>/call  place a call now for one farmer; body {"mode": "retry"} follows the retry rules (default),
+                                 {"mode": "test"} is a test call kept as its own row, outside the retry rules
     POST /api/farmers          add one farmer;  PUT/PATCH /api/farmers/<id>  edit one (also active and consent)
     POST /api/farmers/import   (CSV text)    POST /api/calls/send-now               (same; /trigger-demo kept as alias)
     GET  /api/callbacks                      GET  /api/weather?lat=..&lon=..
@@ -131,7 +132,9 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
                 body = self._body()
                 if path.startswith("/api/farmers/") and path.endswith("/call"):
                     fid = urllib.parse.unquote(path[len("/api/farmers/"):-len("/call")])
-                    return self._send(202, service.manual_call(fid))
+                    fields = json.loads(body or "{}")
+                    mode = fields.get("mode", "retry") if isinstance(fields, dict) else "retry"
+                    return self._send(202, service.manual_call(fid, mode))
                 if path == "/api/farmers":
                     fields = json.loads(body or "{}")
                     if not isinstance(fields, dict):
