@@ -62,3 +62,15 @@ def test_sqlite_is_still_the_default():
     conn.execute("CREATE TABLE t(a INT, b TEXT)")
     assert db.table_columns(conn, "t") == {"a", "b"}
     assert sqlite3.IntegrityError in db.IntegrityError and sqlite3.OperationalError in db.OperationalError
+
+
+def test_migration_turns_empty_text_in_number_columns_into_null(tmp_path):
+    import sqlite3
+    from weathercall.migrate_db import migrate
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE dash_results(farmer_id TEXT, duration_s INT, note TEXT)")
+    conn.execute("INSERT INTO dash_results VALUES('F1', '', '')")
+    conn.commit()
+    conn.close()
+    assert migrate(str(path), "postgresql://u:p@localhost/x", dry_run=True) == {"dash_results": (1, 0)}      # counts only, no database touched

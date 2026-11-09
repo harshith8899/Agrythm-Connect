@@ -37,6 +37,10 @@ def migrate(source: str, target: str, dry_run: bool = False) -> dict[str, tuple[
             continue
         cols = sorted(table_columns(src, table), key=lambda c: [r[1] for r in src.execute(f"PRAGMA table_info({table})")].index(c))
         rows = src.execute(f"SELECT {', '.join(cols)} FROM {table}").fetchall()
+        types = {r[1]: (r[2] or "").upper() for r in src.execute(f"PRAGMA table_info({table})")}
+        numeric = [i for i, c in enumerate(cols) if types.get(c, "").startswith(("INT", "REAL"))]
+        # SQLite let an empty string sit in a number column; Postgres does not: that is NULL
+        rows = [tuple(None if (i in numeric and v == "") else v for i, v in enumerate(r)) for r in rows]
         added = 0
         if not dry_run:
             sql = f"INSERT OR IGNORE INTO {table}({', '.join(cols)}) VALUES({', '.join('?' * len(cols))})"
