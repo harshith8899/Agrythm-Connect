@@ -17,8 +17,6 @@ export const Header = ({
     switch (activeTab) {
       case 'farmers':
         return 'Farmer Profiles Directory';
-      case 'weather':
-        return 'District Weather Advisories & Alerts';
       case 'system':
         return 'System Status & Sarvam Usage';
       case 'overview':

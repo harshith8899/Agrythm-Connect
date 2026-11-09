@@ -8,7 +8,6 @@ import {
   CallHistoryTable, 
   CallDetailDrawer, 
   FarmerDirectory, 
-  WeatherAlertsView,
   SystemStatusView
 } from './components';
 import { useVoiceAgentData } from './hooks';
@@ -69,7 +68,6 @@ function App() {
         setActiveTab={setActiveTab}
         isOpen={sidebarOpen}
         setIsOpen={setSidebarOpen}
-        weatherAlertsCount={summaryMetrics.severeWeatherAlerts}
       />
 
       {/* Main Content Area */}
@@ -159,11 +157,8 @@ function App() {
               callLogs={callLogs}
               onSelectFarmer={handleSelectFarmerFromDirectory}
               onImported={() => fetchAllData(false)}
+              isLive={Boolean(autoDispatcher?.live)}
             />
-          )}
-
-          {activeTab === 'weather' && (
-            <WeatherAlertsView callLogs={callLogs} />
           )}
 
           {activeTab === 'system' && (

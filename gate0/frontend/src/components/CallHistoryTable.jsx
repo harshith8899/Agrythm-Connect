@@ -202,10 +202,10 @@ export const CallHistoryTable = ({
       <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-            Live Call History & Telemetry Logs
+            Call history
           </span>
           <h3 className="text-base font-bold text-slate-900">
-            Voice Agent 4-Parameter Weather Advisories & Retries
+            Weather calls and retries
           </h3>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500">

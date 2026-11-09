@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Search, MapPin, Phone, PhoneCall, Upload, Users, Plus, Pencil, X } from 'lucide-react';
-import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer } from '../utils';
+import { Search, MapPin, Phone, PhoneCall, Upload, Users, Plus, Pencil, X, Phone as PhoneIcon } from 'lucide-react';
+import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, callFarmer } from '../utils';
 
 // Upload a farmers CSV; the backend saves it (same Farmer ID updates the farmer) and the list reloads.
 const ImportCsvButton = ({ onImported }) => {
@@ -38,6 +38,28 @@ const ImportCsvButton = ({ onImported }) => {
       )}
     </div>
   );
+};
+
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// What the Call button does for a farmer, from today's call record: the day's first call, the next retry, or nothing (with the reason).
+const RETRYABLE = ['Retrying', 'Unanswered', 'Not Confirmed', 'Failed'];
+const callAction = (farmer, todayCall) => {
+  if (farmer.active === 'No') return { disabled: true, label: 'Call', why: 'Inactive farmer' };
+  if (farmer.call_consent === 'No') return { disabled: true, label: 'Call', why: 'No call consent' };
+  if (!todayCall) return { label: 'Call now', first: true };
+  const used = Number(todayCall.attempts_used || 0);
+  const max = Number(todayCall.max_attempts || 3);
+  if (RETRYABLE.includes(todayCall.status)) {
+    return used < max
+      ? { label: `Retry now (${used + 1} of ${max})` }
+      : { disabled: true, label: 'Call', why: `All ${max} attempts used today` };
+  }
+  const reasons = { Completed: 'Already completed today', Declined: 'Said they do not need it today', 'Callback Scheduled': 'A callback is booked', Skipped: 'Skipped today' };
+  return { disabled: true, label: 'Call', why: reasons[todayCall.status] || 'Not available now' };
 };
 
 const LANGUAGES = ['Hindi', 'Kannada', 'Telugu', 'English'];
@@ -130,10 +152,31 @@ const AddFarmerButton = ({ onClick }) => (
   </button>
 );
 
-export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, onImported }) => {
+export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, onImported, isLive = false }) => {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null); // null: closed, 'new': add form, or the farmer being edited
   const [toggleError, setToggleError] = useState('');
+  const [callNote, setCallNote] = useState({}); // farmer id -> { ok, text } shown on the card
+  const [calling, setCalling] = useState({});
+
+  const placeCall = async (farmer, action) => {
+    const what = action.first ? 'a call' : 'the next attempt';
+    const text = isLive
+      ? `Place ${what} to ${farmer.farmer_name} now? This is a real call and uses Sarvam credits.`
+      : `Place ${what} to ${farmer.farmer_name} now? Calls are simulated, so no real call is made.`;
+    if (!window.confirm(text)) return;
+    setCalling((c) => ({ ...c, [farmer.farmer_id]: true }));
+    setCallNote((n) => ({ ...n, [farmer.farmer_id]: null }));
+    try {
+      await callFarmer(farmer.farmer_id);
+      setCallNote((n) => ({ ...n, [farmer.farmer_id]: { ok: true, text: 'Call started. The result appears in Call Logs.' } }));
+      [3000, 10000, 25000].forEach((ms) => setTimeout(() => onImported && onImported(), ms));
+    } catch (err) {
+      setCallNote((n) => ({ ...n, [farmer.farmer_id]: { ok: false, text: err.message } }));
+    } finally {
+      setTimeout(() => setCalling((c) => ({ ...c, [farmer.farmer_id]: false })), 4000);
+    }
+  };
 
   const toggleActive = async (farmer) => {
     setToggleError('');
@@ -149,8 +192,10 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
   const farmerStats = farmers.map(f => {
     const farmerCalls = callLogs.filter(c => String(c.farmer_id).trim() === String(f.farmer_id).trim());
     const talkedToday = farmerCalls.some(c => isCallToday(getCallTimestamp(c)) && didFarmerPickUpAndTalk(c));
+    const todayCall = farmerCalls.find(c => c.call_date === todayStr());
     return {
       ...f,
+      action: callAction(f, todayCall),
       totalCalls: farmerCalls.length,
       talkedToday,
     };
@@ -303,6 +348,24 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                 <Pencil className="w-3 h-3" />
                 <span>Edit</span>
               </button>
+            </div>
+
+            <div className="space-y-1">
+              <button
+                onClick={() => placeCall(farmer, farmer.action)}
+                disabled={farmer.action.disabled || calling[farmer.farmer_id]}
+                title={farmer.action.why || (farmer.action.first ? 'Place a call now' : 'Place the next attempt now')}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+              >
+                <PhoneIcon className="w-3.5 h-3.5" />
+                <span>{calling[farmer.farmer_id] ? 'Calling...' : farmer.action.label}</span>
+              </button>
+              {farmer.action.why && <p className="text-[11px] text-slate-500 text-center">{farmer.action.why}</p>}
+              {callNote[farmer.farmer_id] && (
+                <p className={`text-[11px] font-semibold text-center ${callNote[farmer.farmer_id].ok ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {callNote[farmer.farmer_id].text}
+                </p>
+              )}
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">

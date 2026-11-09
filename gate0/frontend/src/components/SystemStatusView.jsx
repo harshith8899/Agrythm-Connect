@@ -67,6 +67,8 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
 
   const overallOk = report && report.overall === 'ok';
   const okCount = report ? report.checks.filter((c) => c.status === 'ok').length : 0;
+  const failCount = report ? report.checks.filter((c) => c.status === 'fail').length : 0;
+  const offCount = report ? report.checks.filter((c) => c.status === 'off').length : 0;
 
   return (
     <div className="space-y-6">
@@ -117,8 +119,10 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
             className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50 rounded-2xl cursor-pointer"
           >
             <span className="text-sm font-bold text-slate-900">Connections</span>
-            <span className={`text-xs font-semibold ${okCount === report.checks.length ? 'text-emerald-600' : 'text-rose-600'}`}>
+            <span className={`text-xs font-semibold ${failCount > 0 ? 'text-rose-600' : offCount > 0 ? 'text-slate-500' : 'text-emerald-600'}`}>
               {okCount} of {report.checks.length} OK
+              {failCount > 0 && `, ${failCount} with a problem`}
+              {offCount > 0 && `, ${offCount} not set up`}
             </span>
             <ChevronDown className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${checksOpen ? 'rotate-180' : ''}`} />
           </button>

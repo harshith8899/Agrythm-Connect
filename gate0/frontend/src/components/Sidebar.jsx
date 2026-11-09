@@ -2,7 +2,6 @@ import React from 'react';
 import {
   PhoneCall,
   Users,
-  CloudRain,
   ShieldCheck,
   X
 } from 'lucide-react';
@@ -12,7 +11,6 @@ export const Sidebar = ({
   setActiveTab,
   isOpen,
   setIsOpen,
-  weatherAlertsCount = 0
 }) => {
   const navItems = [
     {
@@ -25,17 +23,6 @@ export const Sidebar = ({
       id: 'farmers',
       label: 'Farmer Directory',
       icon: Users,
-    },
-    {
-      id: 'weather',
-      label: 'Weather Advisories',
-      icon: CloudRain,
-      badge: weatherAlertsCount > 0
-        ? `${weatherAlertsCount} Alert${weatherAlertsCount > 1 ? 's' : ''}`
-        : '0 Alerts',
-      badgeColor: weatherAlertsCount > 0
-        ? 'bg-amber-100 text-amber-800 border border-amber-200'
-        : 'bg-slate-100 text-slate-500 border border-slate-200',
     },
     {
       id: 'system',

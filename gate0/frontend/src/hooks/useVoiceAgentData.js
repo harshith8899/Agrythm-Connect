@@ -314,12 +314,6 @@ export const useVoiceAgentData = () => {
     });
     const farmersReached = reachedFarmerIds.size;
 
-    const severeWeatherAlerts = enrichedCallLogs.filter(c => {
-      const chance = parseInt(String(c.rainfall_chance || c.weather_rainfall || '0').replace('%', ''), 10) || 0;
-      const forecast = String(c.weather_forecast || '').toLowerCase();
-      return chance >= 60 || forecast.includes('heavy') || forecast.includes('alert') || forecast.includes('storm');
-    }).length;
-
     return {
       totalCalls,
       completedCount,
@@ -331,7 +325,6 @@ export const useVoiceAgentData = () => {
       needsAttentionCount,
       callbackCount,
       callbacksScheduled,
-      severeWeatherAlerts,
       totalRegisteredFarmers: farmers.length,
       confidenceRate: '98.5%'
     };
