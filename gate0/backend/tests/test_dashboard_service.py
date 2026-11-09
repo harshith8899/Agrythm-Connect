@@ -640,3 +640,93 @@ def test_api_add_and_edit_a_farmer(api):
     assert call("/api/farmers", json.dumps({**NEW, "phone_number": "1"}).encode())[0] == 400
     assert call("/api/farmers", b"nope")[0] == 400
     assert "9876543299" not in json.dumps(call("/api/farmers")[1])
+
+
+# ---- the Call button on a farmer card --------------------------------------------------------------------------------------
+def wait_idle(s, seconds=5):
+    deadline = time.time() + seconds
+    while time.time() < deadline and (s._manual or s.running):
+        time.sleep(0.02)
+    time.sleep(0.05)
+
+
+def test_call_button_places_the_days_first_call(tmp_path):
+    d = Scripted((A.ANSWERED,))
+    s, _ = timed(tmp_path, d)
+    s.import_csv(ONE)
+    assert s.manual_call("F1") == {"started": True, "kind": "first", "attempt": 1, "max_attempts": 3}
+    wait_idle(s)
+    assert len(d.calls) == 1 and s.calls()[0]["status"] == "Completed" and s.calls()[0]["attempts_used"] == 1
+
+
+def test_call_button_on_a_retryable_result_is_the_next_attempt_and_replaces_the_waiting_retry(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.NO_ANSWER, A.ANSWERED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    assert s.calls()[0]["attempts_used"] == 1 and s.calls()[0]["next_attempt_at"] == "05 Nov, 09:30 AM"
+    clock["now"] = T0 + timedelta(minutes=5)
+    assert s.manual_call("F1")["attempt"] == 2
+    wait_idle(s)
+    c = s.calls()[0]
+    assert len(d.calls) == 2 and c["attempts_used"] == 2
+    assert c["next_attempt_at"] == "05 Nov, 10:05 AM"                  # the 30-min retry was replaced; next gap is 1 hour
+    assert s.manual_call("F1")["attempt"] == 3                         # the last one
+    wait_idle(s)
+    assert s.calls()[0]["attempts_used"] == 3 and s.calls()[0]["status"] == "Completed"
+
+
+@pytest.mark.parametrize("setup, message", [
+    ("done", "already completed"), ("declined", "do not need"), ("exhausted", "attempts are used"),
+    ("callback", "callback"), ("inactive", "inactive"), ("noconsent", "consent"), ("paused", "stopped"),
+    ("night", "between 05:00 and 22:00")])
+def test_call_button_is_refused_with_a_reason(tmp_path, setup, message):
+    start = datetime(2026, 11, 5, 23, 0, tzinfo=IST) if setup == "night" else T0
+    d = Scripted((A.ANSWERED, A.NO_ANSWER, A.NO_ANSWER, A.NO_ANSWER), understood="declined" if setup == "declined" else "yes")
+    s, clock = timed(tmp_path, d, start=start)
+    s.import_csv(ONE)
+    if setup in ("done", "declined"):
+        s.fire(D)
+    elif setup == "exhausted":
+        d.statuses = [A.NO_ANSWER] * 3
+        s.fire(D)
+        for minutes in (30, 90):
+            clock["now"] = T0 + timedelta(minutes=minutes)
+            s.run_due_retries()
+    elif setup == "callback":
+        d.cb, d.statuses = "17:30", [A.ANSWERED]
+        s.fire(D)
+    elif setup == "inactive":
+        s.update_farmer("F1", {"active": False})
+    elif setup == "noconsent":
+        s.update_farmer("F1", {"call_consent": False})
+    elif setup == "paused":
+        s._note_stop("F1", D - timedelta(days=1))
+        s._note_stop("F1", D)
+    placed = len(d.calls)
+    with pytest.raises(ValueError, match=message):
+        s.manual_call("F1")
+    wait_idle(s)
+    assert len(d.calls) == placed                                       # nothing was dialled
+
+
+def test_call_button_refuses_a_second_press_while_a_call_is_in_progress(tmp_path):
+    s, _ = timed(tmp_path, Scripted((A.ANSWERED,)))
+    s.import_csv(ONE)
+    s._manual.add("F1")
+    with pytest.raises(ValueError, match="in progress"):
+        s.manual_call("F1")
+    s._manual.clear()
+    with pytest.raises(KeyError):
+        s.manual_call("nope")
+
+
+def test_api_call_button(api):
+    call, s = api
+    s._now = lambda: T0                                                 # fixed clock: a real one after 22:00 is out of hours
+    s.import_csv(ONE)
+    code, body, _ = call("/api/farmers/F1/call", b"{}")
+    assert code == 202 and body["kind"] == "first"
+    wait_idle(s)
+    assert call("/api/farmers/F1/call", b"{}")[0] == 400               # already completed today (simulated call understood)
+    assert call("/api/farmers/zzz/call", b"{}")[0] == 404

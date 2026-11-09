@@ -153,6 +153,7 @@ class DashboardService:
         self.running = False
         self.last_run: dict | None = None
         self.cb_lock = threading.Lock()
+        self._manual: set[str] = set()          # farmers with a call placed by hand in progress
 
     def _make_ports(self) -> Ports:
         return Ports(DBFarmers(self.db, self.lock), SQLiteLedger(self.db_path), StoredWeather(
@@ -573,6 +574,79 @@ class DashboardService:
             return False
         threading.Thread(target=self.fire, args=(day,), daemon=True).start()
         return True
+
+    # -- the Call button on a farmer card ------------------------------------------------------------------------------
+    def manual_call(self, fid: str) -> dict:
+        """Places a call now for one farmer, by hand. With no result yet today it is the day's first call; with a result
+        that is still retryable it is the next attempt (the attempt count goes up by one and the waiting retry is
+        replaced). Refused, with the reason, when the farmer is completed, declined, has a callback booked, has used all
+        attempts, is inactive, has no consent, asked to stop, or when it is outside the calling hours."""
+        now = self._now()
+        day = now.date()
+        with self.lock:
+            r = self.db.execute("SELECT active, consent, phone FROM dash_farmers WHERE farmer_id=?", (fid,)).fetchone()
+        if not r:
+            raise KeyError(fid)
+        if not r[0]:
+            raise ValueError("this farmer is inactive")
+        if not r[1]:
+            raise ValueError("this farmer has not given call consent")
+        if not r[2]:
+            raise ValueError("this farmer has no phone number")
+        if self._is_paused(fid):
+            raise ValueError("calls are stopped for this farmer: they asked us to stop")
+        if not (CALL_FROM <= now.timetz().replace(tzinfo=None) <= CALL_TO):
+            raise ValueError("calls can only be placed between 05:00 and 22:00 India time")
+        if self.running:
+            raise ValueError("today's send is running; try again when it finishes")
+        with self.lock:
+            if fid in self._manual:
+                raise ValueError("a call to this farmer is already in progress")
+            row = self.db.execute("SELECT status, note, understood_weather, stop_calls_requested FROM dash_results "
+                                  "WHERE farmer_id=? AND call_date=?", (fid, day.isoformat())).fetchone()
+        kind, seq, attempt = "first", 1, 1
+        if row:
+            status, note, understood, stop = row
+            understood = understood or ""
+            if self._has_callback(fid, day):
+                raise ValueError("a callback is already booked for this farmer")
+            if stop == "yes":
+                raise ValueError("this farmer asked to stop the calls")
+            if understood == "yes":
+                raise ValueError("already completed today: the farmer understood the weather")
+            if understood == "declined":
+                raise ValueError("the farmer said they do not need the weather today")
+            if status == "skipped":
+                raise ValueError(f"skipped today ({(note or 'no reason').replace('_', ' ')})")
+            errors = self._attempt_errors(fid, day)
+            drops = sum(1 for e in errors if e == NETWORK_DROP)
+            counted = len(errors) - min(drops, MAX_FREE_RETRIES)
+            if counted >= self.settings.max_attempts:
+                raise ValueError(f"all {self.settings.max_attempts} attempts are used today")
+            kind, seq, attempt = "retry", len(errors) + 1, counted + 1
+        with self.lock:
+            self._manual.add(fid)
+
+        def work():
+            try:
+                with self.cb_lock:
+                    ports = self._make_ports()
+                    if kind == "first":
+                        self.ports = ports
+                        self.fire_one(fid, day)
+                    else:
+                        with self.lock:
+                            self.db.execute("UPDATE dash_retries SET status='superseded', note='called by hand' "
+                                            "WHERE farmer_id=? AND call_date=? AND status='pending'", (fid, day.isoformat()))
+                            self.db.commit()
+                        self._retry_one(ports, fid, day, seq)
+            except Exception:
+                pass
+            finally:
+                with self.lock:
+                    self._manual.discard(fid)
+        threading.Thread(target=work, daemon=True).start()
+        return {"started": True, "kind": kind, "attempt": attempt, "max_attempts": self.settings.max_attempts}
 
     # -- callbacks: one more call at the time the farmer asked for, never retried ---------------------------------
     def _schedule_callback(self, fid: str, source_day: date, text: str, now: datetime | None = None,
