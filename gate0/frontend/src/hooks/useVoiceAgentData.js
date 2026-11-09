@@ -292,44 +292,30 @@ export const useVoiceAgentData = () => {
     });
   }, [enrichedCallLogs, searchQuery, districtFilter, languageFilter, statusFilter, dateFilter, customDate]);
 
-  // Summary metrics calculated from the call records the backend returns
+  // Summary cards: one row per farmer per day, for the date picked in the filter bar (all dates when none is picked).
+  // Skipped farmers (no consent, inactive, no weather) are not calls, and test calls never count.
   const summaryMetrics = useMemo(() => {
-    const realLogs = enrichedCallLogs.filter(c => !c.is_test); // test calls never count in the summary
-    const totalCalls = realLogs.length;
-    const completedCount = realLogs.filter(c => c.status === 'Completed').length;
-    const retryingCount = realLogs.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length;
-    const failedCount = realLogs.filter(c => c.status === 'Failed').length;
-    const needsAttentionCount = realLogs.filter(c => ['Failed', 'Not Confirmed'].includes(c.status)).length;
-    const escalationCount = needsAttentionCount;
-    const callbackCount = realLogs.filter(c => Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested').length;
-
-    // Callbacks still waiting to be placed (the backend places each one at the time the farmer asked for)
-    const callbacksScheduled = realLogs.filter(c => c.callback_status === 'pending').length;
-
-    // Unique farmers reached (answered weather or resolved callback/escalation)
-    const reachedFarmerIds = new Set();
-    realLogs.forEach(c => {
-      if (['Completed', 'Escalated'].includes(c.status) || ['Weather Delivered', 'Callback Requested', 'Non-Weather Inquiry'].includes(c.disposition)) {
-        if (c.farmer_id) reachedFarmerIds.add(String(c.farmer_id).trim());
-      }
-    });
-    const farmersReached = reachedFarmerIds.size;
+    const inScope = (c) => {
+      if (dateFilter === 'all' || !customDate) return true;
+      const raw = getCallDate(c);
+      return Boolean(raw) && isCallOnDate(raw, customDate);
+    };
+    const scoped = enrichedCallLogs.filter(c => !c.is_test && inScope(c));
+    const called = scoped.filter(c => c.status !== 'Skipped');
+    const scopeLabel = dateFilter === 'today' ? 'Today' : dateFilter === 'yesterday' ? 'Yesterday'
+      : customDate ? customDate : 'All dates';
 
     return {
-      totalCalls,
-      completedCount,
-      deliveredCount: completedCount,
-      farmersReached,
-      retryingCount,
-      failedCount,
-      escalationCount,
-      needsAttentionCount,
-      callbackCount,
-      callbacksScheduled,
-      totalRegisteredFarmers: farmers.length,
-      confidenceRate: '98.5%'
+      scopeLabel,
+      totalCalls: called.length,
+      completedCount: called.filter(c => c.status === 'Completed').length,
+      retryingCount: called.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length,
+      needsAttentionCount: called.filter(c => ['Failed', 'Not Confirmed'].includes(c.status)).length,
+      declinedCount: called.filter(c => c.status === 'Declined').length,
+      callbacksScheduled: scoped.filter(c => c.callback_status === 'pending').length,
+      skippedCount: scoped.length - called.length,
     };
-  }, [enrichedCallLogs, farmers]);
+  }, [enrichedCallLogs, dateFilter, customDate]);
 
   // Send today's calls now to every eligible farmer
   const triggerDemo = async () => {
