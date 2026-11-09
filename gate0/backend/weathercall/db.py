@@ -88,8 +88,34 @@ def translate_ddl(sql: str) -> str:
 
 
 # ---- Postgres connection with the sqlite3-like surface -------------------------------------------------------------------
+class _Link:
+    """One real Postgres connection, shared by every PgConnection of one thread (the pooler allows few connections),
+    and the schema it is currently pointed at. A lock keeps two threads from interleaving on it."""
+
+    def __init__(self, url: str):
+        self.url = url
+        self.conn = None
+        self.schema: str | None = None
+        self.known: set[str] = set()
+        self.lock = threading.RLock()
+
+    def ensure(self) -> None:
+        if self.conn is None or self.conn.closed:
+            self.conn = psycopg.connect(self.url, autocommit=True, prepare_threshold=None, connect_timeout=15)
+            self.schema, self.known = None, set()
+
+    def use(self, schema: str) -> None:
+        if self.schema == schema:
+            return
+        if schema not in self.known:
+            self.conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+            self.known.add(schema)
+        self.conn.execute(f'SET search_path TO "{schema}"')
+        self.schema = schema
+
+
 class PgConnection:
-    def __init__(self, url: str, schema: str | None = None):
+    def __init__(self, url: str, schema: str | None = None, link: _Link | None = None):
         if psycopg is None:
             raise RuntimeError("Postgres needs the psycopg package: pip install \"psycopg[binary]\"")
         parts = urlparse(url)
@@ -99,14 +125,10 @@ class PgConnection:
             raise ValueError("the database schema name may only hold letters, digits and underscores")
         self.url = urlunparse(parts._replace(query=urlencode(query)))
         self._info: dict[str, tuple[list[str], list[str]]] = {}
-        self._lock = threading.RLock()
-        self._conn = None
-        self._connect()
-
-    def _connect(self) -> None:
-        self._conn = psycopg.connect(self.url, autocommit=True, prepare_threshold=None, connect_timeout=15)
-        self._conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
-        self._conn.execute(f'SET search_path TO "{self.schema}"')
+        self._link = link or _Link(self.url)
+        with self._link.lock:
+            self._link.ensure()
+            self._link.use(self.schema)
 
     def _table_info(self, table: str) -> tuple[list[str], list[str]]:
         if table not in self._info:
@@ -124,14 +146,16 @@ class PgConnection:
         return self._info[table]
 
     def _run(self, sql: str, params=None):
-        with self._lock:
-            try:
-                return self._conn.execute(sql, params)
-            except psycopg.OperationalError:
-                if not self._conn.closed:
-                    raise
-                self._connect()                       # the pooler dropped an idle connection: reconnect once
-                return self._conn.execute(sql, params)
+        link = self._link
+        with link.lock:
+            for attempt in (1, 2):
+                try:
+                    link.ensure()
+                    link.use(self.schema)
+                    return link.conn.execute(sql, params)
+                except psycopg.OperationalError:
+                    if attempt == 2 or link.conn is None or not link.conn.closed:
+                        raise                         # the pooler dropped an idle connection: reconnect once
 
     def execute(self, sql: str, params=()):
         return self._run(translate(sql, self._table_info), params)
@@ -163,10 +187,8 @@ class PgConnection:
     def rollback(self) -> None:
         return None
 
-    def close(self) -> None:
-        with self._lock:
-            if self._conn is not None and not self._conn.closed:
-                self._conn.close()
+    def close(self) -> None:                          # the real connection is shared and lives as long as its thread
+        return None
 
 
 def table_columns(conn, table: str) -> set[str]:
@@ -180,11 +202,15 @@ _local = threading.local()
 
 
 def _postgres(url: str, schema: str | None = None, fresh: bool = False) -> PgConnection:
-    """One Postgres connection per thread and database, reused: opening one over the internet takes about a second."""
+    """A PgConnection for this thread: one real connection per thread and database, shared by every schema."""
+    links = _local.__dict__.setdefault("links", {})
+    link = links.get(url)
+    if link is None:
+        link = links[url] = _Link(url)
     cache = _local.__dict__.setdefault("conns", {})
     conn = None if fresh else cache.get((url, schema))
-    if conn is None or conn._conn is None or conn._conn.closed:
-        conn = PgConnection(url, schema)
+    if conn is None:
+        conn = PgConnection(url, schema, link)
         cache[(url, schema)] = conn
     return conn
 

@@ -379,7 +379,7 @@ class DashboardService:
     # -- sending the day's calls ---------------------------------------------------------------------------------
     def _save(self, fid: str, day: date, **kw) -> None:
         cols = ["status", "note", "weather", "attempt_id", "mode", "language", "duration_s", *OUTPUT_VARS, "transcript"]
-        vals = [kw.get(c, "") for c in cols]
+        vals = [kw.get(c) if c == "duration_s" else kw.get(c, "") for c in cols]      # a number column gets a number or NULL
         with self.lock:
             self.db.execute(f"INSERT OR REPLACE INTO dash_results VALUES(?,?,{','.join('?' * len(cols))},?)",
                             (fid, day.isoformat(), *vals, self._now().isoformat(timespec="seconds")))
