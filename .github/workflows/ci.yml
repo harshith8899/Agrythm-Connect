@@ -63,7 +63,8 @@ jobs:
   # Frontend goes to Cloudflare Pages when the tests pass on main. The backend deploys itself on Render
   # (autoDeployTrigger: checksPass in render.yaml), so it waits for the same checks.
   deploy-frontend:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Runs only once the Cloudflare secrets are in and the repository variable DEPLOY_FRONTEND is set to true (docs/DEPLOY.md)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_FRONTEND == 'true'
     needs: [pilot-tests, gate0-backend-tests, gate0-frontend]
     runs-on: ubuntu-latest
     steps:

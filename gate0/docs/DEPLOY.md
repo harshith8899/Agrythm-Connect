@@ -50,6 +50,8 @@ who finds the address could read farmer data and press "Send now" (real calls co
    Edit. Copy the Account ID from the dashboard sidebar.
 2. GitHub, Settings, Secrets and variables, Actions: add secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
    If the Pages project is not called `agrythm-connect`, add a repository variable `CLOUDFLARE_PAGES_PROJECT`.
+   Then add a repository **variable** `DEPLOY_FRONTEND` with the value `true`. Until it exists, the deploy job is skipped,
+   so `main` stays green before Cloudflare is set up.
 3. GitHub, Settings, Branches, add a rule for `main`: require a pull request and require the status checks
    `pilot-tests`, `gate0-backend-tests` and `gate0-frontend`. After that, only tested code reaches `main`, and only `main`
    deploys.
