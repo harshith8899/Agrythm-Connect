@@ -45,6 +45,7 @@ def test_schema_definitions_are_translated():
     assert "id BIGSERIAL PRIMARY KEY" in ddl and "lat DOUBLE PRECISION" in ddl and "n INT" in ddl
     assert 'name TEXT COLLATE "C"' in ddl and 'message_text TEXT COLLATE "C"' in ddl and "AUTOINCREMENT" not in ddl
     assert translate_ddl('x TEXT COLLATE "C"') == 'x TEXT COLLATE "C"'                       # not applied twice
+    assert translate_ddl("(at TEXT, text TEXT, id INT)") == '(at TEXT COLLATE "C", text TEXT COLLATE "C", id INT)'   # a column named text
 
 
 def test_a_bad_schema_name_is_refused():
@@ -54,6 +55,7 @@ def test_a_bad_schema_name_is_refused():
         db.PgConnection("postgresql://u:p@localhost/x", schema='evil"; DROP SCHEMA public;--')
 
 
+@pytest.mark.skipif(bool(__import__("os").environ.get("GATE0_TEST_DATABASE_URL")), reason="the suite is running on Postgres")
 def test_sqlite_is_still_the_default():
     conn = db.connect(":memory:")
     assert isinstance(conn, sqlite3.Connection)

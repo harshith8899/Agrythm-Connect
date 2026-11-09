@@ -82,7 +82,8 @@ def translate(sql: str, table_info=None) -> str:
 def translate_ddl(sql: str) -> str:
     sql = re.sub(r"INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT", "BIGSERIAL PRIMARY KEY", sql, flags=re.I)
     sql = re.sub(r"\bREAL\b", "DOUBLE PRECISION", sql, flags=re.I)
-    sql = re.sub(r'\bTEXT\b(?!\s+COLLATE)', 'TEXT COLLATE "C"', sql, flags=re.I)   # byte order: ISO timestamps compare as text
+    # byte order, so ISO timestamps compare as text. Only the type: a column may itself be called "text".
+    sql = re.sub(r'(?<=[A-Za-z0-9_])(\s+)TEXT\b(?!\s+COLLATE)', r'\1TEXT COLLATE "C"', sql, flags=re.I)
     return sql
 
 
@@ -122,7 +123,7 @@ class PgConnection:
             self._info[table] = (cols, pk)
         return self._info[table]
 
-    def _run(self, sql: str, params=()):
+    def _run(self, sql: str, params=None):
         with self._lock:
             try:
                 return self._conn.execute(sql, params)
@@ -143,16 +144,17 @@ class PgConnection:
         key = (self.url, self.schema, hashlib.md5(script.encode()).hexdigest())
         if key in _ready:
             return
-        tables = []
+        statements, tables = [], []
         for stmt in (s.strip() for s in script.split(";")):
             if not stmt:
                 continue
-            self._run(translate_ddl(stmt))
+            statements.append(translate_ddl(stmt))
             m = re.match(r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(\w+)", stmt, re.I)
             if m:
                 tables.append(m.group(1))
-        for t in tables:                              # Supabase serves tables through its REST API: lock them down
-            self._run(f'ALTER TABLE "{t}" ENABLE ROW LEVEL SECURITY')
+        # Supabase serves tables through its REST API: lock them down. All in one round trip (the server is far away).
+        statements += [f'ALTER TABLE "{t}" ENABLE ROW LEVEL SECURITY' for t in tables]
+        self._run("; ".join(statements))
         _ready.add(key)
 
     def commit(self) -> None:                         # autocommit: nothing to do
@@ -174,17 +176,30 @@ def table_columns(conn, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
+_local = threading.local()
+
+
+def _postgres(url: str, schema: str | None = None, fresh: bool = False) -> PgConnection:
+    """One Postgres connection per thread and database, reused: opening one over the internet takes about a second."""
+    cache = _local.__dict__.setdefault("conns", {})
+    conn = None if fresh else cache.get((url, schema))
+    if conn is None or conn._conn is None or conn._conn.closed:
+        conn = PgConnection(url, schema)
+        cache[(url, schema)] = conn
+    return conn
+
+
 def connect(target, check_same_thread: bool = True):
-    """A SQLite file or :memory:, or Postgres for a postgres:// URL."""
+    """A SQLite file or :memory:, or Postgres for a postgres:// URL (a connection shared by the calling thread)."""
     target = str(target)
     test_url = os.environ.get("GATE0_TEST_DATABASE_URL", "")
     if test_url and not is_postgres(target):
         schema = "t_" + (uuid.uuid4().hex[:12] if target == ":memory:" else hashlib.md5(target.encode()).hexdigest()[:12])
         if (test_url, schema) not in test_schemas:
             test_schemas.append((test_url, schema))
-        return PgConnection(test_url, schema)
+        return _postgres(test_url, schema, fresh=target == ":memory:")
     if is_postgres(target):
-        return PgConnection(target)
+        return _postgres(target)
     return sqlite3.connect(target, check_same_thread=check_same_thread)
 
 
