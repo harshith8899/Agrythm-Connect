@@ -208,13 +208,18 @@ class SystemChecks:
             got = self.weather.get_forecast("probe", PROBE_PLACE[0], PROBE_PLACE[1], today)
         except Exception as exc:
             code = getattr(exc, "code", None)                                  # the HTTP status of a refusal, if there was one
-            why = {429: "HTTP 429: too many requests, this host's address is being throttled",
-                   403: "HTTP 403: the request was blocked"}.get(code) or (f"HTTP {code}" if code else type(exc).__name__)
+            keyed = bool(getattr(self.weather, "uses_key", False))
+            why = {429: ("HTTP 429: too many requests, the plan's limit was reached" if keyed else
+                         "HTTP 429: too many requests, this host's address is being throttled"),
+                   401: "HTTP 401: the API key was rejected" if keyed else "HTTP 401",
+                   403: "HTTP 403: the API key was rejected or the request was blocked" if keyed else "HTTP 403: the request was blocked",
+                   }.get(code) or (f"HTTP {code}" if code else type(exc).__name__)
             return self._check("weather", "Weather API (Open-Meteo)", "fail",
                                f"Did not answer ({why}). Saved forecasts are used meanwhile.", t)
         if today not in got:
             return self._check("weather", "Weather API (Open-Meteo)", "fail", "Answered, but without today's forecast.", t)
-        return self._check("weather", "Weather API (Open-Meteo)", "ok", "Answered with today's forecast.", t)
+        how = " (paid API key)" if getattr(self.weather, "uses_key", False) else " (free service)"
+        return self._check("weather", "Weather API (Open-Meteo)", "ok", f"Answered with today's forecast{how}.", t)
 
     def _sarvam_checks(self, refresh: bool) -> tuple[dict, dict]:
         if self.usage_reader is None:
