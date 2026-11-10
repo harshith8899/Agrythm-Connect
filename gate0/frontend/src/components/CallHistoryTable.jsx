@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { API_CONFIG } from '../utils/constants';
 import { maskPhoneNumber } from '../utils';
+import { SliderLoader } from './SliderLoader';
 
 export const CallHistoryTable = ({ 
   callLogs, 
@@ -24,6 +25,8 @@ export const CallHistoryTable = ({
   onResetFilters, 
   isFiltered,
   isBackendOnline = true,
+  loading = false,
+  refreshing = false,
   onRefresh
 }) => {
   const getStatusBadge = (status, disposition, skipReason) => {
@@ -136,6 +139,32 @@ export const CallHistoryTable = ({
     return `${mins}m ${secs}s`;
   };
 
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-2xs">
+        <div className="p-4 sm:p-5 border-b border-slate-100 space-y-3">
+          <div>
+            <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Call history</span>
+            <h3 className="text-base font-bold text-slate-900">Loading calls…</h3>
+          </div>
+          <SliderLoader />
+        </div>
+        <div className="divide-y divide-slate-100" aria-busy="true">
+          {[0, 1, 2, 3, 4].map((n) => (
+            <div key={n} className="p-4 flex items-center gap-4 animate-pulse">
+              <div className="h-9 w-9 rounded-xl bg-slate-200 shrink-0" />
+              <div className="flex-1 space-y-2">
+                <div className="h-3 rounded bg-slate-200 w-1/3" />
+                <div className="h-2.5 rounded bg-slate-100 w-2/3" />
+              </div>
+              <div className="hidden sm:block h-5 w-20 rounded-full bg-slate-200" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (!callLogs || callLogs.length === 0) {
     if (!isBackendOnline) {
       return (
@@ -212,6 +241,7 @@ export const CallHistoryTable = ({
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-2xs">
+      {refreshing && <SliderLoader />}
       {/* Table Header Controls */}
       <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
