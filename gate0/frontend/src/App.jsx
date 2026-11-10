@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
 import { 
   Sidebar, 
   Header, 
@@ -10,7 +9,8 @@ import {
   FarmerDirectory, 
   SystemStatusView,
   ConfirmHost,
-  MobileNav
+  MobileNav,
+  ServerBanner
 } from './components';
 import { useVoiceAgentData } from './hooks';
 
@@ -25,7 +25,10 @@ function App() {
     triggeringDemo,
     lastSynced,
     syncStatus,
+    loading,
     isBackendOnline,
+    hasConnected,
+    waitingSince,
     errorMessage,
     summaryMetrics,
     autoDispatcher,
@@ -79,7 +82,7 @@ function App() {
           onRefresh={() => fetchAllData(false)}
           refreshing={refreshing}
           syncStatus={syncStatus}
-          isBackendOnline={isBackendOnline}
+          isBackendOnline={isBackendOnline && hasConnected}
           activeTab={activeTab}
           onTriggerDemo={triggerDemo}
           triggeringDemo={triggeringDemo}
@@ -89,34 +92,18 @@ function App() {
 
         {/* Tab Content */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 md:py-8 pb-24 lg:pb-8 space-y-4 sm:space-y-6">
-          {/* Global Backend Offline Alert Banner */}
-          {!isBackendOnline && (
-            <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-900 shadow-xs animate-in fade-in duration-200">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
-                  <AlertTriangle className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-xs sm:text-sm font-bold text-rose-950">
-                    Backend API Disconnected
-                  </div>
-                  <div className="text-xs text-rose-700 mt-0.5 leading-relaxed">
-                    Cannot reach the API. If it runs on Render's free plan it may be waking up: wait a minute and press Retry.
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={() => fetchAllData(false)}
-                className="shrink-0 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer inline-flex items-center justify-center gap-1.5"
-              >
-                <span>Retry Connection</span>
-              </button>
-            </div>
-          )}
+          {/* Waking up / offline banner */}
+          <ServerBanner
+            isOnline={isBackendOnline}
+            loading={loading}
+            hasConnected={hasConnected}
+            waitingSince={waitingSince}
+            onRetry={() => fetchAllData(false)}
+          />
           {activeTab === 'overview' && (
             <>
               {/* KPI Metrics */}
-              <KpiMetrics metrics={summaryMetrics} />
+              <KpiMetrics metrics={summaryMetrics} loading={!hasConnected} />
 
               {/* Filters, below the summary cards */}
               <TopFilterBar
@@ -147,6 +134,8 @@ function App() {
                 onResetFilters={resetFilters}
                 isFiltered={isFiltered}
                 isBackendOnline={isBackendOnline}
+                loading={!hasConnected}
+                refreshing={refreshing}
                 onRefresh={() => fetchAllData(false)}
               />
             </>

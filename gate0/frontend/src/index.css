@@ -14,3 +14,8 @@
   input, select, textarea { font-size: 16px !important; }
   button, [role="button"] { min-height: 40px; }
 }
+
+/* The slider loader: a bar that runs along a track while something loads */
+@keyframes agrythm-slide { 0% { left: -40%; } 100% { left: 100%; } }
+.slider-bar { position: absolute; top: 0; bottom: 0; width: 40%; border-radius: 9999px; animation: agrythm-slide 1.3s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .slider-bar { animation: none; left: 0; width: 100%; opacity: .5; } }

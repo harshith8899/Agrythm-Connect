@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const OverviewCard = ({ title, value, subtitle, icon: Icon, badge, trend, className = '' }) => {
+export const OverviewCard = ({ title, value, subtitle, icon: Icon, badge, trend, className = '', loading = false }) => {
   return (
     <div className={`bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-5 transition-all hover:border-slate-300 ${className}`}>
       <div className="flex items-center justify-between gap-1 mb-2 sm:mb-3">
@@ -15,10 +15,14 @@ export const OverviewCard = ({ title, value, subtitle, icon: Icon, badge, trend,
       </div>
 
       <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 mt-1">
-        <div className="text-2xl font-bold text-slate-900 tracking-tight">
-          {value}
-        </div>
-        {badge && (
+        {loading ? (
+          <div className="h-8 w-12 rounded-lg bg-slate-200 animate-pulse" aria-label="Loading" />
+        ) : (
+          <div className="text-2xl font-bold text-slate-900 tracking-tight">
+            {value}
+          </div>
+        )}
+        {badge && !loading && (
           <span className="inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-trust-green border border-emerald-200">
             {badge}
           </span>
