@@ -88,7 +88,7 @@ export const TopFilterBar = ({
     { id: 'yesterday', label: 'Yesterday' },
   ];
 
-  const statuses = ['All Status', 'Completed', 'Callback Scheduled', 'Retrying', 'Not Confirmed', 'Declined', 'Unanswered', 'Failed', 'Skipped'];
+  const statuses = ['All Status', 'Completed', 'Callback Scheduled', 'Callback Missed', 'Callback Done', 'Retrying', 'Not Confirmed', 'Declined', 'Unanswered', 'Failed', 'Skipped'];
 
   const box = 'flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs';
   const select = 'bg-transparent text-xs font-medium text-slate-700 focus:outline-hidden cursor-pointer';

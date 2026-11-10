@@ -51,6 +51,20 @@ export const CallHistoryTable = ({
             <span>Not Confirmed</span>
           </span>
         );
+      case 'callback missed':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+            <Clock className="w-3 h-3 text-rose-600" />
+            <span>Callback Missed</span>
+          </span>
+        );
+      case 'callback done':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+            <CheckCircle2 className="w-3 h-3 text-slate-500" />
+            <span>Callback Done</span>
+          </span>
+        );
       case 'declined':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
