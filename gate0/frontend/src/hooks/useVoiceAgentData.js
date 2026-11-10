@@ -14,6 +14,12 @@ import {
   maskPhoneNumber
 } from '../utils';
 
+// Today's date in the browser's own calendar (YYYY-MM-DD), the default view of the overview
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 export const useVoiceAgentData = () => {
   const [farmers, setFarmers] = useState([]);
   const [callLogs, setCallLogs] = useState([]);
@@ -41,8 +47,8 @@ export const useVoiceAgentData = () => {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [dateFilter, setDateFilter] = useState('all');
-  const [customDate, setCustomDate] = useState('');
+  const [dateFilter, setDateFilter] = useState('today');   // a fresh day starts with an empty overview
+  const [customDate, setCustomDate] = useState(localToday);
   const [districtFilter, setDistrictFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -373,8 +379,8 @@ export const useVoiceAgentData = () => {
   // Reset all filters
   const resetFilters = () => {
     setSearchQuery('');
-    setDateFilter('all');
-    setCustomDate('');
+    setDateFilter('today');
+    setCustomDate(localToday());
     setDistrictFilter('all');
     setLanguageFilter('all');
     setStatusFilter('all');

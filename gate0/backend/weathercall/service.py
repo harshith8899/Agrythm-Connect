@@ -38,6 +38,7 @@ CALL_FROM, CALL_TO = dtime(5, 0), dtime(22, 0)   # callbacks only inside these h
 GRACE_MINUTES = 30        # a callback not placed within this long after its time is marked missed, not called late
 MAX_RELATIVE_MINUTES = 12 * 60
 NETWORK_DROP = "network_drop"   # set by the Sarvam adapter when a connected call was cut by the network
+INTERRUPTED_MINUTES = 10     # a retry or callback still 'calling' after this long means the process stopped mid-call
 MAX_FREE_RETRIES = 2        # a dropped call (network) is retried twice a day without counting as an attempt
 NETWORK_RETRY_MIN = 5
 MAX_RESCHEDULES = 2       # a farmer may move a callback at most twice (team, 5 Nov)
@@ -435,10 +436,13 @@ class DashboardService:
         return res, out
 
     def _store_outcome(self, fid: str, day: date, farmer: FarmerContext, w, attempt_no: int,
-                       res: ProviderCallResult, out: dict) -> None:
-        """Keeps the latest attempt's result for the dashboard, then plans a callback or a retry if one is due."""
-        weather = {"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
-                   "humidity": w.humidity_pct, "source": w.source}
+                       res: ProviderCallResult, out: dict, at: datetime | None = None, weather: dict | None = None) -> None:
+        """Keeps the latest attempt's result for the dashboard, then plans a callback or a retry if one is due.
+        at: when the call ended, if that is not now (a result recovered after an interruption); times such as 'in 5
+        minutes' and the next retry are counted from it."""
+        if weather is None:
+            weather = ({"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
+                        "humidity": w.humidity_pct, "source": w.source} if w is not None else {})
         transcript = [{"speaker": m["speaker"], "text": scrub(m["text"])} for m in out.pop("transcript", None) or []]
         if out.get("call_summary"):
             out["call_summary"] = scrub(out["call_summary"])            # free text: phone-like numbers masked
@@ -450,8 +454,8 @@ class DashboardService:
         if out.get("understood_weather") == "declined":
             self._note_decline(fid, day)
         if out.get("callback_time") and out.get("stop_calls_requested") != "yes":
-            self._schedule_callback(fid, day, out["callback_time"])
-        if not self._plan_retry(fid, day, attempt_no, res.status, out, res.error) and res.status is AttemptStatus.FAILED:
+            self._schedule_callback(fid, day, out["callback_time"], now=at)
+        if not self._plan_retry(fid, day, attempt_no, res.status, out, res.error, at) and res.status is AttemptStatus.FAILED:
             self._alert("provider_failure", fid,
                         f"The call failed and will not be retried ({scrub(res.error or 'provider error')[:80]}).")
 
@@ -471,7 +475,8 @@ class DashboardService:
                 return []
         return [r[0] or "" for r in rows]
 
-    def _plan_retry(self, fid: str, day: date, attempt_no: int, status: AttemptStatus, out: dict, error: str = "") -> bool:
+    def _plan_retry(self, fid: str, day: date, attempt_no: int, status: AttemptStatus, out: dict, error: str = "",
+                    at: datetime | None = None) -> bool:
         """Plans the next call; False when none is due (so the caller can alert on a failed call). attempt_no is the
         call's place in the day's sequence; the first MAX_FREE_RETRIES network drops do not count as attempts."""
         understood = out.get("understood_weather")
@@ -495,7 +500,7 @@ class DashboardService:
             if counted >= self.settings.max_attempts or counted > len(gaps):
                 return False
             minutes = gaps[counted - 1]
-        due = self._now() + timedelta(minutes=minutes)
+        due = (at or self._now()) + timedelta(minutes=minutes)
         if due.date() != day or not (CALL_FROM <= due.timetz().replace(tzinfo=None) <= CALL_TO):
             return False                       # a retry never runs after the calling window or on another day
         with self.lock:
@@ -527,7 +532,7 @@ class DashboardService:
                 if datetime.fromisoformat(due_at) < now - timedelta(minutes=GRACE_MINUTES):
                     self._retry_update(fid, day, attempt_no, "missed", f"not placed within {GRACE_MINUTES} min")
                     continue
-                self._retry_update(fid, day, attempt_no, "calling")
+                self._retry_update(fid, day, attempt_no, "calling", now.isoformat(timespec="seconds"))   # claimed at
                 try:
                     outcome = self._retry_one(ports, fid, date.fromisoformat(day), attempt_no)
                 except Exception as exc:
@@ -766,7 +771,7 @@ class DashboardService:
                     self._cb_update(fid, due_at, status="missed",
                                     note=f"not placed within {GRACE_MINUTES} min of the requested time")
                     continue
-                self._cb_update(fid, due_at, status="calling")
+                self._cb_update(fid, due_at, status="calling", note=now.isoformat(timespec="seconds"))   # claimed at
                 try:
                     placed += self._callback_one(ports, fid, due_at, date.fromisoformat(source_date))
                 except Exception as exc:                    # never retried, never stops the others
@@ -787,24 +792,30 @@ class DashboardService:
             res = self.dialler.place(farmer.phone, _LANG_NAMES[farmer.language], self._variables(farmer, w))
         except Exception as exc:
             res = ProviderCallResult(AttemptStatus.FAILED, error=type(exc).__name__)
-        for n in (1, 2, 3):                                 # a free attempt number for that day
-            try:
-                ports.ledger.record_attempt(CallAttempt(
-                    farmer_id=fid, call_date=due_day, attempt_no=n, status=res.status, language=farmer.language,
-                    message_text="(callback)", provider_call_id=res.provider_call_id, duration_s=res.duration_s,
-                    error=res.error, weather_source=w.source))
-                if due_day != source_day:                   # a new day: this call is that day's one call
-                    ports.ledger.record_day_result(FarmerDayResult(fid, due_day, final_result(res.status), 1))
-                break
-            except IntegrityError:
-                ports.ledger.db.rollback()
-                continue
         out: dict = {}
         if res.status is AttemptStatus.ANSWERED:
             try:
                 out = self.dialler.outputs(res.provider_call_id)
             except Exception:
                 out = {}
+        self._finish_callback(ports, farmer, fid, due_at, source_day, due_day, res, out, w.source)
+        return 1
+
+    def _finish_callback(self, ports: Ports, farmer: FarmerContext, fid: str, due_at: str, source_day: date, due_day: date,
+                         res: ProviderCallResult, out: dict, weather_source: str, at: datetime | None = None) -> None:
+        """Keeps a callback's result, then handles a stop request or a farmer who asks to be called later again."""
+        for n in (1, 2, 3):                                 # a free attempt number for that day
+            try:
+                ports.ledger.record_attempt(CallAttempt(
+                    farmer_id=fid, call_date=due_day, attempt_no=n, status=res.status, language=farmer.language,
+                    message_text="(callback)", provider_call_id=res.provider_call_id, duration_s=res.duration_s,
+                    error=res.error, weather_source=weather_source))
+                if due_day != source_day:                   # a new day: this call is that day's one call
+                    ports.ledger.record_day_result(FarmerDayResult(fid, due_day, final_result(res.status), 1))
+                break
+            except IntegrityError:
+                ports.ledger.db.rollback()
+                continue
         self._cb_update(fid, due_at, status=res.status.value, note=res.error, attempt_id=res.provider_call_id,
                         call_summary=out.get("call_summary", ""), understood_weather=out.get("understood_weather", ""))
         if out.get("stop_calls_requested") == "yes":
@@ -814,11 +825,10 @@ class DashboardService:
                 used = self.db.execute("SELECT reschedules FROM dash_callbacks WHERE farmer_id=? AND due_at=?",
                                        (fid, due_at)).fetchone()[0] or 0
             if used < MAX_RESCHEDULES:
-                self._schedule_callback(fid, source_day, out["callback_time"], reschedules=used + 1)
+                self._schedule_callback(fid, source_day, out["callback_time"], now=at, reschedules=used + 1)
             else:
                 self._alert("callback_limit", fid,
                             f"Asked to move the callback again after {MAX_RESCHEDULES} reschedules; no more callbacks.")
-        return 1
 
     def callbacks(self) -> list[dict]:
         with self.lock:
@@ -841,6 +851,96 @@ class DashboardService:
         finally:
             self._tick_lock.release()
 
+    # -- a call whose result was never saved (the process stopped while the farmer was on the phone) ------------------------
+    def _claimed_at(self, note: str, due_at: str) -> datetime:
+        try:
+            return datetime.fromisoformat(note)
+        except (TypeError, ValueError):
+            return datetime.fromisoformat(due_at)           # claims made before the claim time was kept
+
+    def _find_call(self, ports: Ports, fid: str, claimed: datetime):
+        farmer = ports.farmers.get_context(fid)
+        find = getattr(self.dialler, "find_call", None)
+        if farmer is None or find is None:
+            return None
+        try:
+            return find(farmer.phone, claimed - timedelta(minutes=2), claimed + timedelta(minutes=20))
+        except Exception:
+            return None
+
+    def recover_interrupted(self, now: datetime | None = None) -> int:
+        """A retry or callback that was taken (status calling) more than INTERRUPTED_MINUTES ago and never finished means the
+        process stopped mid-call (a restart, a crash). Ask the provider what happened to that call: if it is there, save its
+        result and handle it as if nothing had happened (a callback time the farmer asked for is scheduled, counted from
+        when the call ended). If it is not there, drop the claim and tell the team; nobody is dialled twice on a guess.
+        Returns how many calls were recovered."""
+        now = now or self._now()
+        with self.lock:
+            retries = self.db.execute("SELECT farmer_id, call_date, attempt_no, due_at, note FROM dash_retries "
+                                      "WHERE status='calling'").fetchall()
+            callbacks = self.db.execute("SELECT farmer_id, due_at, source_date, note FROM dash_callbacks "
+                                        "WHERE status='calling'").fetchall()
+        limit = timedelta(minutes=INTERRUPTED_MINUTES)
+        stale_r = [r for r in retries if self._claimed_at(r[4], r[3]) + limit < now]
+        stale_c = [r for r in callbacks if self._claimed_at(r[3], r[1]) + limit < now]
+        if not stale_r and not stale_c:
+            return 0
+        recovered = 0
+        with self.cb_lock:
+            ports = self._make_ports()
+            for fid, day, attempt_no, due_at, note in stale_r:
+                found = self._find_call(ports, fid, self._claimed_at(note, due_at))
+                if found is None:
+                    self._retry_update(fid, day, attempt_no, "dropped", "interrupted: no call found")
+                    self._alert("interrupted_call", fid, "A retry call was interrupted and no call was found at the provider. "
+                                                         "Use the Call button if the farmer still needs one.")
+                    continue
+                res, ended = found
+                ended = ended.astimezone(self._now().tzinfo or IST)
+                out = self._outputs(res)
+                farmer = ports.farmers.get_context(fid)
+                try:
+                    ports.ledger.record_attempt(CallAttempt(
+                        farmer_id=fid, call_date=date.fromisoformat(day), attempt_no=attempt_no, status=res.status,
+                        language=farmer.language, message_text="(recovered)", provider_call_id=res.provider_call_id,
+                        duration_s=res.duration_s, error=res.error, weather_source="recovered"))
+                except IntegrityError:
+                    ports.ledger.db.rollback()
+                ports.ledger.db.execute("UPDATE day_results SET result=?, attempts=? WHERE farmer_id=? AND call_date=?",
+                                        (final_result(res.status).value, attempt_no, fid, day))
+                ports.ledger.db.commit()
+                self._store_outcome(fid, date.fromisoformat(day), farmer, None, attempt_no, res, out, at=ended,
+                                    weather=self._saved_weather(fid, day))
+                self._retry_update(fid, day, attempt_no, "done", "recovered after an interruption")
+                recovered += 1
+            for fid, due_at, source_date, note in stale_c:
+                found = self._find_call(ports, fid, self._claimed_at(note, due_at))
+                if found is None:
+                    self._cb_update(fid, due_at, status="error", note="interrupted: no call found")
+                    self._alert("interrupted_call", fid, "A callback was interrupted and no call was found at the provider. "
+                                                         "Use the Call button if the farmer still needs one.")
+                    continue
+                res, ended = found
+                ended = ended.astimezone(self._now().tzinfo or IST)
+                farmer = ports.farmers.get_context(fid)
+                self._finish_callback(ports, farmer, fid, due_at, date.fromisoformat(source_date),
+                                      datetime.fromisoformat(due_at).date(), res, self._outputs(res), "recovered", at=ended)
+                recovered += 1
+        return recovered
+
+    def _outputs(self, res: ProviderCallResult) -> dict:
+        if res.status is not AttemptStatus.ANSWERED:
+            return {}
+        try:
+            return self.dialler.outputs(res.provider_call_id)
+        except Exception:
+            return {}
+
+    def _saved_weather(self, fid: str, day: str) -> dict:
+        with self.lock:
+            row = self.db.execute("SELECT weather FROM dash_results WHERE farmer_id=? AND call_date=?", (fid, day)).fetchone()
+        return json.loads(row[0]) if row and row[0] else {}
+
     def start_tick(self) -> bool:
         """For an outside timer (POST /api/tick): run one pass in the background and return at once. The timer's only
         job is to wake a sleeping host and nudge it; what is due is decided here, exactly as when the loop runs it."""
@@ -850,6 +950,7 @@ class DashboardService:
         return True
 
     def _tick_once(self) -> None:
+        self.recover_interrupted()
         self.run_due_callbacks()
         self.run_due_retries()
         now = self._now()

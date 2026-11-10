@@ -30,6 +30,9 @@ class MockDialler:
     def place(self, phone, language_name, variables) -> ProviderCallResult:
         return MockTelephony().place_call(phone, "mock")
 
+    def find_call(self, phone, start, end):
+        return None                                  # simulated calls leave no record anywhere else
+
     def outputs(self, attempt_id: str) -> dict:
         return {"call_summary": "(simulated) the farmer heard the weather update and said they understood.",
                 "callback_time": "", "understood_weather": "yes", "stop_calls_requested": "no",
