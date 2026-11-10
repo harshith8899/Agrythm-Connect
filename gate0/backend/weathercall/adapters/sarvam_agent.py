@@ -28,6 +28,19 @@ _STATUS = {"connected": AttemptStatus.ANSWERED, "no_answer": AttemptStatus.NO_AN
            "busy": AttemptStatus.BUSY, "failed": AttemptStatus.FAILED}
 
 
+def _result_from(item: dict, attempt_id: str):
+    """What Sarvam's record of one call says, or None while it does not say yet."""
+    status = _STATUS.get(item.get("connectivity_status") or "")
+    if status is None:
+        return None
+    reason = item.get("failure_reason") or ""
+    duration = int(item.get("duration_in_seconds") or 0)
+    if status is AttemptStatus.ANSWERED and _is_network_drop(item.get("ended_by")):
+        return ProviderCallResult(AttemptStatus.FAILED, provider_call_id=attempt_id, duration_s=duration, error="network_drop")
+    return ProviderCallResult(status=status, provider_call_id=attempt_id, duration_s=duration,
+                              error="" if reason in ("", "NO_FAILURE_REASON") else reason[:80])
+
+
 class SarvamAgentVoice:
     def synthesize(self, text: str, language: Language) -> str:
         return json.dumps({"text": text, "language": _LANG_NAMES[language]}, ensure_ascii=False)
@@ -111,15 +124,25 @@ class SarvamAgentTelephony:
             })
             items = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}").get("items", [])
             item = next((i for i in items if i.get("attempt_id") == attempt_id), None)
-            status = _STATUS.get((item or {}).get("connectivity_status") or "")
-            if status is None:
+            result = _result_from(item or {}, attempt_id)
+            if result is None:
                 continue
-            reason = item.get("failure_reason") or ""
-            if status is AttemptStatus.ANSWERED and _is_network_drop(item.get("ended_by")):
-                return ProviderCallResult(AttemptStatus.FAILED, provider_call_id=attempt_id,
-                                          duration_s=int(item.get("duration_in_seconds") or 0), error="network_drop")
-            return ProviderCallResult(
-                status=status, provider_call_id=attempt_id, duration_s=int(item.get("duration_in_seconds") or 0),
-                error="" if reason in ("", "NO_FAILURE_REASON") else reason[:80],
-            )
+            return result
         return ProviderCallResult(AttemptStatus.FAILED, provider_call_id=attempt_id, error="outcome_not_reported_in_time")
+
+    def find_call(self, phone: str, start: datetime, end: datetime):
+        """A call that was placed but whose result the backend never saved (the process stopped mid-call): look it up at
+        Sarvam by the last 4 digits of the number and the time window. Returns (result, when it ended in UTC) or None."""
+        last4 = re.sub(r"\D", "", phone or "")[-4:]
+        q = urllib.parse.urlencode({
+            "start_datetime": start.astimezone(timezone.utc).isoformat(timespec="seconds"),
+            "end_datetime": end.astimezone(timezone.utc).isoformat(timespec="seconds"), "limit": 50})
+        items = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}").get("items", [])
+        mine = sorted((i for i in items if last4 and str(i.get("user_contact_masked") or "")[-4:] == last4),
+                      key=lambda i: i.get("attempted_at") or "")
+        for item in mine:
+            result = _result_from(item, item.get("attempt_id") or "")
+            if result is not None:
+                began = datetime.fromisoformat(str(item["attempted_at"]).replace("Z", "")).replace(tzinfo=timezone.utc)
+                return result, began + timedelta(seconds=result.duration_s or 0)
+        return None
