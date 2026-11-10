@@ -1,11 +1,13 @@
 # Render blueprint for the Gate Zero API. See gate0/docs/DEPLOY.md.
 # One instance only: the daily scheduler (daily send, retries, callbacks) runs inside the process. Data lives in Supabase.
+# Free plan: the service sleeps after about 15 minutes without a visit. A timer in Supabase (gate0/supabase, docs/TRIGGER.md)
+# wakes it about 3 minutes before anything is due. For many farmers or a stricter promise, change plan to starter (always on).
 services:
   - type: web
     name: agrythm-gate0-api
     runtime: python
     region: singapore            # closest to India
-    plan: starter                # always on: the scheduler and callbacks need that
+    plan: free
     rootDir: gate0/backend
     buildCommand: pip install -r requirements.txt
     startCommand: python -m weathercall.server

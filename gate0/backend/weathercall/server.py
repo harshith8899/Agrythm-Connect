@@ -6,6 +6,7 @@
     GET  /api/health                         GET  /api/orchestrator/status
     GET  /api/calls   GET /api/calls/<id>    POST /api/orchestrator/auto-dispatch   {"enabled": true|false}
     GET  /api/farmers                        POST /api/orchestrator/run-now         send today's calls now
+    POST /api/tick             wake-up for an outside timer: runs one pass of what is due (retries, callbacks, the daily send)
     POST /api/farmers/<id>/call  place a call now for one farmer; body {"mode": "retry"} follows the retry rules (default),
                                  {"mode": "test"} is a test call kept as its own row, outside the retry rules
     POST /api/farmers          add one farmer;  PUT/PATCH /api/farmers/<id>  edit one (also active and consent)
@@ -170,6 +171,8 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
                     if not service.start_fire(day):
                         return self._send(409, {"error": "a send is already in progress"})
                     return self._send(202, {"started": True, "date": day.isoformat(), "callMode": service.dialler.mode})
+                if path == "/api/tick":
+                    return self._send(202, {"started": service.start_tick(), "at": service._now().isoformat(timespec="seconds")})
                 if path == "/api/usage":
                     fields = json.loads(body or "{}")
                     if not isinstance(fields, dict) or "sarvam_rate" not in fields:

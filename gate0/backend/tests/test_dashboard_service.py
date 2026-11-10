@@ -854,3 +854,49 @@ def test_run_refuses_a_public_address_without_a_token(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "load_env_file", lambda p: None)
     with pytest.raises(SystemExit, match="GATE0_API_TOKEN"):
         server.run(port=0)
+
+
+# ---- the wake-up call from an outside timer: runs what is due, never twice ----------------------------------------------------
+def test_tick_runs_what_is_due_and_only_one_pass_at_a_time(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)                                                               # not picked up: a retry is waiting for 09:30
+    clock["now"] = T0 + timedelta(minutes=31)
+    assert s._tick_lock.acquire(blocking=False)                             # a pass is already running...
+    assert s.tick() is False and s.start_tick() is False                    # ...so a second one does nothing
+    assert len(d.calls) == 1
+    s._tick_lock.release()
+    assert s.tick() is True                                                 # the retry is due now and is placed
+    assert len(d.calls) == 2 and s.calls()[0]["status"] == "Completed"
+    assert s.tick() is True and len(d.calls) == 2                           # nothing left to do: no second call
+
+
+def test_tick_before_the_due_time_places_nothing(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    clock["now"] = T0 + timedelta(minutes=27)                               # a wake-up 3 minutes early: still nothing due
+    s.tick()
+    assert len(d.calls) == 1 and s.calls()[0]["next_attempt_at"] == "05 Nov, 09:30 AM"
+
+
+def test_tick_starts_the_daily_send_once(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED))
+    s, clock = timed(tmp_path, d, start=datetime(2026, 11, 5, 9, 2, tzinfo=IST))
+    s.import_csv(ONE)
+    s.set_auto_dispatch(True)
+    assert s.tick() is True
+    wait_idle(s)
+    assert len(d.calls) == 1
+    s.tick()
+    wait_idle(s)
+    assert len(d.calls) == 1                                                # a second wake-up the same day calls nobody again
+
+
+def test_api_tick(api):
+    call, s = api
+    s._now = lambda: T0
+    code, body, _ = call("/api/tick", b"{}")
+    assert code == 202 and body["started"] in (True, False) and body["at"].startswith("2026-11-05T09:00")

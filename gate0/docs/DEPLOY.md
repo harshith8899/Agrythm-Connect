@@ -19,7 +19,10 @@ who finds the address could read farmer data and press "Send now" (real calls co
   this API plus your laptop with auto-send on, would call every farmer twice. Keep auto-send off on your laptop.
 - **The database is Supabase** (Postgres, Mumbai). Set it up first with `docs/SUPABASE.md`; the API only needs the
   `GATE0_DATABASE_URL` address, no disk. Render has no Mumbai region, so the API runs in Singapore, the nearest one.
-- **Costs:** Render Starter about 7 USD a month. Cloudflare Pages and Access (up to 50 users) and the Supabase free plan
+- **Free plan plus a wake-up timer.** The service sleeps when idle and a timer in Supabase wakes it before anything is due; see
+  `docs/TRIGGER.md` (one-time setup after the first deploy). For many farmers, switch `plan` to `starter` in `render.yaml`
+  (about 7 USD a month, always on).
+- **Costs:** Render free plan 0 (Starter about 7 USD a month if you switch). Cloudflare Pages and Access (up to 50 users) and the Supabase free plan
   cost nothing. Sarvam and Exotel are billed separately.
 - **Farmers are real data and are not in git.** Copy your local data into Supabase with
   `python -m weathercall.migrate_db` (see `docs/SUPABASE.md`), or import the sheet again in the hosted dashboard.
