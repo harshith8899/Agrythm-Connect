@@ -211,7 +211,7 @@ def run(port: int | None = None) -> None:
     server = ThreadingHTTPServer((host, port), make_handler(service, origins, token=token))
     threading.Thread(target=service.scheduler_loop, daemon=True).start()   # callbacks, and the daily send if switched on
     print(f"Agrythm Connect API on http://{host}:{port}  (database: {'Postgres (Supabase)' if is_postgres(db) else 'SQLite file'}; calls: {service.dialler.mode}; "
-          f"weather: {'open-meteo' if service.real_weather else 'mock'}; daily auto-send: "
+          f"weather: {getattr(service._weather, 'label', 'Open-Meteo') if service.real_weather else 'mock'}; daily auto-send: "
           f"{'ON' if service.auto_dispatch_enabled() else 'off'})" + (f"\n  note: {service.note}" if service.note else ""))
     try:
         server.serve_forever()

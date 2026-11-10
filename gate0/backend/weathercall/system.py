@@ -16,13 +16,12 @@ import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from .adapters.open_meteo import OpenMeteoWeather
+from .adapters.weatherapi import make_weather
 from .db import OperationalError, is_postgres
 from .adapters.sarvam_campaign import IST, scrub
 from .adapters.sarvam_usage import make_usage
 
 UTC = timezone.utc
-PROBE_PLACE = (12.97194, 77.59369)          # Bengaluru: any place will do, it only proves the weather API answers
 CACHE_SECONDS = 30
 DEFAULT_RATE = 3.5                          # INR a minute: Sarvam pay-as-you-go, before GST (Pro 3.25, Growth 3.15)
 MAX_RATE = 1000.0
@@ -52,7 +51,7 @@ class SystemChecks:
         self.service = service
         self.env = env if env is not None else os.environ
         self.usage_reader = make_usage() if usage is _AUTO else usage
-        self.weather = weather or OpenMeteoWeather()
+        self.weather = weather or make_weather(self.env)
         self._now = now or service._now
         self._lock = threading.Lock()
         self._checks_cache: tuple[float, dict] | None = None
@@ -202,24 +201,22 @@ class SystemChecks:
             return self._check("database", "Database", "fail", f"Cannot read the database ({type(exc).__name__}).", t)
 
     def _weather_check(self) -> dict:
+        """Never asks the weather service: weather is fetched only when a call is made, so this reads what the last call saved."""
         t = time.monotonic()
-        today = self._now().date()
+        name = f"Weather API ({getattr(self.weather, 'label', 'Open-Meteo')})"
+        if getattr(self.weather, "label", "") == "WeatherAPI.com" and not getattr(self.weather, "uses_key", False):
+            return self._check("weather", name, "fail", "No API key. Add WEATHERAPI_KEY (a free key from weatherapi.com).", t)
         try:
-            got = self.weather.get_forecast("probe", PROBE_PLACE[0], PROBE_PLACE[1], today)
-        except Exception as exc:
-            code = getattr(exc, "code", None)                                  # the HTTP status of a refusal, if there was one
-            keyed = bool(getattr(self.weather, "uses_key", False))
-            why = {429: ("HTTP 429: too many requests, the plan's limit was reached" if keyed else
-                         "HTTP 429: too many requests, this host's address is being throttled"),
-                   401: "HTTP 401: the API key was rejected" if keyed else "HTTP 401",
-                   403: "HTTP 403: the API key was rejected or the request was blocked" if keyed else "HTTP 403: the request was blocked",
-                   }.get(code) or (f"HTTP {code}" if code else type(exc).__name__)
-            return self._check("weather", "Weather API (Open-Meteo)", "fail",
-                               f"Did not answer ({why}). Saved forecasts are used meanwhile.", t)
-        if today not in got:
-            return self._check("weather", "Weather API (Open-Meteo)", "fail", "Answered, but without today's forecast.", t)
-        how = " (paid API key)" if getattr(self.weather, "uses_key", False) else " (free service)"
-        return self._check("weather", "Weather API (Open-Meteo)", "ok", f"Answered with today's forecast{how}.", t)
+            with self.service.lock:
+                last, days = self.service.db.execute("SELECT MAX(fetched_at), COUNT(*) FROM weather").fetchone()
+        except Exception:
+            last, days = None, 0
+        if not last:
+            return self._check("weather", name, "off", "Ready. Weather is fetched only when a call is made, and none has been yet.", t)
+        when = datetime.fromisoformat(str(last)[:19])
+        label = f"{when.day} {when:%b %H:%M}"
+        return self._check("weather", name, "ok", f"Last fetched {label} for a call; {days} forecast days saved. "
+                           "This page never asks the weather service.", t)
 
     def _sarvam_checks(self, refresh: bool) -> tuple[dict, dict]:
         if self.usage_reader is None:

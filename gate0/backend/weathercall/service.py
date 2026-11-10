@@ -22,7 +22,7 @@ from typing import Callable
 from .adapters.dialers import OUTPUT_VARS, make_dialler
 from .adapters.local import SQLiteLedger
 from .adapters.mock import MockVoice, MockWeather
-from .adapters.open_meteo import OpenMeteoWeather, geocode
+from .adapters.weatherapi import geocode, make_weather
 from .adapters.sarvam_agent import _LANG_NAMES
 from .adapters.sarvam_campaign import IST, scrub
 from .adapters.sheet import _ALIASES, _LANG, _key, _read_rows, load_farmers
@@ -152,7 +152,7 @@ class DashboardService:
         self.dialler, self.note = (dialler, note) if dialler else make_dialler(env)
         e = env if env is not None else os.environ
         self.real_weather = e.get("GATE0_WEATHER", "open_meteo") != "mock"
-        self._weather = weather or (OpenMeteoWeather() if self.real_weather else MockWeather())
+        self._weather = weather or (make_weather(e) if self.real_weather else MockWeather())
         self.ports: Ports | None = None      # engine connections are made inside the working thread (SQLite is per thread)
         self.running = False
         self.last_run: dict | None = None
@@ -162,7 +162,7 @@ class DashboardService:
 
     def _make_ports(self) -> Ports:
         return Ports(DBFarmers(self.db, self.lock), SQLiteLedger(self.db_path), StoredWeather(
-            self._weather, self.db_path, sleep=lambda s: None),       # no long retry waits behind a button
+            self._weather, self.db_path, retry_minutes=(), sleep=lambda s: None),   # one request per place and day: the weather retries are the service's own, later
             MockVoice(), None)
 
     # -- settings ------------------------------------------------------------------------------------------------
@@ -188,7 +188,7 @@ class DashboardService:
                 "lastRun": self._get_setting("last_auto_run") or None, "systemStatus": "Operational",
                 "running": self.running, "callMode": self.dialler.mode, "live": self.dialler.live,
                 "sarvamLive": self.dialler.live,
-                "note": self.note, "weatherSource": "open-meteo (real)" if self.real_weather else "mock",
+                "note": self.note, "weatherSource": f"{getattr(self._weather, 'label', 'Open-Meteo')} (real)" if self.real_weather else "mock",
                 "lastSend": self.last_run}
 
     # -- alerts for the team, and farmers who asked us to stop -------------------------------------------------------

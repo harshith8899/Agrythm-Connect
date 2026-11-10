@@ -95,6 +95,8 @@ def geocode(village: str, district: str, state: str, opener=default_opener) -> P
 
 
 class OpenMeteoWeather:
+    label = "Open-Meteo"
+
     def __init__(self, opener=default_opener):
         self._open = opener
 

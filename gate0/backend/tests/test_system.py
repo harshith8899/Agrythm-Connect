@@ -128,20 +128,36 @@ def test_everything_ok(tmp_path):
     r = s.checks()
     c = by_id(r)
     assert r["overall"] == "ok" and [x["id"] for x in r["checks"]] == ["backend", "database", "weather", "sarvam", "phone"]
-    assert all(x["status"] == "ok" for x in r["checks"])
+    assert all(x["status"] == "ok" for x in r["checks"] if x["id"] != "weather") and c["weather"]["status"] == "off"
     assert "1 farmers" in c["database"]["detail"] and "version 9" in c["sarvam"]["detail"]
     assert "connected" in c["phone"]["detail"].lower()
 
 
-def test_weather_api_down_is_reported_without_stopping_the_other_checks(tmp_path):
-    r = system(tmp_path, FakeUsage([attempt(5)]), FakeWeather(error=TimeoutError("slow"))).checks()
-    c = by_id(r)
-    assert r["overall"] == "fail" and c["weather"]["status"] == "fail" and "TimeoutError" in c["weather"]["detail"]
-    assert c["backend"]["status"] == "ok" and c["database"]["status"] == "ok" and c["sarvam"]["status"] == "ok"
+def test_the_weather_check_never_asks_the_weather_service(tmp_path):
+    """Weather is fetched only when a call is made: opening or polling System Status costs no weather request."""
+    w = FakeWeather()
+    s = system(tmp_path, FakeUsage([attempt(5)]), w)
+    for _ in range(3):
+        s.checks(refresh=True)
+    assert w.calls == 0
 
 
-def test_weather_that_answers_without_today_is_a_failure(tmp_path):
-    assert by_id(system(tmp_path, FakeUsage(), FakeWeather(empty=True)).checks())["weather"]["status"] == "fail"
+def test_the_weather_check_reports_the_last_saved_fetch(tmp_path):
+    s = system(tmp_path, FakeUsage([attempt(5)]))
+    assert by_id(s.checks())["weather"]["status"] == "off"
+    with s.service.lock:
+        s.service.db.execute("CREATE TABLE IF NOT EXISTS weather(place_key TEXT, fetched_at TEXT)")
+        s.service.db.execute("INSERT INTO weather VALUES('mandya','2026-11-10T09:00:03')")
+        s.service.db.execute("INSERT INTO weather VALUES('mandya','2026-11-10T09:00:03')")
+        s.service.db.commit()
+    c = by_id(s.checks(refresh=True))["weather"]
+    assert c["status"] == "ok" and "10 Nov 09:00" in c["detail"] and "2 forecast days" in c["detail"]
+
+
+def test_weatherapi_without_a_key_is_a_failure_that_names_the_setting(tmp_path):
+    from weathercall.adapters.weatherapi import WeatherApiWeather
+    c = by_id(system(tmp_path, FakeUsage(), WeatherApiWeather(), name="nokey.db").checks())["weather"]
+    assert c["status"] == "fail" and "WEATHERAPI_KEY" in c["detail"] and "WeatherAPI.com" in c["name"]
 
 
 def test_sarvam_key_rejected_is_a_failure_with_the_reason(tmp_path):
@@ -164,13 +180,11 @@ def test_not_configured_is_off_not_failed(tmp_path):
 
 
 def test_checks_are_cached_briefly_and_refresh_forces_a_new_run(tmp_path):
-    w = FakeWeather()
-    s = system(tmp_path, FakeUsage(), w)
-    s.checks()
-    s.checks()
-    assert w.calls == 1
-    s.checks(refresh=True)
-    assert w.calls == 2
+    usage = FakeUsage([attempt(5)])
+    s = system(tmp_path, usage)
+    first = s.checks()
+    assert s.checks() is first                      # cached
+    assert s.checks(refresh=True) is not first      # a new run
 
 
 # ---- API -------------------------------------------------------------------------------------------------------------
@@ -218,23 +232,3 @@ def test_the_backend_check_says_when_it_is_not_on_render(tmp_path):
     assert "Running on a computer, not on Render" in c["detail"]
 
 
-def test_the_weather_check_names_the_http_code_when_open_meteo_refuses(tmp_path):
-    import urllib.error
-    for code, words in ((429, "too many requests"), (403, "blocked"), (500, "HTTP 500")):
-        err = urllib.error.HTTPError("https://api.open-meteo.com", code, "x", {}, None)
-        c = by_id(system(tmp_path, FakeUsage(), FakeWeather(error=err), name=f"w{code}.db").checks())["weather"]
-        assert c["status"] == "fail" and f"HTTP {code}" in c["detail"] and words in c["detail"]
-
-
-def test_the_weather_check_says_which_service_is_used_and_names_a_rejected_key(tmp_path):
-    import urllib.error
-
-    class Keyed(FakeWeather):
-        uses_key = True
-
-    ok = by_id(system(tmp_path, FakeUsage(), Keyed(), name="k1.db").checks())["weather"]
-    assert ok["status"] == "ok" and "paid API key" in ok["detail"]
-    assert "free service" in by_id(system(tmp_path, FakeUsage(), FakeWeather(), name="k2.db").checks())["weather"]["detail"]
-    bad = Keyed(error=urllib.error.HTTPError("https://customer-api.open-meteo.com", 401, "x", {}, None))
-    c = by_id(system(tmp_path, FakeUsage(), bad, name="k3.db").checks())["weather"]
-    assert c["status"] == "fail" and "key was rejected" in c["detail"] and "customer-api" not in c["detail"]
