@@ -203,3 +203,16 @@ def test_api_checks_and_usage(api):
     assert api("/api/usage", json.dumps({"sarvam_rate": -2}).encode())[0] == 400
     assert api("/api/usage", b"nope")[0] == 400
     assert api("/api/credits")[0] == 404                       # there is no balance to read or set
+
+
+# ---- where the backend runs ---------------------------------------------------------------------------------------------------
+def test_the_backend_check_says_it_is_hosted_on_render(tmp_path):
+    svc = DashboardService(str(tmp_path / "r.db"), dialler=MockDialler(), env={"GATE0_WEATHER": "mock"}, now=lambda: NOW)
+    hosted = {"RENDER": "true", "RENDER_SERVICE_NAME": "agrythm-connect", "RENDER_GIT_COMMIT": "abcdef1234567"}
+    c = by_id(SystemChecks(svc, usage=None, weather=FakeWeather(), now=lambda: NOW, env=hosted).checks())["backend"]
+    assert "Hosted on Render (agrythm-connect, version abcdef1)" in c["detail"] and "computer" not in c["detail"]
+
+
+def test_the_backend_check_says_when_it_is_not_on_render(tmp_path):
+    c = by_id(system(tmp_path, FakeUsage([attempt(5)])).checks())["backend"]
+    assert "Running on a computer, not on Render" in c["detail"]

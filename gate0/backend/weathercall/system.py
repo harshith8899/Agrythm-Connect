@@ -10,13 +10,14 @@ pay-as-you-go ₹3.50 by default, before GST; editable for another plan). An "in
 from __future__ import annotations
 
 import math
+import os
 import re
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 
 from .adapters.open_meteo import OpenMeteoWeather
-from .db import is_postgres
+from .db import OperationalError, is_postgres
 from .adapters.sarvam_campaign import IST, scrub
 from .adapters.sarvam_usage import make_usage
 
@@ -47,8 +48,9 @@ def _reason_text(reason: str) -> str:
 
 
 class SystemChecks:
-    def __init__(self, service, usage=_AUTO, weather=None, now=None):
+    def __init__(self, service, usage=_AUTO, weather=None, now=None, env=None):
         self.service = service
+        self.env = env if env is not None else os.environ
         self.usage_reader = make_usage() if usage is _AUTO else usage
         self.weather = weather or OpenMeteoWeather()
         self._now = now or service._now
@@ -126,7 +128,11 @@ class SystemChecks:
         with self._lock:
             if not refresh and self._checks_cache and time.monotonic() - self._checks_cache[0] < CACHE_SECONDS:
                 return self._checks_cache[1]
-        out = [self._backend(), self._database(), self._weather_check()]
+        out = [self._backend(), self._database()]
+        timer = self._timer()
+        if timer is not None:
+            out.append(timer)
+        out.append(self._weather_check())
         sarvam, phone = self._sarvam_checks(refresh)
         out += [sarvam, phone]
         report = {"overall": "fail" if any(c["status"] == "fail" for c in out) else "ok",
@@ -140,10 +146,44 @@ class SystemChecks:
         return {"id": cid, "name": name, "status": status, "detail": detail,
                 "ms": round((time.monotonic() - started) * 1000) if started is not None else None}
 
+    def _where(self) -> str:
+        """Where this backend is running: on Render (with the service name and version) or on someone's computer."""
+        if self.env.get("RENDER"):
+            name, commit = self.env.get("RENDER_SERVICE_NAME", ""), (self.env.get("RENDER_GIT_COMMIT") or "")[:7]
+            extra = ", ".join(x for x in (name, f"version {commit}" if commit else "") if x)
+            return f"Hosted on Render ({extra})" if extra else "Hosted on Render"
+        return "Running on a computer, not on Render"
+
     def _backend(self) -> dict:
         s = self.service.status()
-        return self._check("backend", "Backend API", "ok", f"Running. Calls: {s['callMode']}. "
-                           f"Daily auto-send: {'on' if s['enabled'] else 'off'}.")
+        live_data = (" It is using the live Supabase data." if is_postgres(self.service.db_path) and not self.env.get("RENDER")
+                     else "")
+        return self._check("backend", "Backend API", "ok", f"{self._where()}. Calls: {s['callMode']}. "
+                           f"Daily auto-send: {'on' if s['enabled'] else 'off'}.{live_data}")
+
+    def _timer(self) -> dict | None:
+        """The Supabase wake-up timer (docs/TRIGGER.md): what it last decided. Only when the data is in Postgres."""
+        if not is_postgres(self.service.db_path):
+            return None
+        t = time.monotonic()
+        name = "Wake-up timer (Supabase)"
+        try:
+            with self.service.lock:
+                row = self.service.db.execute("SELECT at, reason, note FROM wake_log ORDER BY id DESC LIMIT 1").fetchone()
+        except OperationalError:
+            return self._check("timer", name, "off", "Not set up in Supabase (see docs/TRIGGER.md).", t)
+        if row is None:
+            return self._check("timer", name, "ok", "Installed. No wake-up has been needed yet.", t)
+        at, reason, note = row
+        when = at.astimezone(IST)
+        label = f"{when:%d %b %H:%M}"
+        recent = self._now().astimezone(IST) - when < timedelta(hours=6)
+        if note and str(note).startswith("not configured"):
+            if recent:
+                return self._check("timer", name, "fail", f"At {label} the backend had to be woken ({reason}) but the Supabase "
+                                   "Vault secrets (backend address and token) are missing. See docs/TRIGGER.md.", t)
+            return self._check("timer", name, "off", f"No recent wake-up (last attempt {label} had no Vault secrets).", t)
+        return self._check("timer", name, "ok", f"Last wake-up {label} ({reason}).", t)
 
     def _database(self) -> dict:
         t = time.monotonic()

@@ -107,3 +107,30 @@ def test_the_lead_time_fits_the_backends_grace_window(world):
     """A wake-up 3 minutes early (the rule) or a few minutes late (a cold start) is far inside what the backend allows."""
     from weathercall import service as module
     assert module.GRACE_MINUTES >= 10
+
+
+# ---- System Status shows what the timer last did --------------------------------------------------------------------------------
+def test_system_status_reports_the_wake_up_timer(world, monkeypatch):
+    from weathercall import system as module
+    from weathercall.system import SystemChecks
+    monkeypatch.setattr(module, "is_postgres", lambda target: True)         # the test's data is in Postgres under a file name
+    svc, _, run = world
+    now = datetime(2026, 11, 10, 12, 0, tzinfo=IST)
+    checks = SystemChecks(svc, usage=None, now=lambda: now, env={})
+    assert "No wake-up has been needed yet" in checks._timer()["detail"]
+    run("insert into wake_log(at, reason, note) values (%s, 'retry due', 'not configured: add the Vault secrets')", (at(11, 30),))
+    c = checks._timer()
+    assert c["status"] == "fail" and "Vault secrets" in c["detail"] and "retry due" in c["detail"]      # it needed to wake the backend and could not
+    run("insert into wake_log(at, reason, request_id) values (%s, 'callback due', 7)", (at(11, 45),))
+    c = checks._timer()
+    assert c["status"] == "ok" and "10 Nov 11:45" in c["detail"] and "callback due" in c["detail"]
+    run("delete from wake_log")
+    run("insert into wake_log(at, reason, note) values (%s, 'retry due', 'not configured: add the Vault secrets')", (at(2, 0),))
+    assert checks._timer()["status"] == "off"                                                           # an old attempt is not a live problem
+
+
+def test_the_timer_check_is_left_out_without_postgres(tmp_path, monkeypatch):
+    from weathercall import system as module
+    monkeypatch.setattr(module, "is_postgres", lambda target: False)
+    svc = DashboardService(str(tmp_path / "x.db"), dialler=MockDialler(), env={"GATE0_WEATHER": "mock"})
+    assert module.SystemChecks(svc, usage=None, env={})._timer() is None
