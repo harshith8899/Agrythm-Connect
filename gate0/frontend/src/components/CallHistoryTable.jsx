@@ -317,9 +317,11 @@ export const CallHistoryTable = ({
       </div>
 
       {/* Larger screens: the full table */}
-      <div className="hidden md:block overflow-x-auto">
+      {/* The table scrolls inside its own box (both ways, header stays put) so the sideways scrollbar is always in view at the
+          bottom of the box and not at the end of a long list. */}
+      <div className="hidden md:block overflow-auto max-h-[calc(100vh-9rem)]">
         <table className="w-full text-left text-xs">
-          <thead className="bg-slate-50/80 text-[11px] font-bold tracking-wider text-slate-500 uppercase border-b border-slate-200/80">
+          <thead className="bg-slate-50 sticky top-0 z-10 text-[11px] font-bold tracking-wider text-slate-500 uppercase border-b border-slate-200/80">
             <tr>
               <th className="px-4 py-3.5">Call ID & Time</th>
               <th className="px-4 py-3.5">Farmer & Contact</th>

@@ -221,18 +221,23 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
     };
   });
 
-  const filtered = farmerStats.filter(f => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
+  // Search every word typed against everything shown on the card (name, id, village, district, state, language, phone as
+  // shown, status words), ignoring case, accents and punctuation. "mandya kannada" finds Kannada farmers in Mandya.
+  const plain = (s) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\u0900-\u0dff]+/g, ' ');
+  const searchText = (f) => {
     const phone = f.phone_number || f.phone || '';
-    return (
-      String(f.farmer_name || '').toLowerCase().includes(q) ||
-      String(phone).toLowerCase().includes(q) ||
-      maskPhoneNumber(phone).toLowerCase().includes(q) ||
-      String(f.district || '').toLowerCase().includes(q) ||
-      String(f.village || '').toLowerCase().includes(q) ||
-      String(f.farmer_id || '').toLowerCase().includes(q)
-    );
+    return plain([
+      f.farmer_name, f.farmer_id, f.village, f.district, f.state, f.primary_language, f.preferred_language,
+      normalizeLanguage(f.primary_language || f.preferred_language), phone, maskPhoneNumber(phone),
+      f.active === 'No' ? 'inactive' : 'active', f.call_consent === 'No' ? 'no consent' : 'consent',
+      f.talkedToday ? 'talked today' : '',
+    ].join(' '));
+  };
+  const words = plain(search).split(' ').filter(Boolean);
+  const filtered = words.length === 0 ? farmerStats : farmerStats.filter((f) => {
+    const hay = searchText(f);
+    const digits = hay.replace(/ /g, '');
+    return words.every((w) => hay.includes(w) || (/^\d+$/.test(w) && digits.includes(w)));
   });
 
   if (farmers.length === 0) {
@@ -277,13 +282,13 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <ImportCsvButton onImported={onImported} />
           <AddFarmerButton onClick={() => setEditing('new')} />
-        <div className="relative min-w-[280px]">
+        <div className="relative w-full sm:min-w-[280px]">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search farmers by name, village, district..."
+            placeholder="Search name, ID, phone, village, district, state, language..."
             className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-hidden focus:bg-white focus:border-trust-navy transition-all"
           />
         </div>
