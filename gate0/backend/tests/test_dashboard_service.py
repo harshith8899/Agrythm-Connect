@@ -900,3 +900,26 @@ def test_api_tick(api):
     s._now = lambda: T0
     code, body, _ = call("/api/tick", b"{}")
     assert code == 202 and body["started"] in (True, False) and body["at"].startswith("2026-11-05T09:00")
+
+
+def test_a_callback_the_system_could_not_place_in_time_shows_as_missed_not_scheduled(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED), callback_text="09:35")
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    assert s.calls()[0]["status"] == "Callback Scheduled"
+    clock["now"] = T0 + timedelta(minutes=70)                                  # the backend only comes back an hour later
+    s.run_due_callbacks()
+    c = s.calls()[0]
+    assert (c["status"], c["disposition"]) == ("Callback Missed", "Callback not placed in time")
+    assert c["scheduled_callback_time"] == "05 Nov, 09:35 AM" and len(d.calls) == 1
+
+
+def test_a_callback_that_was_placed_shows_as_done(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED), callback_text="09:35")
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    clock["now"] = T0 + timedelta(minutes=36)
+    s.run_due_callbacks()
+    assert s.calls()[0]["status"] == "Callback Done" and len(d.calls) == 2

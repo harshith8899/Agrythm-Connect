@@ -990,12 +990,18 @@ class DashboardService:
         return out
 
     @staticmethod
-    def _status_for(status: str, understood: str, has_callback: bool, retry_pending: bool = False) -> tuple[str, str]:
+    def _status_for(status: str, understood: str, has_callback: bool, retry_pending: bool = False,
+                    callback_status: str | None = None) -> tuple[str, str]:
         """The dashboard's status and disposition for one stored result."""
         if retry_pending and not has_callback:
             return "Retrying", "Retry scheduled"
         if status == "answered":
             if has_callback:
+                if callback_status in ("missed", "skipped"):          # the requested time passed and nobody was called
+                    return "Callback Missed", "Callback not placed in time"
+                if callback_status in ("answered", "no_answer", "busy", "failed", "error"):
+                    return "Callback Done", {"answered": "Callback placed", "no_answer": "Callback not picked up",
+                                             "busy": "Callback busy"}.get(callback_status, "Callback failed")
                 return "Callback Scheduled", "Callback Requested"
             if understood == "declined":
                 return "Declined", "Not needed today"
@@ -1031,7 +1037,8 @@ class DashboardService:
              transcript, updated, name, phone, village, district) in rows:
             cb = by_day.get((fid, day))
             retry_at = retry_due.get((fid, day))
-            dash_status, disposition = self._status_for(status, understood or "", cb is not None, retry_at is not None)
+            dash_status, disposition = self._status_for(status, understood or "", cb is not None, retry_at is not None,
+                                                        cb[1] if cb else None)
             attempts = all_attempts.get((fid, day), [])
             if status == "skipped":
                 disposition = (note or "skipped").replace("_", " ").title()

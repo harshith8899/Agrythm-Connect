@@ -157,7 +157,7 @@ export const useVoiceAgentData = () => {
       // Status resolution: the backend sends the dashboard's own status words
       const rawStatus = call.status || call.call_status || 'Completed';
       const statusWords = {
-        'completed': 'Completed', 'answered': 'Completed', 'callback scheduled': 'Callback Scheduled',
+        'completed': 'Completed', 'answered': 'Completed', 'callback scheduled': 'Callback Scheduled', 'callback missed': 'Callback Missed', 'callback done': 'Callback Done',
         'not confirmed': 'Not Confirmed', 'declined': 'Declined', 'unanswered': 'Unanswered', 'busy': 'Unanswered', 'no_answer': 'Unanswered',
         'retrying': 'Retrying', 'failed': 'Failed', 'skipped': 'Skipped', 'escalated': 'Escalated',
         'requires escalation': 'Escalated', 'calling': 'Calling', 'scheduled': 'Scheduled',
@@ -316,7 +316,7 @@ export const useVoiceAgentData = () => {
       totalCalls: called.length,
       completedCount: called.filter(c => c.status === 'Completed').length,
       retryingCount: called.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length,
-      needsAttentionCount: called.filter(c => ['Failed', 'Not Confirmed'].includes(c.status)).length,
+      needsAttentionCount: called.filter(c => ['Failed', 'Not Confirmed', 'Callback Missed'].includes(c.status)).length,
       declinedCount: called.filter(c => c.status === 'Declined').length,
       callbacksScheduled: scoped.filter(c => c.callback_status === 'pending').length,
       skippedCount: scoped.length - called.length,
