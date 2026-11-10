@@ -187,3 +187,10 @@ def test_sheet_fills_coordinates_from_geocoder(tmp_path):
     a, b = load_farmers(f, lambda v, d, s: geocode(v, d, s, fake(geo={"Mandya": [MANDYA_KA]})), matches)
     assert (a.latitude, a.longitude) == (12.52, 76.9) and (b.latitude, b.longitude) == (0.0, 0.0)
     assert "Karnataka" in matches["F1"] and matches["F2"] == "no confident match"
+
+
+def test_open_meteo_is_called_with_a_named_user_agent():
+    from weathercall.adapters import open_meteo
+    headers = dict(open_meteo._client.addheaders)
+    assert headers["User-Agent"].startswith("AgrythmConnect/") and "github.com" in headers["User-Agent"]
+    assert open_meteo.default_opener == open_meteo._client.open

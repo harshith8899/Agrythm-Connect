@@ -28,12 +28,19 @@ _WMO = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "cloudy", 45: "fog
         95: "thunderstorms", 96: "thunderstorms with hail", 99: "thunderstorms with hail"}
 
 
+# Say who is asking. A hosting provider's shared address that arrives as a bare "Python-urllib" is the kind of client that
+# public APIs throttle or block; a named one with a contact is treated as a normal, polite caller.
+USER_AGENT = "AgrythmConnect/1.0 (daily weather calls for farmers; https://github.com/harshith8899/Agrythm-Connect)"
+_client = urllib.request.build_opener()
+_client.addheaders = [("User-Agent", USER_AGENT), ("Accept", "application/json")]
+default_opener = _client.open
+
 FORECAST_DAYS = 7
 DAILY_FIELDS = ("weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
                 "wind_speed_10m_max,relative_humidity_2m_mean")
 
 
-def _get(url: str, params: dict, opener=urllib.request.urlopen) -> dict:
+def _get(url: str, params: dict, opener=default_opener) -> dict:
     with opener(f"{url}?{urllib.parse.urlencode(params)}", timeout=20) as resp:
         return json.load(resp)
 
@@ -51,7 +58,7 @@ class Place:
     level: str          # village | district
 
 
-def geocode(village: str, district: str, state: str, opener=urllib.request.urlopen) -> Place | None:
+def geocode(village: str, district: str, state: str, opener=default_opener) -> Place | None:
     """Village first; if the village is unknown, the district centre. None when nothing matches confidently."""
     for name, level in ((village, "village"), (district, "district")):
         if not name:
@@ -70,7 +77,7 @@ def geocode(village: str, district: str, state: str, opener=urllib.request.urlop
 
 
 class OpenMeteoWeather:
-    def __init__(self, opener=urllib.request.urlopen):
+    def __init__(self, opener=default_opener):
         self._open = opener
 
     def get_forecast(self, place_name: str, latitude: float, longitude: float, start: date) -> dict[date, WeatherReport]:

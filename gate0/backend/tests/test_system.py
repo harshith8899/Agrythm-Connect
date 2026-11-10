@@ -216,3 +216,11 @@ def test_the_backend_check_says_it_is_hosted_on_render(tmp_path):
 def test_the_backend_check_says_when_it_is_not_on_render(tmp_path):
     c = by_id(system(tmp_path, FakeUsage([attempt(5)])).checks())["backend"]
     assert "Running on a computer, not on Render" in c["detail"]
+
+
+def test_the_weather_check_names_the_http_code_when_open_meteo_refuses(tmp_path):
+    import urllib.error
+    for code, words in ((429, "too many requests"), (403, "blocked"), (500, "HTTP 500")):
+        err = urllib.error.HTTPError("https://api.open-meteo.com", code, "x", {}, None)
+        c = by_id(system(tmp_path, FakeUsage(), FakeWeather(error=err), name=f"w{code}.db").checks())["weather"]
+        assert c["status"] == "fail" and f"HTTP {code}" in c["detail"] and words in c["detail"]
