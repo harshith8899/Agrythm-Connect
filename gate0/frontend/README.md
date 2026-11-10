@@ -74,3 +74,16 @@ gate0/
 
 `gate0/backend/index.js`, `routes/`, `services/` and `database/` are the earlier Node simulation. They are not used by the
 dashboard any more (`npm run backend:node-legacy` still starts them) and can be removed once the team agrees.
+
+## Running the dashboard against the hosted backend (Render)
+By default `npm run frontend` forwards `/api` to the backend on this computer (`http://localhost:8000`). To use the hosted
+backend instead, create `gate0/frontend/.env.local` (it is not committed; `.env.example` shows the shape):
+
+```
+GATE0_PROXY_TARGET=https://your-service.onrender.com
+GATE0_API_TOKEN=the-same-token-the-backend-uses
+```
+
+Then restart `npm run frontend`. The dev server adds the token to every call, so the browser never holds it. On the free Render
+plan the first call after a quiet period can take up to a minute while the service wakes; the page may show "Backend API
+Disconnected" until then, so press Retry.
