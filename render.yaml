@@ -27,6 +27,8 @@ services:
       # Secrets and ids: filled in the Render dashboard, never committed.
       - key: GATE0_DATABASE_URL        # the Supabase Session pooler address, with the password in it
         sync: false
+      - key: OPEN_METEO_API_KEY        # optional: the paid Open-Meteo key (leave empty to use the free service)
+        sync: false
       - key: GATE0_API_TOKEN
         sync: false
       - key: SARVAM_AGENT_API_KEY

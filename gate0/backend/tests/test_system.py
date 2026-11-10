@@ -224,3 +224,17 @@ def test_the_weather_check_names_the_http_code_when_open_meteo_refuses(tmp_path)
         err = urllib.error.HTTPError("https://api.open-meteo.com", code, "x", {}, None)
         c = by_id(system(tmp_path, FakeUsage(), FakeWeather(error=err), name=f"w{code}.db").checks())["weather"]
         assert c["status"] == "fail" and f"HTTP {code}" in c["detail"] and words in c["detail"]
+
+
+def test_the_weather_check_says_which_service_is_used_and_names_a_rejected_key(tmp_path):
+    import urllib.error
+
+    class Keyed(FakeWeather):
+        uses_key = True
+
+    ok = by_id(system(tmp_path, FakeUsage(), Keyed(), name="k1.db").checks())["weather"]
+    assert ok["status"] == "ok" and "paid API key" in ok["detail"]
+    assert "free service" in by_id(system(tmp_path, FakeUsage(), FakeWeather(), name="k2.db").checks())["weather"]["detail"]
+    bad = Keyed(error=urllib.error.HTTPError("https://customer-api.open-meteo.com", 401, "x", {}, None))
+    c = by_id(system(tmp_path, FakeUsage(), bad, name="k3.db").checks())["weather"]
+    assert c["status"] == "fail" and "key was rejected" in c["detail"] and "customer-api" not in c["detail"]

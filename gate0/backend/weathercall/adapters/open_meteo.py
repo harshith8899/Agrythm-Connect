@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import json
+import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -18,6 +20,10 @@ from ..contracts import WeatherReport
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+# The paid (commercial) service: its own addresses and the key as an apikey parameter. Used only when OPEN_METEO_API_KEY is set;
+# the free service is for non-commercial use and throttles shared hosting addresses (HTTP 429).
+CUSTOMER_GEOCODE_URL = "https://customer-geocoding-api.open-meteo.com/v1/search"
+CUSTOMER_FORECAST_URL = "https://customer-api.open-meteo.com/v1/forecast"
 
 # WMO weather codes in short spoken words
 _WMO = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "cloudy", 45: "foggy", 48: "foggy",
@@ -40,7 +46,14 @@ DAILY_FIELDS = ("weather_code,temperature_2m_max,temperature_2m_min,precipitatio
                 "wind_speed_10m_max,relative_humidity_2m_mean")
 
 
-def _get(url: str, params: dict, opener=default_opener) -> dict:
+def api_key() -> str:
+    return os.environ.get("OPEN_METEO_API_KEY", "").strip()
+
+
+def _get(url: str, params: dict, opener=default_opener, customer_url: str | None = None) -> dict:
+    key = api_key()
+    if key and customer_url:                      # the key travels in the request only, never in a log or a message
+        url, params = customer_url, {**params, "apikey": key}
     with opener(f"{url}?{urllib.parse.urlencode(params)}", timeout=20) as resp:
         return json.load(resp)
 
@@ -63,8 +76,13 @@ def geocode(village: str, district: str, state: str, opener=default_opener) -> P
     for name, level in ((village, "village"), (district, "district")):
         if not name:
             continue
-        results = _get(GEOCODE_URL, {"name": name, "count": 10, "language": "en", "format": "json",
-                                     "countryCode": "IN"}, opener).get("results") or []
+        query = {"name": name, "count": 10, "language": "en", "format": "json", "countryCode": "IN"}
+        try:
+            results = _get(GEOCODE_URL, query, opener, CUSTOMER_GEOCODE_URL).get("results") or []
+        except urllib.error.HTTPError:
+            if not api_key():
+                raise
+            results = _get(GEOCODE_URL, query, opener).get("results") or []     # the plan may not cover place search: the free one is enough
         in_state = [r for r in results if not state or _same(r.get("admin1"), state)]
         in_district = [r for r in in_state
                        if not district or any(_same(r.get(k), district) for k in ("admin2", "admin3", "name"))]
@@ -80,6 +98,10 @@ class OpenMeteoWeather:
     def __init__(self, opener=default_opener):
         self._open = opener
 
+    @property
+    def uses_key(self) -> bool:
+        return bool(api_key())
+
     def get_forecast(self, place_name: str, latitude: float, longitude: float, start: date) -> dict[date, WeatherReport]:
         """The next 7 days from `start`. Days with a missing or implausible field are left out."""
         if not latitude and not longitude:
@@ -88,7 +110,7 @@ class OpenMeteoWeather:
             "latitude": latitude, "longitude": longitude, "timezone": "Asia/Kolkata", "start_date": start.isoformat(),
             "end_date": (start + timedelta(days=FORECAST_DAYS - 1)).isoformat(), "daily": DAILY_FIELDS,
             "wind_speed_unit": "kmh",
-        }, self._open).get("daily") or {}
+        }, self._open, CUSTOMER_FORECAST_URL).get("daily") or {}
         out: dict[date, WeatherReport] = {}
         for n, day in enumerate(daily.get("time") or []):
             try:

@@ -194,3 +194,55 @@ def test_open_meteo_is_called_with_a_named_user_agent():
     headers = dict(open_meteo._client.addheaders)
     assert headers["User-Agent"].startswith("AgrythmConnect/") and "github.com" in headers["User-Agent"]
     assert open_meteo.default_opener == open_meteo._client.open
+
+
+# ---- the paid Open-Meteo key (optional) -------------------------------------------------------------------------------------------
+def _recording_opener():
+    seen = []
+
+    def opener(url, timeout):
+        seen.append(url)
+        body = {"results": [{"name": "Mandya", "admin1": "Karnataka", "admin2": "Mandya", "latitude": 12.5, "longitude": 76.9}]} \
+            if "geocoding" in url else {"daily": {"time": []}}
+        import io, json as _json
+        return io.BytesIO(_json.dumps(body).encode())
+    opener.seen = seen
+    return opener
+
+
+def test_without_a_key_the_free_addresses_are_used(monkeypatch):
+    from weathercall.adapters import open_meteo as om
+    monkeypatch.delenv("OPEN_METEO_API_KEY", raising=False)
+    opener = _recording_opener()
+    om.geocode("Mandya", "Mandya", "Karnataka", opener)
+    om.OpenMeteoWeather(opener).get_forecast("x", 12.5, 76.9, date(2026, 11, 10))
+    assert all(u.startswith(("https://geocoding-api.open-meteo.com/", "https://api.open-meteo.com/")) for u in opener.seen)
+    assert not any("apikey" in u for u in opener.seen) and om.OpenMeteoWeather(opener).uses_key is False
+
+
+def test_with_a_key_the_customer_addresses_and_the_key_are_used(monkeypatch):
+    from weathercall.adapters import open_meteo as om
+    monkeypatch.setenv("OPEN_METEO_API_KEY", "SECRET-KEY-123")
+    opener = _recording_opener()
+    om.geocode("Mandya", "Mandya", "Karnataka", opener)
+    om.OpenMeteoWeather(opener).get_forecast("x", 12.5, 76.9, date(2026, 11, 10))
+    assert opener.seen[0].startswith("https://customer-geocoding-api.open-meteo.com/v1/search?")
+    assert opener.seen[1].startswith("https://customer-api.open-meteo.com/v1/forecast?")
+    assert all("apikey=SECRET-KEY-123" in u for u in opener.seen) and om.OpenMeteoWeather(opener).uses_key is True
+
+
+def test_with_a_key_a_refused_place_search_falls_back_to_the_free_one(monkeypatch):
+    import urllib.error
+    from weathercall.adapters import open_meteo as om
+    monkeypatch.setenv("OPEN_METEO_API_KEY", "SECRET-KEY-123")
+    seen = []
+
+    def opener(url, timeout):
+        seen.append(url)
+        if "customer-geocoding" in url:
+            raise urllib.error.HTTPError(url, 403, "not in this plan", {}, None)
+        return io.BytesIO(json.dumps({"results": [{"name": "Mandya", "admin1": "Karnataka", "admin2": "Mandya",
+                                                   "latitude": 12.5, "longitude": 76.9}]}).encode())
+    place = om.geocode("Mandya", "Mandya", "Karnataka", opener)
+    assert place and place.latitude == 12.5
+    assert seen[0].startswith("https://customer-geocoding-api") and seen[1].startswith("https://geocoding-api") and "apikey" not in seen[1]
