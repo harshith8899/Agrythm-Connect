@@ -36,8 +36,9 @@ who finds the address could read farmer data and press "Send now" (real calls co
 3. Deploy. Open `https://<service>.onrender.com/api/health`: it must answer `{"status": "ok"}`. Any other `/api` address
    answers 401 without the token, which is correct.
 4. The API refuses to start on a public address without `GATE0_API_TOKEN`; a failed start usually means that is missing.
-   Weather: if System Status shows the weather API failing with HTTP 429, add `OPEN_METEO_API_KEY` (a paid key from open-meteo.com,
-   as a secret) under Environment and redeploy; the free service throttles shared hosting addresses.
+   Weather: add `WEATHERAPI_KEY` (the free key from weatherapi.com, as a secret) under Environment and redeploy; when it is set,
+   WeatherAPI.com is the weather source (Open-Meteo's free service throttles shared hosting addresses with HTTP 429). Weather is
+   fetched only when a call is made, once per place and day, and the System Status tab never asks the weather service.
 5. Render, Settings, Build and Deploy: Auto-Deploy should show "After CI checks pass".
 
 ## 2. Cloudflare (the dashboard)

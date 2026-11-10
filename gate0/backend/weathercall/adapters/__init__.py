@@ -16,17 +16,26 @@ def _sheet():
         raise ValueError("GATE0_FARMERS=sheet needs GATE0_FARMERS_FILE (path to the CSV or Excel sheet)")
     geocoder = None
     if os.environ.get("GATE0_WEATHER", "mock") != "mock":   # real weather needs real coordinates
-        from .open_meteo import geocode
+        from .weatherapi import geocode
         geocoder = geocode
     return SheetFarmerSource(path, geocoder)
 
 
-def _open_meteo():
-    from .open_meteo import OpenMeteoWeather
+def _stored(inner):
     from .weather_store import StoredWeather
     # waits between weather retries after a provider failure: 15 min, then 30 more, then 60 more (client rule)
     waits = tuple(int(x) for x in os.environ.get("GATE0_WEATHER_RETRY_MINUTES", "15,30,60").split(",") if x.strip())
-    return StoredWeather(OpenMeteoWeather(), os.environ.get("GATE0_DB", ":memory:"), waits)
+    return StoredWeather(inner, os.environ.get("GATE0_DB", ":memory:"), waits)
+
+
+def _open_meteo():
+    from .open_meteo import OpenMeteoWeather
+    return _stored(OpenMeteoWeather())
+
+
+def _weatherapi():
+    from .weatherapi import WeatherApiWeather
+    return _stored(WeatherApiWeather())
 
 
 def _sarvam():
@@ -41,7 +50,7 @@ def _sarvam_agent(kind):
 
 _FARMERS = {"local": lambda: InMemoryFarmerSource(demo_farmers()), "sheet": _sheet, "trust_ai": TrustAIFarmerSource}
 _LEDGER = {"local": lambda: SQLiteLedger(os.environ.get("GATE0_DB", ":memory:")), "trust_ai": TrustAILedger}
-_WEATHER = {"mock": MockWeather, "open_meteo": _open_meteo}
+_WEATHER = {"mock": MockWeather, "open_meteo": _open_meteo, "weatherapi": _weatherapi}
 _VOICE = {"mock": MockVoice, "sarvam": _sarvam, "sarvam_agent": lambda: _sarvam_agent("voice")}
 _TELEPHONY = {"mock": MockTelephony, "sarvam_agent": lambda: _sarvam_agent("telephony")}
 
