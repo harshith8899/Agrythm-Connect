@@ -156,6 +156,7 @@ class DashboardService:
         self.running = False
         self.last_run: dict | None = None
         self.cb_lock = threading.Lock()
+        self._tick_lock = threading.Lock()
         self._manual: set[str] = set()          # farmers with a call placed by hand in progress
 
     def _make_ports(self) -> Ports:
@@ -828,7 +829,27 @@ class DashboardService:
         return [dict(zip(keys, r)) for r in rows]
 
     # -- the background timer: callbacks when due, and the daily send when switched on ------------------------------
-    def tick(self) -> None:
+    def tick(self) -> bool:
+        """One pass over what is due: callbacks, retries and the daily send. Only one pass runs at a time, whether it comes
+        from the background loop or from POST /api/tick, so a wake-up call can never double a call. Returns False if
+        another pass was already running."""
+        if not self._tick_lock.acquire(blocking=False):
+            return False
+        try:
+            self._tick_once()
+            return True
+        finally:
+            self._tick_lock.release()
+
+    def start_tick(self) -> bool:
+        """For an outside timer (POST /api/tick): run one pass in the background and return at once. The timer's only
+        job is to wake a sleeping host and nudge it; what is due is decided here, exactly as when the loop runs it."""
+        if self._tick_lock.locked():
+            return False
+        threading.Thread(target=self.tick, daemon=True).start()
+        return True
+
+    def _tick_once(self) -> None:
         self.run_due_callbacks()
         self.run_due_retries()
         now = self._now()
