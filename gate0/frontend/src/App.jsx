@@ -54,7 +54,7 @@ function App() {
   } = useVoiceAgentData();
 
   // Check if any filter is active
-  const isFiltered = Boolean(searchQuery || dateFilter !== 'all' || districtFilter !== 'all' || languageFilter !== 'all' || statusFilter !== 'all');
+  const isFiltered = Boolean(searchQuery || dateFilter !== 'today' || districtFilter !== 'all' || languageFilter !== 'all' || statusFilter !== 'all');
 
   // Handle clicking "View Call Logs" from Farmer Directory
   const handleSelectFarmerFromDirectory = (farmerName) => {
@@ -101,7 +101,7 @@ function App() {
                     Backend API Disconnected
                   </div>
                   <div className="text-xs text-rose-700 mt-0.5 leading-relaxed">
-                    Cannot reach the API. Run <code className="bg-rose-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-950">npm run backend</code> in your terminal to start it.
+                    Cannot reach the API. If it runs on Render's free plan it may be waking up: wait a minute and press Retry.
                   </div>
                 </div>
               </div>

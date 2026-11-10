@@ -161,12 +161,12 @@ export const CallHistoryTable = ({
         
         <div>
           <h3 className="text-base font-bold text-slate-900">
-            {isFiltered ? 'No Matching Call Records' : 'No Call Records Yet'}
+            {isFiltered ? 'No Matching Call Records' : 'No calls for this day yet'}
           </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
             {isFiltered 
               ? 'No voice call logs match the selected search or filter criteria. Try adjusting your filters.'
-              : 'Import farmers in the Farmer Directory, then click "Send now" in the header to place today\'s calls.'}
+              : 'Nothing has been called yet. The daily send places the calls, or use Send now in the header. Pick "All Dates" to see earlier days.'}
           </p>
         </div>
 

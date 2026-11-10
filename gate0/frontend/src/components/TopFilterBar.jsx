@@ -45,7 +45,7 @@ export const TopFilterBar = ({
   availableDistricts = [],
   availableLanguages = [],
 }) => {
-  const isFiltered = searchQuery || dateFilter !== 'all' || customDate || districtFilter !== 'all' || languageFilter !== 'all' || statusFilter !== 'all';
+  const isFiltered = searchQuery || dateFilter !== 'today' || districtFilter !== 'all' || languageFilter !== 'all' || statusFilter !== 'all';
 
   const handleDatePresetClick = (presetId) => {
     if (presetId === 'today') {
