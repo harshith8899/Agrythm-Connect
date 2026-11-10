@@ -207,8 +207,11 @@ class SystemChecks:
         try:
             got = self.weather.get_forecast("probe", PROBE_PLACE[0], PROBE_PLACE[1], today)
         except Exception as exc:
+            code = getattr(exc, "code", None)                                  # the HTTP status of a refusal, if there was one
+            why = {429: "HTTP 429: too many requests, this host's address is being throttled",
+                   403: "HTTP 403: the request was blocked"}.get(code) or (f"HTTP {code}" if code else type(exc).__name__)
             return self._check("weather", "Weather API (Open-Meteo)", "fail",
-                               f"Did not answer ({type(exc).__name__}). Saved forecasts are used meanwhile.", t)
+                               f"Did not answer ({why}). Saved forecasts are used meanwhile.", t)
         if today not in got:
             return self._check("weather", "Weather API (Open-Meteo)", "fail", "Answered, but without today's forecast.", t)
         return self._check("weather", "Weather API (Open-Meteo)", "ok", "Answered with today's forecast.", t)
