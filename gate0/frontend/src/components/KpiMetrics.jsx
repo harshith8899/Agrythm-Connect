@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { OverviewCard } from './OverviewCard';
 
-export const KpiMetrics = ({ metrics }) => {
+export const KpiMetrics = ({ metrics, loading = false }) => {
   const called = metrics.totalCalls || 0;
   const completed = metrics.completedCount || 0;
   const callbacks = metrics.callbacksScheduled || 0;
@@ -26,6 +26,7 @@ export const KpiMetrics = ({ metrics }) => {
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
         <OverviewCard
+          loading={loading}
           title="Farmers Called"
           value={called}
           subtitle="Farmers with at least one call"
@@ -33,6 +34,7 @@ export const KpiMetrics = ({ metrics }) => {
           badge={called > 0 ? scope : 'None yet'}
         />
         <OverviewCard
+          loading={loading}
           title="Completed"
           value={completed}
           subtitle={`${completionPct} of farmers called understood the weather`}
@@ -40,6 +42,7 @@ export const KpiMetrics = ({ metrics }) => {
           badge={called > 0 ? completionPct : 'Pending'}
         />
         <OverviewCard
+          loading={loading}
           title="Callbacks Pending"
           value={callbacks}
           subtitle="Farmers who asked to be called later"
@@ -47,6 +50,7 @@ export const KpiMetrics = ({ metrics }) => {
           badge={callbacks > 0 ? 'Waiting' : 'None'}
         />
         <OverviewCard
+          loading={loading}
           title="Unanswered"
           value={unanswered}
           subtitle="Not picked up, waiting for a retry or out of attempts"
@@ -54,6 +58,7 @@ export const KpiMetrics = ({ metrics }) => {
           badge={unanswered > 0 ? 'Retrying' : 'Clear'}
         />
         <OverviewCard
+          loading={loading}
           title="Needs Attention"
           value={needsAttention}
           subtitle="Failed calls, or the farmer did not confirm"

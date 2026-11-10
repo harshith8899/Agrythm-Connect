@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   loadFarmersData, 
   loadCallLogsData, 
@@ -29,6 +29,10 @@ export const useVoiceAgentData = () => {
   const [lastSynced, setLastSynced] = useState(null);
   const [syncStatus, setSyncStatus] = useState('syncing');
   const [isBackendOnline, setIsBackendOnline] = useState(true);
+  const [hasConnected, setHasConnected] = useState(false);   // the backend has answered at least once
+  const [offlineSince, setOfflineSince] = useState(null);     // when it stopped answering (ms)
+  const [mountedAt] = useState(() => Date.now());          // when the page started waiting
+  const inFlight = useRef(false);
   const [sarvamLive, setSarvamLive] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
@@ -57,6 +61,8 @@ export const useVoiceAgentData = () => {
 
   // Primary Fetch Function
   const fetchAllData = useCallback(async (isSilent = false) => {
+    if (inFlight.current) return;      // a slow first answer (the server waking up) must not pile up more requests
+    inFlight.current = true;
     if (!isSilent) {
       setRefreshing(true);
     }
@@ -77,6 +83,12 @@ export const useVoiceAgentData = () => {
       const isOnline = callLogsRes.source === 'sqlite_live' || farmersRes.source === 'sqlite_live';
       setIsBackendOnline(isOnline);
       setSyncStatus(isOnline ? 'connected' : 'disconnected');
+      if (isOnline) {
+        setHasConnected(true);
+        setOfflineSince(null);
+      } else {
+        setOfflineSince((prev) => prev ?? mountedAt);
+      }
 
       if (dispRes) {
         setAutoDispatcher(dispRes);
@@ -94,14 +106,16 @@ export const useVoiceAgentData = () => {
     } catch (err) {
       console.error('Error refreshing voice agent data:', err);
       setIsBackendOnline(false);
+      setOfflineSince((prev) => prev ?? mountedAt);
       setSarvamLive(false);
       setSyncStatus('disconnected');
       setErrorMessage(err.message || 'Failed to connect to backend server');
     } finally {
+      inFlight.current = false;
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [mountedAt]);
 
   // Initial load via microtask
   useEffect(() => {
@@ -121,12 +135,14 @@ export const useVoiceAgentData = () => {
   useEffect(() => {
     if (!autoPollInterval || autoPollInterval <= 0) return;
 
+    // 3 s while a send runs, 5 s while the server is not answering (so the page fills in soon after it wakes), else 15 s
+    const every = sending ? 3 : !isBackendOnline ? 5 : autoPollInterval;
     const timer = setInterval(() => {
       fetchAllData(true);
-    }, (sending ? 3 : autoPollInterval) * 1000);
+    }, every * 1000);
 
     return () => clearInterval(timer);
-  }, [autoPollInterval, sending, fetchAllData]);
+  }, [autoPollInterval, sending, isBackendOnline, fetchAllData]);
 
   // Combined Farmer Map for fast lookup
   const farmersMap = useMemo(() => {
@@ -396,6 +412,8 @@ export const useVoiceAgentData = () => {
     lastSynced,
     syncStatus,
     isBackendOnline,
+    hasConnected,
+    waitingSince: !isBackendOnline ? offlineSince : (!hasConnected ? mountedAt : null),
     sarvamLive,
     errorMessage,
     summaryMetrics,

@@ -50,9 +50,9 @@ export const Header = ({
                   Live Sync
                 </span>
               ) : (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-200 shadow-2xs">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping" />
-                  Backend Offline
+                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full border border-amber-200 shadow-2xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Waking up…
                 </span>
               )}
             </div>

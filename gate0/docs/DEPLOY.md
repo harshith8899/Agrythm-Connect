@@ -65,16 +65,11 @@ API token added on the server side, so the token never reaches the browser. (The
 If something is wrong: `API proxy is not configured` (503) means `BACKEND_URL` or `API_TOKEN` is missing; `unauthorized` (401) means
 the token differs from Render's; `Backend not reachable` (502) means Render is not answering (it may still be waking up).
 
-## 3. GitHub Actions (`.github/workflows/ci.yml`)
-1. Cloudflare, My Profile, API Tokens, Create Token, Create Custom Token with the permission Account, Cloudflare Pages,
-   Edit. Copy the Account ID from the dashboard sidebar.
-2. GitHub, Settings, Secrets and variables, Actions: add secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-   If the Pages project is not called `agrythm-connect`, add a repository variable `CLOUDFLARE_PAGES_PROJECT`.
-   Then add a repository **variable** `DEPLOY_FRONTEND` with the value `true`. Until it exists, the deploy job is skipped,
-   so `main` stays green before Cloudflare is set up.
-3. GitHub, Settings, Branches, add a rule for `main`: require a pull request and require the status checks
-   `pilot-tests`, `gate0-backend-tests` and `gate0-frontend`. After that, only tested code reaches `main`, and only `main`
-   deploys.
+## 3. GitHub
+Settings, Branches, add a rule for `main`: require a pull request and require the status checks `pilot-tests`,
+`gate0-backend-tests` and `gate0-frontend`. After that, only tested code reaches `main`, and only `main` deploys.
+(Optional: to deploy the dashboard from GitHub Actions instead of Cloudflare's Git connection, add the secrets
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` and the variable `DEPLOY_FRONTEND` = `true`, and do not use the Git connection.)
 
 ## What happens on each change
 | Event | What runs |
