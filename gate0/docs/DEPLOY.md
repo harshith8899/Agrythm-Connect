@@ -38,15 +38,32 @@ who finds the address could read farmer data and press "Send now" (real calls co
 4. The API refuses to start on a public address without `GATE0_API_TOKEN`; a failed start usually means that is missing.
 5. Render, Settings, Build and Deploy: Auto-Deploy should show "After CI checks pass".
 
-## 2. Cloudflare Pages (dashboard)
-1. Create the project once (from `gate0/frontend`, after `npx wrangler login`):
-   `npx wrangler pages project create agrythm-connect --production-branch main`
-2. Pages project, Settings, Variables and Secrets (Production): `BACKEND_URL` = the Render address (plain text, no trailing
-   slash) and `API_TOKEN` = the token from step 1 (type Secret).
-3. Protect it: Zero Trust, Access, Applications, Add, Self-hosted. Domain: the Pages address (and the custom domain if
-   you add one). Policy: allow only the team's email addresses. Also add `*.agrythm-connect.pages.dev` so preview addresses
-   are covered.
-4. The dashboard calls `/api` on its own address, so no `VITE_API_URL` is needed in production.
+## 2. Cloudflare (the dashboard)
+Cloudflare's current "Set up your application" screen creates a **Worker with static assets**. `gate0/frontend/wrangler.jsonc` and
+`gate0/frontend/worker/index.js` are made for it: the Worker serves the built dashboard and forwards `/api/*` to Render with the
+API token added on the server side, so the token never reaches the browser. (The older Pages setup, with
+`functions/api/[[path]].js`, does the same job and still works if you create a Pages project instead.)
+
+1. Cloudflare dashboard, Workers & Pages, Create, import the GitHub repository `Agrythm-Connect`.
+2. On "Set up your application":
+   - Project name `agrythm-connect` (it must match `name` in `wrangler.jsonc`).
+   - Build command `npm run build`. Deploy command `npx wrangler deploy` (the default).
+   - Tick **Protect with Cloudflare Access** (see step 4).
+   - Open **Advanced settings**: Root directory **`gate0/frontend`**; leave the API token on "create new token"; under variables add
+     the build variable `NODE_VERSION` = `22`.
+   - Leave **Enable preview builds** off for now.
+   - Click **Deploy**. The first build takes a couple of minutes. The address looks like `agrythm-connect.<your-name>.workers.dev`.
+3. Give the Worker its two settings: open the Worker, Settings, **Variables and Secrets**, and add both as type **Secret**:
+   `BACKEND_URL` = the Render address (no trailing slash) and `API_TOKEN` = the same token as `GATE0_API_TOKEN` on Render. Save and
+   deploy. (These are runtime settings. The variables under "Advanced settings" on the setup screen are only for the build.)
+4. **Protect the site (required).** Anyone who can open the site could otherwise read farmer data and press Send now. The tick box
+   in step 2 puts Cloudflare Access in front of the address. Then Zero Trust, Access, Applications, open that application, and edit
+   its policy: Action **Allow**, Include **Emails**, the team's addresses. The first time, Zero Trust asks for a team name and the
+   Free plan (up to 50 users).
+5. The dashboard calls `/api` on its own address, so no `VITE_API_URL` is needed in production.
+
+If something is wrong: `API proxy is not configured` (503) means `BACKEND_URL` or `API_TOKEN` is missing; `unauthorized` (401) means
+the token differs from Render's; `Backend not reachable` (502) means Render is not answering (it may still be waking up).
 
 ## 3. GitHub Actions (`.github/workflows/ci.yml`)
 1. Cloudflare, My Profile, API Tokens, Create Token, Create Custom Token with the permission Account, Cloudflare Pages,
