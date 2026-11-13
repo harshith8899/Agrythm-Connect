@@ -65,7 +65,7 @@ const callAction = (farmer, todayCall) => {
 };
 
 const LANGUAGES = ['Hindi', 'Kannada', 'Telugu', 'English'];
-const BLANK = { farmer_name: '', phone_number: '', preferred_language: 'Hindi', village: '', district: '', state: '', pincode: '', call_consent: false, active: true };
+const BLANK = { farmer_name: '', phone_number: '', preferred_language: 'Kannada', village: '', district: '', state: 'Karnataka', pincode: '', call_consent: false, active: true };
 
 const Field = ({ label, children }) => (
   <label className="block text-[11px] font-semibold text-slate-600">
@@ -86,6 +86,8 @@ const SearchableCombobox = ({
   disabled = false,
   allowCustom = true,
   required = false,
+  onSelect,
+  describe,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState(value || '');
@@ -149,6 +151,7 @@ const SearchableCombobox = ({
   const handleSelect = (option) => {
     setSearch(option);
     onChange(option);
+    if (onSelect) onSelect(option);
     setIsOpen(false);
     setHighlightIndex(-1);
   };
@@ -246,6 +249,7 @@ const SearchableCombobox = ({
                     } ${isSelected ? 'font-bold text-trust-navy bg-trust-navy/5' : ''}`}
                   >
                     <span className="truncate">{opt}</span>
+                    {describe && describe(opt) && <span className="ml-2 shrink-0 text-[10px] text-slate-400">{describe(opt)}</span>}
                     {isSelected && <Check className="w-3.5 h-3.5 text-trust-green shrink-0 ml-2" />}
                   </li>
                 );
@@ -267,7 +271,15 @@ const SearchableCombobox = ({
   );
 };
 
+// Calling language that usually goes with a state (a suggestion only: it follows the state until someone picks a language).
+const LANGUAGE_FOR_STATE = { Karnataka: 'Kannada', Telangana: 'Telugu', 'Andhra Pradesh': 'Telugu' };
+const DEFAULT_STATE = 'Karnataka';
+const sameText = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
 // Add a farmer by hand (farmer is null) or edit one. A blank phone keeps the saved number.
+// Convenience: Karnataka is the default state (any other can be picked), the PIN code fills state, district and village,
+// typing the first letters of a village lists matching places from the India Post directory (picking one fills the rest),
+// and "Save and add another" keeps the state and district for the next farmer of the same area.
 const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
   const editing = Boolean(farmer);
   const [form, setForm] = useState(editing ? {
@@ -276,55 +288,102 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
     preferred_language: normalizeLanguage(farmer.preferred_language) || 'Hindi',
     village: farmer.village || '',
     district: farmer.district || '',
-    state: farmer.state || '',
+    state: farmer.state || DEFAULT_STATE,
     pincode: farmer.pincode || '',
     call_consent: farmer.call_consent === 'Yes',
     active: farmer.active !== 'No',
   } : BLANK);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [savedNote, setSavedNote] = useState('');
   const [pinLoading, setPinLoading] = useState(false);
   const [pinError, setPinError] = useState('');
   const [pinVillages, setPinVillages] = useState([]);
+  const [places, setPlaces] = useState([]);              // matches for the village being typed, from the India Post directory
+  const [placeBusy, setPlaceBusy] = useState(false);
+  const languageChosen = useRef(editing);                // once a language is picked by hand it no longer follows the state
+  const placeCache = useRef(new Map());
+  const placeTimer = useRef(null);
+  const placeRequest = useRef(0);
+  const formRef = useRef(null);
+  const nameRef = useRef(null);
+
+  useEffect(() => () => clearTimeout(placeTimer.current), []);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }));
 
-  const handleStateChange = (val) => {
-    setForm((f) => {
-      const validDistricts = getDistrictsForState(val);
-      const keepDistrict = validDistricts.some(
-        (d) => d.toLowerCase() === (f.district || '').trim().toLowerCase()
-      );
-      return {
-        ...f,
-        state: val,
-        district: keepDistrict ? f.district : '',
-      };
-    });
+  // Everything that changes the state goes through here, so the language suggestion and the district check stay in one place.
+  const withState = (f, state) => {
+    const keep = getDistrictsForState(state).some((d) => sameText(d, f.district));
+    const language = !languageChosen.current && LANGUAGE_FOR_STATE[state] ? LANGUAGE_FOR_STATE[state]
+      : (!languageChosen.current ? 'Hindi' : f.preferred_language);
+    return { ...f, state, district: keep ? f.district : '', preferred_language: language };
   };
+
+  const handleStateChange = (val) => setForm((f) => withState(f, val));
 
   const handleDistrictChange = (val) => {
     const detectedState = getStateForDistrict(val);
-    setForm((f) => ({
-      ...f,
-      district: val,
-      state: f.state || detectedState || f.state,
-    }));
+    setForm((f) => (detectedState && !sameText(detectedState, f.state) && !f.state
+      ? { ...withState(f, detectedState), district: val } : { ...f, district: val }));
   };
 
+  // India Post directory by place name (needs 3 letters; waits for a pause in typing; one answer is kept per search).
+  const searchPlaces = (text) => {
+    clearTimeout(placeTimer.current);
+    const term = String(text || '').trim();
+    if (term.length < 3) {
+      placeRequest.current += 1;
+      setPlaces([]);
+      setPlaceBusy(false);
+      return;
+    }
+    placeTimer.current = setTimeout(async () => {
+      const id = ++placeRequest.current;
+      const key = term.toLowerCase();
+      try {
+        let list = placeCache.current.get(key);
+        if (!list) {
+          setPlaceBusy(true);
+          const res = await fetch(`https://api.postalpincode.in/postoffice/${encodeURIComponent(term)}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          list = data?.[0]?.Status === 'Success'
+            ? (data[0].PostOffice || []).map((p) => ({ name: p.Name, district: p.District, state: p.State, pincode: p.Pincode }))
+            : [];
+          placeCache.current.set(key, list);
+        }
+        if (id === placeRequest.current) setPlaces(list);
+      } catch {
+        if (id === placeRequest.current) setPlaces([]);          // the directory is down: typing and saving still work
+      } finally {
+        if (id === placeRequest.current) setPlaceBusy(false);
+      }
+    }, 350);
+  };
+
+  // Places that fit what is already chosen (state, and district when there is one), best match first, one per name.
+  const typed = form.village.trim().toLowerCase();
+  const placeByName = new Map();
+  places
+    .filter((p) => (!form.state || sameText(p.state, form.state)) && (!form.district || sameText(p.district, form.district)))
+    .sort((a, b) => Number(b.name.toLowerCase().startsWith(typed)) - Number(a.name.toLowerCase().startsWith(typed)) || a.name.localeCompare(b.name))
+    .forEach((p) => { if (!placeByName.has(p.name.toLowerCase())) placeByName.set(p.name.toLowerCase(), p); });
+
   const handleVillageChange = (val) => {
-    const matchedFarmer = farmers.find(
-      (f) => String(f.village || '').trim().toLowerCase() === String(val || '').trim().toLowerCase()
-    );
+    setForm((f) => ({ ...f, village: val }));
+    searchPlaces(val);
+  };
+
+  // A village picked from the list fills what is still empty (district, state, PIN code) from the same row.
+  const handleVillagePicked = (name) => {
+    const fromFarmer = farmers.find((f) => sameText(f.village, name) && (!form.state || sameText(f.state, form.state)));
+    const hit = placeByName.get(String(name).toLowerCase())
+      || (fromFarmer && { district: fromFarmer.district, state: fromFarmer.state, pincode: fromFarmer.pincode });
+    if (!hit) return;
     setForm((f) => {
-      const nextDistrict = f.district || matchedFarmer?.district || '';
-      const detectedState = nextDistrict ? getStateForDistrict(nextDistrict) : null;
-      return {
-        ...f,
-        village: val,
-        district: nextDistrict || f.district,
-        state: f.state || matchedFarmer?.state || detectedState || f.state,
-      };
+      const next = hit.state && !f.state ? withState(f, hit.state) : { ...f };
+      return { ...next, village: name, district: next.district || hit.district || '', pincode: next.pincode || hit.pincode || '' };
     });
   };
 
@@ -334,7 +393,7 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
     setForm((f) => ({ ...f, pincode: raw }));
     setPinError('');
 
-    if (raw.length === 6 && /^\d{6}$/.test(raw)) {
+    if (raw.length === 6) {
       setPinLoading(true);
       try {
         const res = await fetch(`https://api.postalpincode.in/pincode/${raw}`);
@@ -346,18 +405,11 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
           const poNames = Array.from(new Set(poList.map((p) => p.Name).filter(Boolean)));
           setPinVillages(poNames);
 
-          const matchedState = INDIAN_STATES.find(
-            (s) => s.toLowerCase() === String(po.State || '').trim().toLowerCase()
-          ) || po.State;
-
-          const districtsInState = getDistrictsForState(matchedState);
-          const matchedDistrict = districtsInState.find(
-            (d) => d.toLowerCase() === String(po.District || '').trim().toLowerCase()
-          ) || po.District;
+          const matchedState = INDIAN_STATES.find((s) => sameText(s, po.State)) || po.State;
+          const matchedDistrict = getDistrictsForState(matchedState).find((d) => sameText(d, po.District)) || po.District;
 
           setForm((prev) => ({
-            ...prev,
-            state: matchedState || prev.state,
+            ...withState(prev, matchedState || prev.state),
             district: matchedDistrict || prev.district,
             village: prev.village || (poNames.length === 1 ? poNames[0] : prev.village),
           }));
@@ -365,118 +417,101 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
           setPinError(data[0]?.Message || 'Invalid PIN code or no location found.');
         }
       } catch {
-        setPinError('PIN code lookup service unreachable.');
+        setPinError('PIN code lookup service unreachable. Choose the state and district below.');
       } finally {
         setPinLoading(false);
       }
     }
   };
 
-  // Compute district options based on selected state; fallback to all Indian districts if no state selected
-  const districtOptions = form.state
-    ? getDistrictsForState(form.state)
-    : ALL_INDIAN_DISTRICTS;
+  // Karnataka first, then the other states; a state read from a PIN code that is not in the list is added too.
+  const stateChoices = [DEFAULT_STATE, ...INDIAN_STATES.filter((s) => s !== DEFAULT_STATE)];
+  if (form.state && !stateChoices.some((s) => sameText(s, form.state))) stateChoices.push(form.state);
 
-  // Compute village options based on selected state, district, existing farmers, and PIN lookup
-  const villageOptions = Array.from(
-    new Set([
-      ...pinVillages,
-      ...farmers
-        .filter((f) => {
-          const matchState = !form.state || String(f.state || '').trim().toLowerCase() === String(form.state).trim().toLowerCase();
-          const matchDistrict = !form.district || String(f.district || '').trim().toLowerCase() === String(form.district).trim().toLowerCase();
-          return matchState && matchDistrict && f.village;
-        })
-        .map((f) => String(f.village).trim())
-        .filter(Boolean),
-    ])
-  ).sort();
+  const districtOptions = form.state ? getDistrictsForState(form.state) : ALL_INDIAN_DISTRICTS;
 
-  const submit = async (e) => {
-    e.preventDefault();
+  // Village choices: matches from the directory, the villages of the PIN code, and villages of existing farmers in the area
+  const villageOptions = Array.from(new Set([
+    ...Array.from(placeByName.values()).map((p) => p.name),
+    ...pinVillages,
+    ...farmers
+      .filter((f) => f.village
+        && (!form.state || sameText(f.state, form.state))
+        && (!form.district || sameText(f.district, form.district)))
+      .map((f) => String(f.village).trim()),
+  ].filter(Boolean)));
+  const describeVillage = (name) => {
+    const p = placeByName.get(String(name).toLowerCase());
+    return p ? [p.district, p.pincode].filter(Boolean).join(' · ') : '';
+  };
+
+  const save = async (again) => {
+    if (formRef.current && !formRef.current.reportValidity()) return;
     setBusy(true);
     setError('');
+    setSavedNote('');
     try {
       if (editing) await updateFarmer(farmer.farmer_id, form);
       else await addFarmer(form);
       onSaved();
-      onClose();
+      if (again && !editing) {
+        setSavedNote(`Saved ${form.farmer_name}. Add the next farmer.`);
+        setForm({ ...BLANK, state: form.state, district: form.district, preferred_language: form.preferred_language });
+        setPinVillages([]);
+        setPlaces([]);
+        setBusy(false);
+        if (nameRef.current) nameRef.current.focus();
+      } else {
+        onClose();
+      }
     } catch (err) {
       setError(err.message);
       setBusy(false);
     }
   };
 
+  const submit = (e) => {
+    e.preventDefault();
+    save(false);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40" role="dialog" aria-modal="true">
-      <form onSubmit={submit} className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+      <form ref={formRef} onSubmit={submit} className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-slate-900">{editing ? `Edit ${farmer.farmer_name}` : 'Add farmer'}</h3>
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer" aria-label="Close">
             <X className="w-4 h-4" />
           </button>
         </div>
+        {savedNote && <p className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">{savedNote}</p>}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-4">
-          {/* 1st: Farmer name */}
           <Field label="Farmer name">
             <input
+              ref={nameRef}
               className={inputCls}
               value={form.farmer_name}
               onChange={set('farmer_name')}
               placeholder="e.g. Ramesh Kumar"
+              autoFocus
               required
             />
           </Field>
 
-          {/* 2nd: Mobile number */}
           <Field label={editing ? `Mobile number (saved: ${farmer.phone_number}; blank keeps it)` : 'Mobile number'}>
             <input
               className={inputCls}
               value={form.phone_number}
-              onChange={set('phone_number')}
+              onChange={(e) => setForm((f) => ({ ...f, phone_number: e.target.value.replace(/[^\d+\s-]/g, '').slice(0, 16) }))}
               inputMode="tel"
               placeholder="10 digits (e.g. 9845012345)"
               required={!editing}
             />
           </Field>
 
-          {/* 3rd: State */}
-          <Field label="State">
-            <SearchableCombobox
-              value={form.state}
-              onChange={handleStateChange}
-              options={INDIAN_STATES}
-              placeholder="Type or select state (e.g. Karnataka)..."
-              required
-            />
-          </Field>
-
-          {/* 4th: District */}
-          <Field label="District">
-            <SearchableCombobox
-              value={form.district}
-              onChange={handleDistrictChange}
-              options={districtOptions}
-              disabled={false}
-              placeholder={form.state ? `Type or select district in ${form.state}...` : 'Type or select district (e.g. Mandya)...'}
-              required
-            />
-          </Field>
-
-          {/* 5th: Village */}
-          <Field label="Village">
-            <SearchableCombobox
-              value={form.village}
-              onChange={handleVillageChange}
-              options={villageOptions}
-              allowCustom={true}
-              placeholder={form.district ? `Type or select village in ${form.district}...` : 'Type or select village name...'}
-            />
-          </Field>
-
-          {/* 6th: PIN Code */}
-          <div>
-            <Field label="PIN Code (6 digits)">
+          {/* The PIN code comes first: six digits fill the state, district and village below */}
+          <div className="sm:col-span-2">
+            <Field label="PIN code (fills state, district and village)">
               <div className="relative">
                 <input
                   className={inputCls}
@@ -496,10 +531,45 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
             {pinError && <p className="text-[10px] font-semibold text-rose-600 mt-1">{pinError}</p>}
           </div>
 
-          {/* 7th: Calling language */}
+          <Field label="State">
+            <select className={inputCls} value={form.state} onChange={(e) => handleStateChange(e.target.value)} required>
+              {stateChoices.map((s) => (
+                <option key={s} value={s}>{s === DEFAULT_STATE ? `${s} (default)` : s}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="District">
+            <SearchableCombobox
+              value={form.district}
+              onChange={handleDistrictChange}
+              options={districtOptions}
+              placeholder={`Type the first letters (${form.state || 'any state'})...`}
+              required
+            />
+          </Field>
+
+          <div className="sm:col-span-2">
+            <Field label={placeBusy ? 'Village (searching places...)' : 'Village (type 3 letters to see places)'}>
+              <SearchableCombobox
+                value={form.village}
+                onChange={handleVillageChange}
+                onSelect={handleVillagePicked}
+                describe={describeVillage}
+                options={villageOptions}
+                allowCustom={true}
+                placeholder={form.district ? `Type the first letters of the village in ${form.district}...` : 'Type the first letters of the village...'}
+              />
+            </Field>
+          </div>
+
           <div className="sm:col-span-2">
             <Field label="Calling language">
-              <select className={inputCls} value={form.preferred_language} onChange={set('preferred_language')}>
+              <select
+                className={inputCls}
+                value={form.preferred_language}
+                onChange={(e) => { languageChosen.current = true; setForm((f) => ({ ...f, preferred_language: e.target.value })); }}
+              >
                 {LANGUAGES.map((l) => (
                   <option key={l} value={l}>
                     {l}
@@ -520,8 +590,13 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
           </label>
         </div>
         {error && <p className="text-xs font-semibold text-rose-700">{error}</p>}
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 cursor-pointer">Cancel</button>
+          {!editing && (
+            <button type="button" disabled={busy} onClick={() => save(true)} className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-trust-navy text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 cursor-pointer">
+              Save and add another
+            </button>
+          )}
           <button type="submit" disabled={busy} className="px-4 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 cursor-pointer">
             {busy ? 'Saving...' : 'Save'}
           </button>

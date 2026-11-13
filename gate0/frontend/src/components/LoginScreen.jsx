@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
-import { Lock, User, Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react';
-import { loginAdmin } from '../utils';
+import React, { useEffect, useRef, useState } from 'react';
+import { Lock, User, Eye, EyeOff, Loader2, ShieldCheck, Server, CheckCircle2 } from 'lucide-react';
+import { loginAdmin, pingServer } from '../utils';
+
+const GIVE_UP_AFTER_S = 180;      // a start normally takes under a minute; after this it is a real problem, not a slow start
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const LoginScreen = ({ onLoginSuccess }) => {
   const [username, setUsername] = useState('');
@@ -8,6 +11,33 @@ export const LoginScreen = ({ onLoginSuccess }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [server, setServer] = useState('waking');      // waking | ready | down
+  const [seconds, setSeconds] = useState(0);
+  const ready = useRef(false);
+
+  // Wake the server the moment this page opens, so it is up by the time the password is typed.
+  useEffect(() => {
+    let stopped = false;
+    const startedAt = Date.now();
+    const tick = setInterval(() => setSeconds(Math.round((Date.now() - startedAt) / 1000)), 1000);
+    (async () => {
+      while (!stopped) {
+        if (await pingServer(20000)) {
+          ready.current = true;
+          if (!stopped) setServer('ready');
+          return;
+        }
+        if (Date.now() - startedAt > GIVE_UP_AFTER_S * 1000) {
+          if (!stopped) setServer('down');
+          return;
+        }
+        await wait(2500);
+      }
+    })();
+    return () => { stopped = true; clearInterval(tick); };
+  }, []);
+
+  const retryWake = () => { window.location.reload(); };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -20,12 +50,23 @@ export const LoginScreen = ({ onLoginSuccess }) => {
     setError('');
 
     try {
-      await loginAdmin(username.trim(), password);
+      // While the server is still starting the sign-in is tried again by itself (a wrong password is never retried).
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await loginAdmin(username.trim(), password);
+          break;
+        } catch (err) {
+          if (!err.transient || attempt >= 24) throw err;
+          setError('The server is waking up. Signing in as soon as it is ready...');
+          await wait(5000);
+        }
+      }
+      setError('');
       if (onLoginSuccess) {
         onLoginSuccess();
       }
     } catch (err) {
-      setError(err.message || 'Invalid username or password.');
+      setError(err.transient ? 'The server did not answer. Check that the Render service shows Live, then try again.' : (err.message || 'Invalid username or password.'));
     } finally {
       setLoading(false);
     }
@@ -66,6 +107,28 @@ export const LoginScreen = ({ onLoginSuccess }) => {
               Enter authorized administrator credentials to manage campaigns and farmer records.
             </p>
           </div>
+
+          {server === 'waking' && (
+            <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2" role="status" aria-live="polite">
+              <Server className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+              <span>
+                <strong>Waking up the server...</strong> It sleeps when idle and can take up to a minute. You can already type your
+                details; sign-in continues by itself. {seconds} s
+              </span>
+            </div>
+          )}
+          {server === 'ready' && (
+            <div className="mb-4 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Server is ready.</span>
+            </div>
+          )}
+          {server === 'down' && (
+            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between gap-3" role="alert">
+              <span>The server has not answered for {Math.floor(GIVE_UP_AFTER_S / 60)} minutes. Check that the Render service shows Live.</span>
+              <button type="button" onClick={retryWake} className="shrink-0 px-3 py-1.5 rounded-lg bg-rose-600 text-white font-bold cursor-pointer">Retry</button>
+            </div>
+          )}
 
           {error && (
             <div
@@ -143,7 +206,7 @@ export const LoginScreen = ({ onLoginSuccess }) => {
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>Verifying credentials...</span>
+                  <span>{error ? 'Waiting for the server...' : 'Verifying credentials...'}</span>
                 </>
               ) : (
                 <span>Sign In to Dashboard</span>

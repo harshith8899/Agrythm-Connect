@@ -56,18 +56,44 @@ const checkAuthResponse = (response) => {
   }
 };
 
+/**
+ * Asks the server whether it is awake (/api/health needs no sign-in). On the free hosting plan a sleeping server answers the first
+ * request only after up to a minute, so this is also how the sign-in page wakes it early. Never throws: true when it answered.
+ */
+export const pingServer = async (timeoutMs = 70000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${API_BASE}/api/health`, { cache: 'no-store', signal: controller.signal });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/** An error that means "the server is not ready yet", not "wrong password": the caller may simply try again. */
+const notReady = () => Object.assign(new Error('The server is still waking up. Trying again...'), { transient: true });
+
 export const loginAdmin = async (username, password) => {
-  const response = await fetch(`${API_BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+  } catch {
+    throw notReady();                                    // no answer at all: asleep or restarting
+  }
   let body = null;
   try {
     body = await response.json();
   } catch {
     body = null;
   }
+  if (response.status >= 500 || response.status === 429) throw notReady();    // the host's "starting up" and proxy errors
   if (!response.ok) {
     throw new Error((body && body.error) || 'Invalid username or password');
   }
