@@ -21,10 +21,14 @@ Phone numbers are masked in every response and never logged. CORS allows only th
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
 import json
 import os
+import secrets
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -37,11 +41,69 @@ from .system import SystemChecks
 MAX_BODY = 2 * 1024 * 1024
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
+_SIGNING_SECRET = secrets.token_bytes(32)
 
-def make_handler(service: DashboardService, origins: set[str], system: SystemChecks | None = None, token: str = ""):
-    """token: when set, every /api call except /api/health must send it as the X-API-Token header."""
+
+def _get_signing_secret() -> bytes:
+    secret = os.environ.get("GATE0_AUTH_SECRET") or os.environ.get("GATE0_API_TOKEN")
+    if secret:
+        return hashlib.sha256(secret.encode("utf-8")).digest()
+    return _SIGNING_SECRET
+
+
+def create_session_token(username: str, ttl_seconds: int = 86400 * 7) -> str:
+    """Creates an HMAC-signed session token containing the username and expiration timestamp."""
+    exp = int(time.time()) + ttl_seconds
+    payload = json.dumps({"u": username, "exp": exp}, separators=(",", ":")).encode("utf-8")
+    sig = hmac.new(_get_signing_secret(), payload, hashlib.sha256).digest()
+    p_b64 = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    s_b64 = base64.urlsafe_b64encode(sig).decode("ascii").rstrip("=")
+    return f"{p_b64}.{s_b64}"
+
+
+def verify_session_token(token_str: str) -> bool:
+    """Verifies that the session token is signed with the server secret and has not expired."""
+    try:
+        parts = token_str.strip().split(".")
+        if len(parts) != 2:
+            return False
+        p_b64 = parts[0] + "=" * (-len(parts[0]) % 4)
+        s_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload = base64.urlsafe_b64decode(p_b64.encode("ascii"))
+        sig = base64.urlsafe_b64decode(s_b64.encode("ascii"))
+        expected_sig = hmac.new(_get_signing_secret(), payload, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return False
+        data = json.loads(payload.decode("utf-8"))
+        return float(data.get("exp", 0)) > time.time()
+    except Exception:
+        return False
+
+
+def make_handler(
+    service: DashboardService,
+    origins: set[str],
+    system: SystemChecks | None = None,
+    token: str = "",
+    admin_user: str | None = None,
+    admin_password: str | None = None,
+    require_auth: bool | None = None,
+):
+    """token: when set, every /api call except /api/health must send it as the X-API-Token header or Bearer token."""
     system = system or SystemChecks(service)
-    token_bytes = token.encode("utf-8")
+    effective_admin_user = admin_user if admin_user is not None else os.environ.get("GATE0_ADMIN_USER", "")
+    effective_admin_pass = admin_password if admin_password is not None else os.environ.get("GATE0_ADMIN_PASSWORD", "")
+    effective_token = token or os.environ.get("GATE0_API_TOKEN", "")
+    if require_auth is None:
+        require_auth = bool(effective_token or effective_admin_user or effective_admin_pass)
+
+    def is_valid_token(cand: str) -> bool:
+        if not cand:
+            return False
+        cand_bytes = cand.strip().encode("utf-8")
+        if effective_token and hmac.compare_digest(cand_bytes, effective_token.encode("utf-8")):
+            return True
+        return verify_session_token(cand)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):            # no request logging: URLs and bodies could hold farmer data
@@ -55,12 +117,20 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-API-Token")
 
+        def _extract_token(self) -> str:
+            auth = self.headers.get("Authorization", "").strip()
+            if auth.lower().startswith("bearer "):
+                return auth[7:].strip()
+            return self.headers.get("X-API-Token", "").strip()
+
         def _denied(self, path: str) -> bool:
             """True (after answering 401) when a token is required and the request does not carry it."""
-            if not token or path == "/api/health":
+            if path in ("/api/health", "/api/auth/login"):
                 return False
-            sent = self.headers.get("X-API-Token", "").encode("utf-8")
-            if hmac.compare_digest(sent, token_bytes):
+            if not require_auth:
+                return False
+            sent = self._extract_token()
+            if sent and is_valid_token(sent):
                 return False
             self._send(401, {"error": "unauthorized"})
             return True
@@ -151,6 +221,20 @@ def make_handler(service: DashboardService, origins: set[str], system: SystemChe
                 return
             try:
                 body = self._body()
+                if path == "/api/auth/login":
+                    fields = json.loads(body or "{}")
+                    if not isinstance(fields, dict):
+                        return self._send(400, {"error": "expected a JSON object"})
+                    u = str(fields.get("username", "")).strip()
+                    p = str(fields.get("password", "")).strip()
+                    admin_u = effective_admin_user.strip()
+                    admin_p = effective_admin_pass.strip()
+                    if (admin_u and admin_p and
+                            hmac.compare_digest(u.encode("utf-8"), admin_u.encode("utf-8")) and
+                            hmac.compare_digest(p.encode("utf-8"), admin_p.encode("utf-8"))):
+                        session_token = create_session_token(admin_u)
+                        return self._send(200, {"token": session_token, "username": admin_u})
+                    return self._send(401, {"error": "Invalid username or password"})
                 if path.startswith("/api/farmers/") and path.endswith("/call"):
                     fid = urllib.parse.unquote(path[len("/api/farmers/"):-len("/call")])
                     fields = json.loads(body or "{}")
@@ -202,13 +286,15 @@ def run(port: int | None = None) -> None:
     db = (os.environ.get("GATE0_DATABASE_URL") or os.environ.get("GATE0_DB")
           or str(Path(__file__).resolve().parent.parent / "weathercall.db"))
     token = os.environ.get("GATE0_API_TOKEN", "")
+    admin_user = os.environ.get("GATE0_ADMIN_USER", "")
+    admin_password = os.environ.get("GATE0_ADMIN_PASSWORD", "")
     host = os.environ.get("GATE0_API_HOST", "127.0.0.1")
-    if host not in ("127.0.0.1", "localhost", "::1") and not token:
-        raise SystemExit("GATE0_API_TOKEN must be set when the API listens on a public address (GATE0_API_HOST).")
+    if host not in ("127.0.0.1", "localhost", "::1") and not token and not (admin_user and admin_password):
+        raise SystemExit("GATE0_API_TOKEN or admin credentials (GATE0_ADMIN_USER/GATE0_ADMIN_PASSWORD) must be set when the API listens on a public address (GATE0_API_HOST).")
     service = DashboardService(db)
     origins = {o.strip() for o in os.environ.get("GATE0_CORS_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()}
     port = port or int(os.environ.get("PORT", 8000))
-    server = ThreadingHTTPServer((host, port), make_handler(service, origins, token=token))
+    server = ThreadingHTTPServer((host, port), make_handler(service, origins, token=token, admin_user=admin_user, admin_password=admin_password, require_auth=True))
     threading.Thread(target=service.scheduler_loop, daemon=True).start()   # callbacks, and the daily send if switched on
     print(f"Agrythm Connect API on http://{host}:{port}  (database: {'Postgres (Supabase)' if is_postgres(db) else 'SQLite file'}; calls: {service.dialler.mode}; "
           f"weather: {getattr(service._weather, 'label', 'Open-Meteo') if service.real_weather else 'mock'}; daily auto-send: "

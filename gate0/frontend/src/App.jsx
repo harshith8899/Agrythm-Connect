@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sidebar, 
   Header, 
@@ -10,11 +10,13 @@ import {
   SystemStatusView,
   ConfirmHost,
   MobileNav,
-  ServerBanner
+  ServerBanner,
+  LoginScreen
 } from './components';
 import { useVoiceAgentData } from './hooks';
+import { getSessionToken, logoutAdmin } from './utils';
 
-function App() {
+function Dashboard({ onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const {
@@ -23,13 +25,13 @@ function App() {
     filteredCallLogs,
     refreshing,
     triggeringDemo,
-    lastSynced,
+    lastSynced: _lastSynced,
     syncStatus,
     loading,
     isBackendOnline,
     hasConnected,
     waitingSince,
-    errorMessage,
+    errorMessage: _errorMessage,
     summaryMetrics,
     autoDispatcher,
     toggleAutoDispatcher,
@@ -73,6 +75,7 @@ function App() {
         setActiveTab={setActiveTab}
         isOpen={sidebarOpen}
         setIsOpen={setSidebarOpen}
+        onLogout={onLogout}
       />
 
       {/* Main Content Area */}
@@ -88,6 +91,7 @@ function App() {
           triggeringDemo={triggeringDemo}
           autoDispatcher={autoDispatcher}
           onToggleAutoDispatcher={toggleAutoDispatcher}
+          onLogout={onLogout}
         />
 
         {/* Tab Content */}
@@ -169,6 +173,28 @@ function App() {
       )}
     </div>
   );
+}
+
+function App() {
+  const [sessionToken, setSessionToken] = useState(() => getSessionToken());
+
+  useEffect(() => {
+    const handleAuth = () => {
+      setSessionToken(getSessionToken());
+    };
+    window.addEventListener('gate0-auth-change', handleAuth);
+    window.addEventListener('gate0-unauthorized', handleAuth);
+    return () => {
+      window.removeEventListener('gate0-auth-change', handleAuth);
+      window.removeEventListener('gate0-unauthorized', handleAuth);
+    };
+  }, []);
+
+  if (!sessionToken) {
+    return <LoginScreen onLoginSuccess={() => setSessionToken(getSessionToken())} />;
+  }
+
+  return <Dashboard onLogout={logoutAdmin} />;
 }
 
 export default App;

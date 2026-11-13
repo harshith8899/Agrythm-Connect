@@ -33,6 +33,10 @@ services:
         sync: false
       - key: GATE0_API_TOKEN
         sync: false
+      - key: GATE0_ADMIN_USER
+        sync: false
+      - key: GATE0_ADMIN_PASSWORD
+        sync: false
       - key: SARVAM_AGENT_API_KEY
         sync: false
       - key: SARVAM_ORG_ID

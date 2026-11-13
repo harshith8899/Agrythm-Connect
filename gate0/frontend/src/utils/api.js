@@ -1,21 +1,84 @@
 import { API_BASE, API_CONFIG } from './constants';
 
-const getJson = async (url) => {
-  const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
+const AUTH_TOKEN_KEY = 'gate0_session_token';
+const AUTH_USER_KEY = 'gate0_admin_user';
+
+export const getSessionToken = () => {
+  try {
+    return sessionStorage.getItem(AUTH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
 };
 
-const postJson = async (path, options = {}) => {
-  const response = await fetch(`${API_BASE}${path}`, { method: 'POST', ...options });
+export const getAdminUser = () => {
+  try {
+    return sessionStorage.getItem(AUTH_USER_KEY) || 'Admin';
+  } catch {
+    return 'Admin';
+  }
+};
+
+export const setSessionAuth = (token, username) => {
+  try {
+    if (token) sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+    if (username) sessionStorage.setItem(AUTH_USER_KEY, username);
+    window.dispatchEvent(new Event('gate0-auth-change'));
+  } catch {
+    // Storage unavailable
+  }
+};
+
+export const clearSessionAuth = () => {
+  try {
+    sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    sessionStorage.removeItem(AUTH_USER_KEY);
+    window.dispatchEvent(new Event('gate0-auth-change'));
+    window.dispatchEvent(new Event('gate0-unauthorized'));
+  } catch {
+    // Storage unavailable
+  }
+};
+
+const authHeaders = (customHeaders = {}) => {
+  const headers = new Headers(customHeaders);
+  const token = getSessionToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  return headers;
+};
+
+const checkAuthResponse = (response) => {
+  if (response.status === 401) {
+    clearSessionAuth();
+    throw new Error('Unauthorized');
+  }
+};
+
+export const loginAdmin = async (username, password) => {
+  const response = await fetch(`${API_BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
   let body = null;
   try {
     body = await response.json();
   } catch {
     body = null;
   }
-  if (!response.ok) throw new Error((body && body.error) || `HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new Error((body && body.error) || 'Invalid username or password');
+  }
+  if (body && body.token) {
+    setSessionAuth(body.token, body.username || username);
+  }
   return body;
+};
+
+export const logoutAdmin = () => {
+  clearSessionAuth();
 };
 
 /** Farmers saved in the backend database (phone numbers arrive already masked). */
@@ -56,10 +119,43 @@ export const updateDispatcherStatus = (enabled) =>
     body: JSON.stringify({ enabled }),
   });
 
-const sendJson = async (method, path, payload) => {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+const getJson = async (url) => {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: authHeaders({ Accept: 'application/json' }),
+    cache: 'no-store',
   });
+  checkAuthResponse(response);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+};
+
+const postJson = async (path, options = {}) => {
+  const headers = authHeaders(options.headers || {});
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    ...options,
+    headers,
+  });
+  checkAuthResponse(response);
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  if (!response.ok) throw new Error((body && body.error) || `HTTP ${response.status}`);
+  return body;
+};
+
+const sendJson = async (method, path, payload) => {
+  const headers = authHeaders({ 'Content-Type': 'application/json' });
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers,
+    body: JSON.stringify(payload),
+  });
+  checkAuthResponse(response);
   let body = null;
   try {
     body = await response.json();

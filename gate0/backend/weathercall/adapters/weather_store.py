@@ -56,7 +56,7 @@ class StoredWeather:
         return WeatherReport(place_name, row[0], row[1], row[2], row[3], row[4], row[5], row[6]), row[7][:10]
 
     def _save(self, pkey: tuple, place_name: str, forecast: dict[date, WeatherReport]) -> None:
-        now = datetime.now().isoformat(timespec="seconds")
+        now = datetime.combine(self._today(), datetime.now().time()).isoformat(timespec="seconds")
         rows = [(*pkey, d.isoformat(), place_name, r.summary, r.temp_min_c, r.temp_max_c, r.rain_chance_pct, r.source,
                  now, r.wind_kmh, r.humidity_pct) for d, r in forecast.items()]
         self.db.executemany("INSERT OR REPLACE INTO weather VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)

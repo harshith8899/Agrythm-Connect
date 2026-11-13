@@ -4,6 +4,7 @@ export * from './api';
 export * from './confirm';
 export * from './callAnalytics';
 export * from './transcriptTranslation';
+export * from './indiaLocationData';
 
 /**
  * Masks a phone number for user privacy in UI presentation (e.g. +91 98XXX XX001).
