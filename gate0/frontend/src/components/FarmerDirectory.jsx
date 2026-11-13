@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, MapPin, Phone, PhoneCall, Upload, Users, Plus, Pencil, X, Phone as PhoneIcon, Loader2, ChevronDown, Check } from 'lucide-react';
+import { Search, MapPin, Phone, PhoneCall, Upload, Users, Plus, Pencil, X, Phone as PhoneIcon, Loader2, ChevronDown, Check, UserCheck } from 'lucide-react';
 import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, callFarmer, confirmDialog, INDIAN_STATES, getDistrictsForState, ALL_INDIAN_DISTRICTS, getStateForDistrict, getHeadPincodeForDistrict, fetchPincodeForLocation } from '../utils';
 
 // Upload a farmers CSV; the backend saves it (same Farmer ID updates the farmer) and the list reloads.
@@ -698,6 +698,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
   const [calling, setCalling] = useState({});
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [batchCalling, setBatchCalling] = useState(false);
+  const [batchActivating, setBatchActivating] = useState(false);
   const [districtFilter, setDistrictFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
@@ -817,7 +818,24 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
   };
 
   const selectedFarmers = farmerStats.filter((f) => selectedIds.has(f.farmer_id));
+  const selectedInactiveFarmers = selectedFarmers.filter((f) => f.active === 'No');
   const selectedConsentedFarmers = selectedFarmers.filter((f) => f.call_consent !== 'No' && f.active !== 'No');
+
+  const handleBatchMakeActive = async () => {
+    if (selectedInactiveFarmers.length === 0) return;
+    setBatchActivating(true);
+    setToggleError('');
+    try {
+      for (const farmer of selectedInactiveFarmers) {
+        await updateFarmer(farmer.farmer_id, { active: true });
+      }
+      if (onImported) onImported();
+    } catch (err) {
+      setToggleError(err.message || 'Failed to activate selected farmers');
+    } finally {
+      setBatchActivating(false);
+    }
+  };
 
   const handleBatchCallSelected = async () => {
     if (selectedConsentedFarmers.length === 0) {
@@ -1049,12 +1067,13 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                 {selectedIds.size} farmer{selectedIds.size === 1 ? '' : 's'} selected
               </span>
               <span className="text-slate-300 ml-2">
-                ({selectedConsentedFarmers.length} eligible for voice calls)
+                ({selectedConsentedFarmers.length} eligible for voice calls
+                {selectedInactiveFarmers.length > 0 ? `, ${selectedInactiveFarmers.length} inactive` : ''})
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
             <button
               type="button"
               onClick={() => setSelectedIds(new Set())}
@@ -1062,6 +1081,36 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
             >
               Deselect All
             </button>
+
+            {/* In between button: Make All Active */}
+            <button
+              type="button"
+              onClick={handleBatchMakeActive}
+              disabled={batchActivating || selectedInactiveFarmers.length === 0}
+              title={selectedInactiveFarmers.length > 0 ? `Activate ${selectedInactiveFarmers.length} inactive farmer(s)` : 'All selected farmers are already active'}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                selectedInactiveFarmers.length > 0
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                  : 'bg-white/10 text-slate-300 opacity-60 cursor-not-allowed'
+              }`}
+            >
+              {batchActivating ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Activating...</span>
+                </>
+              ) : (
+                <>
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>
+                    {selectedInactiveFarmers.length > 0
+                      ? `Make All Active (${selectedInactiveFarmers.length})`
+                      : 'All Active'}
+                  </span>
+                </>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={handleBatchCallSelected}
