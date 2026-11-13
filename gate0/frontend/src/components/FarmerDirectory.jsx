@@ -275,6 +275,19 @@ const SearchableCombobox = ({
 const LANGUAGE_FOR_STATE = { Karnataka: 'Kannada', Telangana: 'Telugu', 'Andhra Pradesh': 'Telugu' };
 const DEFAULT_STATE = 'Karnataka';
 const sameText = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+// India Post still uses the old spellings of some district names; map them to the names in our district list.
+const DISTRICT_ALIASES = {
+  bangalore: 'Bengaluru Urban', 'bangalore urban': 'Bengaluru Urban', 'bangalore rural': 'Bengaluru Rural', bagalkot: 'Bagalkote',
+  belgaum: 'Belagavi', bellary: 'Ballari', bijapur: 'Vijayapura', chikmagalur: 'Chikkamagaluru', chikballapur: 'Chikkaballapura',
+  davangere: 'Davanagere', gulbarga: 'Kalaburagi', mysore: 'Mysuru', shimoga: 'Shivamogga', tumkur: 'Tumakuru',
+  chamrajnagar: 'Chamarajanagar', 'uttar kannada': 'Uttara Kannada', ramanagar: 'Ramanagara', coorg: 'Kodagu',
+};
+const matchDistrict = (list, name) => {
+  const exact = list.find((d) => sameText(d, name));
+  if (exact) return exact;
+  const alias = DISTRICT_ALIASES[String(name || '').trim().toLowerCase()];
+  return alias && list.find((d) => sameText(d, alias)) ? alias : name;
+};
 
 // Add a farmer by hand (farmer is null) or edit one. A blank phone keeps the saved number.
 // Convenience: Karnataka is the default state (any other can be picked), the PIN code fills state, district and village,
@@ -468,12 +481,14 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
           setPinVillages(poNames);
 
           const matchedState = INDIAN_STATES.find((s) => sameText(s, po.State)) || po.State;
-          const matchedDistrict = getDistrictsForState(matchedState).find((d) => sameText(d, po.District)) || po.District;
+          const matchedDistrict = matchDistrict(getDistrictsForState(matchedState), po.District);
 
+          // The new PIN code replaces what the old one filled in. The village is kept only if this PIN really has it.
+          setPlaces([]);
           setForm((prev) => ({
             ...withState(prev, matchedState || prev.state),
-            district: matchedDistrict || prev.district,
-            village: prev.village || (poNames.length === 1 ? poNames[0] : prev.village),
+            district: matchedDistrict || '',
+            village: poNames.length === 1 ? poNames[0] : (poNames.some((n) => sameText(n, prev.village)) ? prev.village : ''),
           }));
         } else {
           setPinError(data[0]?.Message || 'Invalid PIN code or no location found.');
@@ -538,7 +553,7 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" role="dialog" aria-modal="true">
       <form ref={formRef} onSubmit={submit} className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-slate-900">{editing ? `Edit ${farmer.farmer_name}` : 'Add farmer'}</h3>
@@ -612,7 +627,7 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
           </Field>
 
           <div className="sm:col-span-2">
-            <Field label={placeBusy ? 'Village (searching places...)' : 'Village (type 3 letters to see places)'}>
+            <Field label={placeBusy ? 'Village / Area (searching places...)' : 'Village / Area (type 3 letters to see places)'}>
               <SearchableCombobox
                 value={form.village}
                 onChange={handleVillageChange}
@@ -620,7 +635,7 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
                 describe={describeVillage}
                 options={villageOptions}
                 allowCustom={true}
-                placeholder={form.district ? `Type the first letters of the village in ${form.district}...` : 'Type the first letters of the village...'}
+                placeholder={form.district ? `Type the first letters of the village / area in ${form.district}...` : 'Type the first letters of the village / area...'}
               />
             </Field>
           </div>
