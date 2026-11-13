@@ -8,6 +8,7 @@ import {
   CallDetailDrawer, 
   FarmerDirectory, 
   SystemStatusView,
+  RealTimeCostChart,
   ConfirmHost,
   MobileNav,
   ServerBanner,
@@ -18,6 +19,7 @@ import { getSessionToken, logoutAdmin } from './utils';
 
 function Dashboard({ onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showCostChart, setShowCostChart] = useState(false);
 
   const {
     farmers,
@@ -108,6 +110,35 @@ function Dashboard({ onLogout }) {
             <>
               {/* KPI Metrics */}
               <KpiMetrics metrics={summaryMetrics} loading={!hasConnected} />
+
+              {/* Real-Time Cost Analytics Chart Toggle & Panel */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between px-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowCostChart((prev) => !prev)}
+                    className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-white border border-slate-200/80 text-slate-700 hover:text-slate-900 hover:border-slate-300 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span>{showCostChart ? 'Hide Real-Time Cost Chart' : 'Show Real-Time Cost Analytics'}</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-trust-green border border-emerald-200">
+                      Live ₹
+                    </span>
+                  </button>
+                </div>
+
+                {showCostChart && (
+                  <RealTimeCostChart
+                    callLogs={callLogs}
+                    rate={3.5}
+                    isLive={Boolean(autoDispatcher?.live)}
+                    onRefresh={() => fetchAllData(false)}
+                  />
+                )}
+              </div>
 
               {/* Filters, below the summary cards */}
               <TopFilterBar

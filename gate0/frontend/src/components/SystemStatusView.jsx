@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, MinusCircle, AlertTriangle, ChevronDown, Info } from 'lucide-react';
 import { getSystemChecks, getUsage, saveUsageRate, getAlerts, didFarmerPickUpAndTalk } from '../utils';
+import { RealTimeCostChart } from './RealTimeCostChart';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
@@ -265,8 +266,8 @@ const CostEfficiencyStrip = ({ usage }) => {
   );
 };
 
-const InteractiveUsageChart = ({ days = [], isSimulated = false }) => {
-  const [chartView, setChartView] = useState('volume'); // 'volume' | 'cost'
+const InteractiveUsageChart = ({ days = [], rate = 3.5, isSimulated = false, callLogs = [] }) => {
+  const [chartView, setChartView] = useState('realtime'); // 'realtime' | 'volume' | 'cost'
   const [hoveredIdx, setHoveredIdx] = useState(null);
 
   const chronologicalDays = useMemo(() => {
@@ -303,15 +304,7 @@ const InteractiveUsageChart = ({ days = [], isSimulated = false }) => {
   }, [chronologicalDays]);
   const avgY = padTop + chartH - (avgAmount / (yMaxAmount || 1)) * chartH;
 
-  if (n === 0) {
-    return (
-      <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
-        No daily call telemetry available to chart.
-      </div>
-    );
-  }
-
-  const slotW = chartW / n;
+  const slotW = chartW / (n || 1);
 
   // Build points for cost area and line
   const costPoints = chronologicalDays.map((d, i) => {
@@ -334,10 +327,22 @@ const InteractiveUsageChart = ({ days = [], isSimulated = false }) => {
       {/* Top Header & Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div className="flex items-center gap-2">
+          {chartView === 'realtime' && (
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+          )}
           <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-            {chartView === 'volume' ? 'Daily Call Volume & Connectivity' : 'Daily Cost Trend (₹)'}
+            {chartView === 'realtime'
+              ? 'Real-Time Intraday Cost Analytics'
+              : chartView === 'volume'
+              ? 'Daily Call Volume & Connectivity'
+              : 'Daily Cost Trend (₹)'}
           </span>
-          <span className="text-[11px] font-medium text-slate-400">({n} days chronological)</span>
+          {chartView !== 'realtime' && (
+            <span className="text-[11px] font-medium text-slate-400">({n} days chronological)</span>
+          )}
           {isSimulated && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
               Simulated Data
@@ -350,6 +355,24 @@ const InteractiveUsageChart = ({ days = [], isSimulated = false }) => {
           <button
             type="button"
             onClick={() => {
+              setChartView('realtime');
+              setHoveredIdx(null);
+            }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              chartView === 'realtime'
+                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            Real-Time Intraday (₹)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setChartView('volume');
               setHoveredIdx(null);
             }}
@@ -359,7 +382,7 @@ const InteractiveUsageChart = ({ days = [], isSimulated = false }) => {
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            Call Volume & Connectivity
+            Daily Volume
           </button>
           <button
             type="button"
@@ -373,13 +396,32 @@ const InteractiveUsageChart = ({ days = [], isSimulated = false }) => {
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            Cost Trend (₹)
+            14-Day Cost Trend
           </button>
         </div>
       </div>
 
-      {/* Responsive SVG Chart Area */}
-      <div className="relative w-full">
+      {/* 1. Real-Time Intraday View */}
+      {chartView === 'realtime' && (
+        <RealTimeCostChart
+          callLogs={callLogs}
+          rate={rate}
+          isLive={true}
+          embedded={true}
+        />
+      )}
+
+      {/* 2 & 3. 14-Day Chronological Daily Charts */}
+      {chartView !== 'realtime' && (
+        <>
+          {n === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
+              No daily call telemetry available to chart.
+            </div>
+          ) : (
+            <>
+              {/* Responsive SVG Chart Area */}
+              <div className="relative w-full">
         {/* Floating Tooltip */}
         {hoveredDay && (
           <div
@@ -755,8 +797,12 @@ const InteractiveUsageChart = ({ days = [], isSimulated = false }) => {
           Hover or tap any day to inspect exact duration, connectivity and spend
         </div>
       </div>
-    </div>
-  );
+          </>
+        )}
+      </>
+    )}
+  </div>
+);
 };
 
 // One simple page: is each part connected, and how much has been used. Reads /api/system/checks and /api/usage.
@@ -1014,6 +1060,7 @@ export const SystemStatusView = ({ isBackendOnline = true, callLogs = [] }) => {
               days={activeUsage.days || []}
               rate={Number(activeUsage.rate || 3.5)}
               isSimulated={Boolean(activeUsage.isSimulated)}
+              callLogs={callLogs}
             />
 
             {/* Daily Breakdown Table */}
