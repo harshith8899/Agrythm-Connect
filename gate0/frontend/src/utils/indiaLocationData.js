@@ -230,4 +230,197 @@ export const getStateForDistrict = (districtName) => {
   return null;
 };
 
+// Curated head post office PIN codes for Indian districts
+export const DISTRICT_HEAD_PINCODES = {
+  // Karnataka (all 31 districts)
+  'bagalkote': '587101',
+  'ballari': '583101',
+  'belagavi': '590001',
+  'bengaluru rural': '562123',
+  'bengaluru urban': '560001',
+  'bidar': '585401',
+  'chamarajanagar': '571313',
+  'chikkaballapura': '562101',
+  'chikkamagaluru': '577101',
+  'chitradurga': '577501',
+  'dakshina kannada': '575001',
+  'davanagere': '577001',
+  'dharwad': '580001',
+  'gadag': '582101',
+  'hassan': '573201',
+  'haveri': '581110',
+  'kalaburagi': '585101',
+  'kodagu': '571201',
+  'kolar': '563101',
+  'koppal': '583231',
+  'mandya': '571401',
+  'mysuru': '570001',
+  'raichur': '584101',
+  'ramanagara': '562159',
+  'shivamogga': '577201',
+  'tumakuru': '572101',
+  'udupi': '576101',
+  'uttara kannada': '581301',
+  'vijayanagara': '583201',
+  'vijayapura': '586101',
+  'yadgir': '585202',
+
+  // Andhra Pradesh
+  'ananthapuramu': '515001',
+  'chittoor': '517001',
+  'east godavari': '533001',
+  'guntur': '522001',
+  'kakinada': '533001',
+  'krishna': '520001',
+  'kurnool': '518001',
+  'prakasam': '523001',
+  'sri potti sriramulu nellore': '524001',
+  'srikakulam': '532001',
+  'tirupati': '517501',
+  'visakhapatnam': '530001',
+  'vizianagaram': '535001',
+  'west godavari': '534001',
+  'ysr kadapa': '516001',
+
+  // Telangana
+  'hyderabad': '500001',
+  'karimnagar': '505001',
+  'khammam': '507001',
+  'mahbubnagar': '509001',
+  'medchal-malkajgiri': '500047',
+  'nalgonda': '508001',
+  'nizamabad': '503001',
+  'ranga reddy': '500030',
+  'sangareddy': '502001',
+  'warangal': '506001',
+
+  // Maharashtra
+  'mumbai': '400001',
+  'pune': '411001',
+  'nagpur': '440001',
+  'nashik': '422001',
+  'thane': '400601',
+  'aurangabad': '431001',
+  'kolhapur': '416001',
+  'solapur': '413001',
+  'satara': '415001',
+
+  // Tamil Nadu
+  'chennai': '600001',
+  'coimbatore': '641001',
+  'madurai': '625001',
+  'tiruchirappalli': '620001',
+  'salem': '636001',
+  'tirunelveli': '627001',
+
+  // Kerala
+  'thiruvananthapuram': '695001',
+  'ernakulam': '682001',
+  'kozhikode': '673001',
+  'thrissur': '680001',
+
+  // Delhi & NCR
+  'delhi': '110001',
+  'new delhi': '110001',
+  'gurugram': '122001',
+  'faridabad': '121001',
+  'noida': '201301',
+  'ghaziabad': '201001',
+
+  // Other major cities/districts
+  'jaipur': '302001',
+  'ahmedabad': '380001',
+  'surat': '395001',
+  'lucknow': '226001',
+  'kanpur': '208001',
+  'varanasi': '221001',
+  'patna': '800001',
+  'bhopal': '462001',
+  'indore': '452001',
+  'kolkata': '700001',
+  'chandigarh': '160017',
+};
+
+export const getHeadPincodeForDistrict = (districtName) => {
+  if (!districtName) return null;
+  const key = String(districtName).trim().toLowerCase();
+  return DISTRICT_HEAD_PINCODES[key] || null;
+};
+
+/**
+ * Automatically fetch the PIN code for a Village, Town or District via India Post API.
+ */
+export const fetchPincodeForLocation = async ({ village, district, state } = {}) => {
+  // 1. Try village search first if village is provided
+  if (village && String(village).trim().length >= 2) {
+    try {
+      const res = await fetch(`https://api.postalpincode.in/postoffice/${encodeURIComponent(String(village).trim())}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data[0]?.Status === 'Success' && data[0]?.PostOffice?.length > 0) {
+          const offices = data[0].PostOffice;
+          const targetDist = district ? String(district).trim().toLowerCase() : '';
+          const targetState = state ? String(state).trim().toLowerCase() : '';
+
+          // Prefer match with district and state
+          const matched = offices.find((po) => {
+            const matchDist = !targetDist || String(po.District || '').toLowerCase() === targetDist;
+            const matchState = !targetState || String(po.State || '').toLowerCase() === targetState;
+            return matchDist && matchState;
+          }) || offices.find((po) => {
+            return !targetDist || String(po.District || '').toLowerCase() === targetDist;
+          }) || offices[0];
+
+          if (matched?.Pincode) {
+            return {
+              pincode: String(matched.Pincode).slice(0, 6),
+              district: matched.District,
+              state: matched.State,
+              village: matched.Name,
+            };
+          }
+        }
+      }
+    } catch {
+      // Fall through to district search
+    }
+  }
+
+  // 2. Search by district if provided
+  if (district && String(district).trim().length >= 2) {
+    const localPin = getHeadPincodeForDistrict(district);
+    if (localPin) {
+      return { pincode: localPin };
+    }
+
+    try {
+      const res = await fetch(`https://api.postalpincode.in/postoffice/${encodeURIComponent(String(district).trim())}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data[0]?.Status === 'Success' && data[0]?.PostOffice?.length > 0) {
+          const offices = data[0].PostOffice;
+          const targetDist = String(district).trim().toLowerCase();
+          const matched = offices.find(
+            (po) => String(po.Name || '').toLowerCase() === targetDist
+          ) || offices.find(
+            (po) => String(po.District || '').toLowerCase() === targetDist
+          ) || offices[0];
+
+          if (matched?.Pincode) {
+            return {
+              pincode: String(matched.Pincode).slice(0, 6),
+              district: matched.District,
+              state: matched.State,
+            };
+          }
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  return null;
+};
+
 

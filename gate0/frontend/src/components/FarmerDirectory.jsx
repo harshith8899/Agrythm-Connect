@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, MapPin, Phone, PhoneCall, Upload, Users, Plus, Pencil, X, Phone as PhoneIcon, Loader2, ChevronDown, Check } from 'lucide-react';
-import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, callFarmer, confirmDialog, INDIAN_STATES, getDistrictsForState, ALL_INDIAN_DISTRICTS, getStateForDistrict } from '../utils';
+import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, callFarmer, confirmDialog, INDIAN_STATES, getDistrictsForState, ALL_INDIAN_DISTRICTS, getStateForDistrict, getHeadPincodeForDistrict, fetchPincodeForLocation } from '../utils';
 
 // Upload a farmers CSV; the backend saves it (same Farmer ID updates the farmer) and the list reloads.
 const ImportCsvButton = ({ onImported }) => {
@@ -320,12 +320,46 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
     return { ...f, state, district: keep ? f.district : '', preferred_language: language };
   };
 
-  const handleStateChange = (val) => setForm((f) => withState(f, val));
+  const handleStateChange = (val) => {
+    setForm((f) => {
+      const next = withState(f, val);
+      const keep = getDistrictsForState(val).some((d) => sameText(d, f.district));
+      const nextDist = keep ? f.district : '';
+      const headPin = nextDist ? getHeadPincodeForDistrict(nextDist) : '';
+      return {
+        ...next,
+        district: nextDist,
+        village: keep ? f.village : '',
+        pincode: headPin || (keep ? f.pincode : ''),
+      };
+    });
+  };
 
   const handleDistrictChange = (val) => {
     const detectedState = getStateForDistrict(val);
-    setForm((f) => (detectedState && !sameText(detectedState, f.state) && !f.state
-      ? { ...withState(f, detectedState), district: val } : { ...f, district: val }));
+    const headPin = getHeadPincodeForDistrict(val);
+    setForm((f) => {
+      const base = detectedState && !sameText(detectedState, f.state) && !f.state
+        ? withState(f, detectedState)
+        : f;
+      return {
+        ...base,
+        district: val,
+        pincode: headPin || base.pincode,
+      };
+    });
+
+    if (form.village || !headPin) {
+      fetchPincodeForLocation({ village: form.village, district: val, state: form.state || detectedState }).then((res) => {
+        if (res?.pincode) {
+          setForm((prev) => ({
+            ...prev,
+            pincode: res.pincode,
+            state: prev.state || res.state || prev.state,
+          }));
+        }
+      }).catch(() => {});
+    }
   };
 
   // India Post directory by place name (needs 3 letters; waits for a pause in typing; one answer is kept per search).
@@ -353,7 +387,20 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
             : [];
           placeCache.current.set(key, list);
         }
-        if (id === placeRequest.current) setPlaces(list);
+        if (id === placeRequest.current) {
+          setPlaces(list);
+          const matched = list.find((p) => sameText(p.name, term) && (!form.district || sameText(p.district, form.district)))
+            || list.find((p) => !form.district || sameText(p.district, form.district))
+            || list[0];
+          if (matched?.pincode) {
+            setForm((f) => ({
+              ...f,
+              pincode: matched.pincode,
+              district: f.district || matched.district || '',
+              state: f.state || matched.state || '',
+            }));
+          }
+        }
       } catch {
         if (id === placeRequest.current) setPlaces([]);          // the directory is down: typing and saving still work
       } finally {
@@ -371,11 +418,21 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
     .forEach((p) => { if (!placeByName.has(p.name.toLowerCase())) placeByName.set(p.name.toLowerCase(), p); });
 
   const handleVillageChange = (val) => {
-    setForm((f) => ({ ...f, village: val }));
+    const vTrim = String(val || '').trim().toLowerCase();
+    const fromFarmer = farmers.find(
+      (f) => sameText(f.village, vTrim) && (!form.district || sameText(f.district, form.district)) && f.pincode
+    );
+    const headPin = !val && form.district ? getHeadPincodeForDistrict(form.district) : null;
+
+    setForm((f) => ({
+      ...f,
+      village: val,
+      pincode: fromFarmer?.pincode ? String(fromFarmer.pincode).slice(0, 6) : (headPin || f.pincode),
+    }));
     searchPlaces(val);
   };
 
-  // A village picked from the list fills what is still empty (district, state, PIN code) from the same row.
+  // A village picked from the list fills what is still empty (district, state) and updates the PIN code.
   const handleVillagePicked = (name) => {
     const fromFarmer = farmers.find((f) => sameText(f.village, name) && (!form.state || sameText(f.state, form.state)));
     const hit = placeByName.get(String(name).toLowerCase())
@@ -383,7 +440,12 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
     if (!hit) return;
     setForm((f) => {
       const next = hit.state && !f.state ? withState(f, hit.state) : { ...f };
-      return { ...next, village: name, district: next.district || hit.district || '', pincode: next.pincode || hit.pincode || '' };
+      return {
+        ...next,
+        village: name,
+        district: next.district || hit.district || '',
+        pincode: hit.pincode || next.pincode || '',
+      };
     });
   };
 
