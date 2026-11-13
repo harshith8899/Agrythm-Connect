@@ -79,7 +79,7 @@ export const CallDetailDrawer = ({ call, onClose }) => {
       {/* Backdrop */}
       <div 
         onClick={onClose}
-        className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 transition-opacity"
+        className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 transition-opacity"
       />
 
       {/* Drawer Container */}
