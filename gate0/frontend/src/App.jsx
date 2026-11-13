@@ -156,7 +156,7 @@ function Dashboard({ onLogout }) {
           )}
 
           {activeTab === 'system' && (
-            <SystemStatusView isBackendOnline={isBackendOnline} />
+            <SystemStatusView isBackendOnline={isBackendOnline} callLogs={callLogs} />
           )}
         </main>
       </div>

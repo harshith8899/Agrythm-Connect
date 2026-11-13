@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, CheckCircle2, XCircle, MinusCircle, AlertTriangle, ChevronDown } from 'lucide-react';
-import { getSystemChecks, getUsage, saveUsageRate, getAlerts } from '../utils';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { RefreshCw, CheckCircle2, XCircle, MinusCircle, AlertTriangle, ChevronDown, Info } from 'lucide-react';
+import { getSystemChecks, getUsage, saveUsageRate, getAlerts, didFarmerPickUpAndTalk } from '../utils';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
@@ -9,6 +9,133 @@ const STATUS_STYLE = {
   fail: { icon: XCircle, color: 'text-rose-600', label: 'Problem' },
   off: { icon: MinusCircle, color: 'text-slate-400', label: 'Not set up' },
 };
+
+function getCallDateKey(call) {
+  if (!call) return '';
+  const raw = call.call_date || call.date || call.Date || call.call_timestamp || call.created_at || '';
+  const str = String(raw).trim();
+  if (!str) return '';
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    return `${m[1]}-${m[2]}-${m[3]}`;
+  }
+  const m2 = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (m2) {
+    const dd = m2[1].padStart(2, '0');
+    const mm = m2[2].padStart(2, '0');
+    const yyyy = m2[3];
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+  return '';
+}
+
+function generateSimulatedUsage(callLogs = [], rate = 3.5) {
+  const dayMap = {};
+
+  // Build a rolling 14-day date map ending today
+  const today = new Date();
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    dayMap[key] = { date: key, calls: 0, connected: 0, billed_minutes: 0, amount: 0 };
+  }
+
+  // Aggregate stats from local callLogs
+  (callLogs || []).forEach((call) => {
+    if (call.is_test) return;
+    const dateKey = getCallDateKey(call);
+    if (!dateKey) return;
+
+    if (!dayMap[dateKey]) {
+      dayMap[dateKey] = { date: dateKey, calls: 0, connected: 0, billed_minutes: 0, amount: 0 };
+    }
+
+    const day = dayMap[dateKey];
+    day.calls += 1;
+
+    const isConnected =
+      didFarmerPickUpAndTalk(call) ||
+      ['completed', 'delivered', 'connected', 'answered'].includes(
+        String(call.call_status || call.status || '').toLowerCase()
+      ) ||
+      Number(call.duration_sec || call.duration || 0) > 0;
+
+    if (isConnected) {
+      day.connected += 1;
+      const sec = Number(call.duration_sec ?? call.duration ?? 0);
+      const mins = Math.max(1, Math.ceil(sec / 60));
+      day.billed_minutes += mins;
+      day.amount = Math.round(day.billed_minutes * rate * 100) / 100;
+    }
+  });
+
+  const sortedDescending = Object.values(dayMap).sort((a, b) => b.date.localeCompare(a.date));
+  const days = sortedDescending.slice(0, 14);
+
+  const todayStr = today.toISOString().slice(0, 10);
+  const todayTotals = dayMap[todayStr] || { calls: 0, connected: 0, billed_minutes: 0, amount: 0 };
+
+  const weekAgo = new Date(today);
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  const weekCalls = days.filter((d) => new Date(d.date) >= weekAgo);
+  const weekTotals = {
+    calls: weekCalls.reduce((s, d) => s + d.calls, 0),
+    connected: weekCalls.reduce((s, d) => s + d.connected, 0),
+    billed_minutes: weekCalls.reduce((s, d) => s + d.billed_minutes, 0),
+    amount: Math.round(weekCalls.reduce((s, d) => s + d.amount, 0) * 100) / 100,
+  };
+
+  const windowTotals = {
+    calls: days.reduce((s, d) => s + d.calls, 0),
+    connected: days.reduce((s, d) => s + d.connected, 0),
+    billed_minutes: days.reduce((s, d) => s + d.billed_minutes, 0),
+    amount: Math.round(days.reduce((s, d) => s + d.amount, 0) * 100) / 100,
+  };
+
+  return {
+    configured: false,
+    isSimulated: true,
+    error: '',
+    exhausted: false,
+    today: todayTotals,
+    week: weekTotals,
+    window: windowTotals,
+    window_days: 14,
+    days,
+    rate,
+    currency: 'INR',
+    note: 'Simulated usage calculated from local farmer call history records at the configured rate.',
+  };
+}
+
+function formatDayLabel(dateStr) {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[parseInt(parts[1], 10) - 1] || parts[1];
+    const day = parseInt(parts[2], 10);
+    return `${day} ${month}`;
+  }
+  return dateStr;
+}
+
+function formatFullDate(dateStr) {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    }
+  }
+  return dateStr;
+}
 
 const UsageCell = ({ title, data }) => (
   <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
@@ -20,8 +147,620 @@ const UsageCell = ({ title, data }) => (
   </div>
 );
 
+const CostEfficiencyStrip = ({ usage }) => {
+  const windowData = usage?.window || {
+    calls: (usage?.days || []).reduce((s, d) => s + d.calls, 0),
+    connected: (usage?.days || []).reduce((s, d) => s + d.connected, 0),
+    billed_minutes: (usage?.days || []).reduce((s, d) => s + d.billed_minutes, 0),
+    amount: (usage?.days || []).reduce((s, d) => s + d.amount, 0),
+  };
+
+  const totalCalls = windowData.calls || 0;
+  const connected = windowData.connected || 0;
+  const unanswered = Math.max(0, totalCalls - connected);
+  const answerRate = totalCalls > 0 ? (connected / totalCalls) * 100 : 0;
+  const effectiveCostPerConnected = connected > 0 ? windowData.amount / connected : 0;
+  const billedMins = windowData.billed_minutes || 0;
+  const avgMinsPerCall = connected > 0 ? (billedMins / connected).toFixed(1) : '0.0';
+
+  // Sarvam Voice AI usage vs Estimated Exotel Telephony pulse carriage charges (~₹0.50/min pulse in India)
+  const rate = Number(usage?.rate || 3.5);
+  const voiceCost = windowData.amount || billedMins * rate;
+  const telephonyPulseRate = 0.5;
+  const telephonyCost = Math.round(billedMins * telephonyPulseRate * 100) / 100;
+  const totalTelephonyCombined = voiceCost + telephonyCost;
+  const voiceSharePct = totalTelephonyCombined > 0 ? Math.round((voiceCost / totalTelephonyCombined) * 100) : 88;
+  const carriageSharePct = 100 - voiceSharePct;
+
+  return (
+    <div className="bg-slate-50/80 border border-slate-200/80 rounded-2xl p-4 sm:p-5 space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+        <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+          Cost Efficiency & Telephony Pulse Analysis
+        </span>
+        <span className="text-[11px] text-slate-500">
+          Aggregated across {totalCalls} calls ({usage?.window_days || 14}-day window)
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+        {/* Metric 1: Answer Rate */}
+        <div className="bg-white rounded-xl p-3.5 border border-slate-100 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Answer Rate</span>
+              <span className="text-base font-bold text-trust-green">{answerRate.toFixed(1)}%</span>
+            </div>
+            {/* Visual breakdown bar */}
+            <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden flex mt-2.5">
+              <div
+                className="h-full bg-trust-green transition-all duration-300"
+                style={{ width: `${answerRate}%` }}
+                title={`Connected: ${connected} calls (${answerRate.toFixed(1)}%)`}
+              />
+              <div
+                className="h-full bg-slate-200 transition-all duration-300"
+                style={{ width: `${100 - answerRate}%` }}
+                title={`Unanswered/Failed: ${unanswered} calls`}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2.5 pt-2 border-t border-slate-50">
+            <span className="text-trust-green font-semibold">{connected} connected</span>
+            <span className="text-slate-400">{unanswered} unanswered / failed</span>
+          </div>
+        </div>
+
+        {/* Metric 2: Effective Cost per Connected Call */}
+        <div className="bg-white rounded-xl p-3.5 border border-slate-100 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Cost / Connected Call</span>
+              <span className="text-base font-bold text-slate-900">{rupees(effectiveCostPerConnected)}</span>
+            </div>
+            <div className="text-[11px] text-slate-600 mt-2">
+              Across <strong className="text-slate-900">{billedMins}</strong> total billed minutes
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2.5 pt-2 border-t border-slate-50">
+            <span className="text-slate-600">Avg duration:</span>
+            <span className="font-semibold text-slate-800">{avgMinsPerCall} min / connected call</span>
+          </div>
+        </div>
+
+        {/* Metric 3: Cost Split Breakdown */}
+        <div className="bg-white rounded-xl p-3.5 border border-slate-100 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Cost Split Breakdown</span>
+              <span className="text-[11px] font-bold text-slate-700">{rupees(totalTelephonyCombined)} est.</span>
+            </div>
+            {/* Visual two-tone split bar */}
+            <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden flex mt-2.5">
+              <div
+                className="h-full bg-trust-green transition-all duration-300"
+                style={{ width: `${voiceSharePct}%` }}
+                title={`Sarvam Voice Agent: ${voiceSharePct}%`}
+              />
+              <div
+                className="h-full bg-trust-navy transition-all duration-300"
+                style={{ width: `${carriageSharePct}%` }}
+                title={`Telephony Carrier: ${carriageSharePct}%`}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-slate-600 mt-2.5 pt-2 border-t border-slate-50">
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-trust-green inline-block shrink-0" />
+              Voice AI: <strong className="text-slate-800">{rupees(voiceCost)}</strong>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-trust-navy inline-block shrink-0" />
+              Carrier: <strong className="text-slate-800">{rupees(telephonyCost)}</strong>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const InteractiveUsageChart = ({ days = [], isSimulated = false }) => {
+  const [chartView, setChartView] = useState('volume'); // 'volume' | 'cost'
+  const [hoveredIdx, setHoveredIdx] = useState(null);
+
+  const chronologicalDays = useMemo(() => {
+    if (!days || !days.length) return [];
+    return [...days].sort((a, b) => a.date.localeCompare(b.date));
+  }, [days]);
+
+  const n = chronologicalDays.length;
+
+  // Coordinate setup for clean responsive vector rendering
+  const svgWidth = 660;
+  const svgHeight = 220;
+  const padLeft = 40;
+  const padRight = 16;
+  const padTop = 26;
+  const padBottom = 34;
+  const chartW = svgWidth - padLeft - padRight; // 604
+  const chartH = svgHeight - padTop - padBottom; // 160
+
+  const maxCalls = useMemo(() => {
+    return Math.max(...chronologicalDays.map((d) => d.calls), 4);
+  }, [chronologicalDays]);
+  const yMaxCalls = Math.ceil(maxCalls * 1.15);
+
+  const maxAmount = useMemo(() => {
+    return Math.max(...chronologicalDays.map((d) => d.amount), 10);
+  }, [chronologicalDays]);
+  const yMaxAmount = Math.ceil(maxAmount * 1.2);
+
+  const avgAmount = useMemo(() => {
+    if (!chronologicalDays.length) return 0;
+    const sum = chronologicalDays.reduce((acc, d) => acc + Number(d.amount || 0), 0);
+    return sum / chronologicalDays.length;
+  }, [chronologicalDays]);
+  const avgY = padTop + chartH - (avgAmount / (yMaxAmount || 1)) * chartH;
+
+  if (n === 0) {
+    return (
+      <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
+        No daily call telemetry available to chart.
+      </div>
+    );
+  }
+
+  const slotW = chartW / n;
+
+  // Build points for cost area and line
+  const costPoints = chronologicalDays.map((d, i) => {
+    const x = padLeft + i * slotW + slotW / 2;
+    const y = padTop + chartH - ((d.amount || 0) / (yMaxAmount || 1)) * chartH;
+    return { x, y, day: d, i };
+  });
+
+  const areaPath =
+    costPoints.length > 0
+      ? `M ${costPoints[0].x} ${padTop + chartH} L ${costPoints.map((p) => `${p.x} ${p.y}`).join(' L ')} L ${costPoints[costPoints.length - 1].x} ${padTop + chartH} Z`
+      : '';
+
+  const linePath = costPoints.length > 0 ? `M ${costPoints.map((p) => `${p.x} ${p.y}`).join(' L ')}` : '';
+
+  const hoveredDay = hoveredIdx !== null ? chronologicalDays[hoveredIdx] : null;
+
+  return (
+    <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 space-y-4">
+      {/* Top Header & Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+            {chartView === 'volume' ? 'Daily Call Volume & Connectivity' : 'Daily Cost Trend (₹)'}
+          </span>
+          <span className="text-[11px] font-medium text-slate-400">({n} days chronological)</span>
+          {isSimulated && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+              Simulated Data
+            </span>
+          )}
+        </div>
+
+        {/* View toggle buttons */}
+        <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200/60 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => {
+              setChartView('volume');
+              setHoveredIdx(null);
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              chartView === 'volume'
+                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Call Volume & Connectivity
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setChartView('cost');
+              setHoveredIdx(null);
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              chartView === 'cost'
+                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Cost Trend (₹)
+          </button>
+        </div>
+      </div>
+
+      {/* Responsive SVG Chart Area */}
+      <div className="relative w-full">
+        {/* Floating Tooltip */}
+        {hoveredDay && (
+          <div
+            className="absolute top-1 z-20 pointer-events-none transition-all duration-100"
+            style={{
+              left: `${((padLeft + hoveredIdx * slotW + slotW / 2) / svgWidth) * 100}%`,
+              transform:
+                (padLeft + hoveredIdx * slotW + slotW / 2) / svgWidth < 0.25
+                  ? 'translateX(0%)'
+                  : (padLeft + hoveredIdx * slotW + slotW / 2) / svgWidth > 0.75
+                  ? 'translateX(-100%)'
+                  : 'translateX(-50%)',
+            }}
+          >
+            <div className="bg-slate-900/95 text-white rounded-xl shadow-xl px-3.5 py-2.5 border border-slate-700 min-w-[185px] space-y-1.5 text-xs backdrop-blur-xs">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-1">
+                <span className="font-semibold text-slate-200">{formatFullDate(hoveredDay.date)}</span>
+                <span className="font-mono text-emerald-400 font-bold">{rupees(hoveredDay.amount)}</span>
+              </div>
+              <div className="space-y-1 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-trust-navy inline-block border border-slate-500" />
+                    Total Calls:
+                  </span>
+                  <span className="font-bold text-white">{hoveredDay.calls}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-trust-green inline-block" />
+                    Connected:
+                  </span>
+                  <span className="font-bold text-emerald-400">
+                    {hoveredDay.connected}
+                    {hoveredDay.calls > 0 &&
+                      ` (${Math.round((hoveredDay.connected / hoveredDay.calls) * 100)}%)`}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-0.5 border-t border-slate-800 text-slate-300">
+                  <span>Billed Minutes:</span>
+                  <span className="font-semibold text-amber-300">{hoveredDay.billed_minutes} mins</span>
+                </div>
+                {chartView === 'cost' && (
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                    <span>vs Daily Avg:</span>
+                    <span
+                      className={
+                        hoveredDay.amount >= avgAmount
+                          ? 'text-amber-400 font-semibold'
+                          : 'text-emerald-400 font-semibold'
+                      }
+                    >
+                      {hoveredDay.amount >= avgAmount ? '+' : ''}
+                      {rupees(hoveredDay.amount - avgAmount)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <svg
+          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          className="w-full h-auto overflow-visible select-none"
+        >
+          <defs>
+            <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#1E6F43" stopOpacity="0.28" />
+              <stop offset="100%" stopColor="#1E6F43" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+
+          {/* Gridlines and Y-axis Labels */}
+          {chartView === 'volume' ? (
+            <>
+              {[0, 0.5, 1].map((pct) => {
+                const yVal = padTop + chartH * (1 - pct);
+                const label = Math.round(yMaxCalls * pct);
+                return (
+                  <g key={`grid-vol-${pct}`}>
+                    <line
+                      x1={padLeft}
+                      y1={yVal}
+                      x2={padLeft + chartW}
+                      y2={yVal}
+                      stroke="#F1F5F9"
+                      strokeWidth="1"
+                    />
+                    <text
+                      x={padLeft - 8}
+                      y={yVal + 3}
+                      textAnchor="end"
+                      fill="#94A3B8"
+                      fontSize="9"
+                      fontWeight="500"
+                    >
+                      {label}
+                    </text>
+                  </g>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              {[0, 0.5, 1].map((pct) => {
+                const yVal = padTop + chartH * (1 - pct);
+                const label = Math.round(yMaxAmount * pct);
+                return (
+                  <g key={`grid-cost-${pct}`}>
+                    <line
+                      x1={padLeft}
+                      y1={yVal}
+                      x2={padLeft + chartW}
+                      y2={yVal}
+                      stroke="#F1F5F9"
+                      strokeWidth="1"
+                    />
+                    <text
+                      x={padLeft - 8}
+                      y={yVal + 3}
+                      textAnchor="end"
+                      fill="#94A3B8"
+                      fontSize="9"
+                      fontWeight="500"
+                    >
+                      ₹{label}
+                    </text>
+                  </g>
+                );
+              })}
+            </>
+          )}
+
+          {/* X Axis Baseline */}
+          <line
+            x1={padLeft}
+            y1={padTop + chartH}
+            x2={padLeft + chartW}
+            y2={padTop + chartH}
+            stroke="#CBD5E1"
+            strokeWidth="1"
+          />
+
+          {/* CHART VIEW 1: Volume & Connectivity (Grouped Bars) */}
+          {chartView === 'volume' && (
+            <>
+              {chronologicalDays.map((d, i) => {
+                const xSlot = padLeft + i * slotW;
+                const xCenter = xSlot + slotW / 2;
+                const barW = Math.max(3, Math.min(13, (slotW - 8) / 2));
+
+                const totalH = d.calls > 0 ? Math.max(3, (d.calls / yMaxCalls) * chartH) : 0;
+                const connH = d.connected > 0 ? Math.max(3, (d.connected / yMaxCalls) * chartH) : 0;
+
+                const totalX = xCenter - barW - 1;
+                const connX = xCenter + 1;
+                const totalY = padTop + chartH - totalH;
+                const connY = padTop + chartH - connH;
+
+                const isHovered = hoveredIdx === i;
+
+                return (
+                  <g key={`vol-bar-${d.date}`}>
+                    {/* Hover highlight background */}
+                    {isHovered && (
+                      <rect
+                        x={xSlot + 2}
+                        y={padTop}
+                        width={slotW - 4}
+                        height={chartH}
+                        fill="#F8FAFC"
+                        rx="4"
+                      />
+                    )}
+
+                    {/* Total Calls Bar (Navy #0F2444) */}
+                    {totalH > 0 && (
+                      <rect
+                        x={totalX}
+                        y={totalY}
+                        width={barW}
+                        height={totalH}
+                        fill="#0F2444"
+                        rx="2"
+                        className="transition-all duration-150"
+                      />
+                    )}
+
+                    {/* Connected Calls Bar (Emerald Green #1E6F43) */}
+                    {connH > 0 && (
+                      <rect
+                        x={connX}
+                        y={connY}
+                        width={barW}
+                        height={connH}
+                        fill="#1E6F43"
+                        rx="2"
+                        className="transition-all duration-150"
+                      />
+                    )}
+                  </g>
+                );
+              })}
+            </>
+          )}
+
+          {/* CHART VIEW 2: Cost Trend (₹) (Visual Bar + Area + Dashed Average Line) */}
+          {chartView === 'cost' && (
+            <>
+              {/* Gradient Area under curve */}
+              {areaPath && <path d={areaPath} fill="url(#costGradient)" />}
+
+              {/* Day spend bars */}
+              {chronologicalDays.map((d, i) => {
+                const xSlot = padLeft + i * slotW;
+                const xCenter = xSlot + slotW / 2;
+                const barW = Math.max(4, Math.min(22, slotW - 8));
+                const barX = xCenter - barW / 2;
+                const barH = d.amount > 0 ? Math.max(3, (d.amount / yMaxAmount) * chartH) : 0;
+                const barY = padTop + chartH - barH;
+                const isHovered = hoveredIdx === i;
+
+                return (
+                  <g key={`cost-bar-${d.date}`}>
+                    {isHovered && (
+                      <rect
+                        x={xSlot + 2}
+                        y={padTop}
+                        width={slotW - 4}
+                        height={chartH}
+                        fill="#F8FAFC"
+                        rx="4"
+                      />
+                    )}
+                    {barH > 0 && (
+                      <rect
+                        x={barX}
+                        y={barY}
+                        width={barW}
+                        height={barH}
+                        fill="#1E6F43"
+                        fillOpacity={isHovered ? 0.95 : 0.45}
+                        rx="3"
+                        className="transition-all duration-150"
+                      />
+                    )}
+                  </g>
+                );
+              })}
+
+              {/* Stroke trend line */}
+              {linePath && (
+                <path
+                  d={linePath}
+                  fill="none"
+                  stroke="#1E6F43"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+
+              {/* Data points */}
+              {costPoints.map((p) => (
+                <circle
+                  key={`dot-${p.day.date}`}
+                  cx={p.x}
+                  cy={p.y}
+                  r={hoveredIdx === p.i ? 4.5 : 3}
+                  fill={hoveredIdx === p.i ? '#0F2444' : '#1E6F43'}
+                  stroke="#FFFFFF"
+                  strokeWidth="1.5"
+                  className="transition-all duration-150"
+                />
+              ))}
+
+              {/* Dashed Average Daily Spend Reference Line */}
+              {avgY >= padTop && avgY <= padTop + chartH && (
+                <g>
+                  <line
+                    x1={padLeft}
+                    y1={avgY}
+                    x2={padLeft + chartW}
+                    y2={avgY}
+                    stroke="#94A3B8"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 4"
+                  />
+                  <text
+                    x={padLeft + chartW}
+                    y={Math.max(padTop + 10, avgY - 5)}
+                    textAnchor="end"
+                    fill="#64748B"
+                    fontSize="9"
+                    fontWeight="600"
+                  >
+                    Avg: {rupees(avgAmount)}/day
+                  </text>
+                </g>
+              )}
+            </>
+          )}
+
+          {/* X Axis Date Labels */}
+          {chronologicalDays.map((d, i) => {
+            const xSlot = padLeft + i * slotW;
+            const xCenter = xSlot + slotW / 2;
+            const isHovered = hoveredIdx === i;
+
+            return (
+              <text
+                key={`label-${d.date}`}
+                x={xCenter}
+                y={padTop + chartH + 16}
+                textAnchor="middle"
+                fill={isHovered ? '#0F2444' : '#64748B'}
+                fontSize="9"
+                fontWeight={isHovered ? '700' : '500'}
+              >
+                {formatDayLabel(d.date)}
+              </text>
+            );
+          })}
+
+          {/* Interactive Transparent Overlay Rects for Hover Detection */}
+          {chronologicalDays.map((d, i) => {
+            const xSlot = padLeft + i * slotW;
+            return (
+              <rect
+                key={`hit-${d.date}`}
+                x={xSlot}
+                y={padTop}
+                width={slotW}
+                height={chartH + padBottom}
+                fill="transparent"
+                className="cursor-pointer"
+                onMouseEnter={() => setHoveredIdx(i)}
+                onMouseLeave={() => setHoveredIdx(null)}
+                onTouchStart={() => setHoveredIdx(i)}
+              />
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Chart Legend & Telemetry Guide */}
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 pt-2 border-t border-slate-100">
+        {chartView === 'volume' ? (
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-xs bg-trust-navy inline-block shadow-2xs" />
+              <span className="text-slate-700 font-medium">Total Calls ({maxCalls} peak)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-xs bg-trust-green inline-block shadow-2xs" />
+              <span className="text-slate-700 font-medium">Connected Calls</span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-xs bg-trust-green inline-block shadow-2xs" />
+              <span className="text-slate-700 font-medium">Daily Spend (₹)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-4 h-0.5 border-t-2 border-dashed border-slate-400 inline-block" />
+              <span className="text-slate-600 font-medium">Average ({rupees(avgAmount)}/day)</span>
+            </div>
+          </div>
+        )}
+        <div className="text-[11px] text-slate-400">
+          Hover or tap any day to inspect exact duration, connectivity and spend
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // One simple page: is each part connected, and how much has been used. Reads /api/system/checks and /api/usage.
-export const SystemStatusView = ({ isBackendOnline = true }) => {
+export const SystemStatusView = ({ isBackendOnline = true, callLogs = [] }) => {
   const [report, setReport] = useState(null);
   const [usage, setUsage] = useState(null);
   const [alerts, setAlerts] = useState([]);
@@ -34,7 +773,11 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
     try {
-      const [checks, use, al] = await Promise.all([getSystemChecks(refresh), getUsage(refresh), getAlerts().catch(() => [])]);
+      const [checks, use, al] = await Promise.all([
+        getSystemChecks(refresh),
+        getUsage(refresh),
+        getAlerts().catch(() => []),
+      ]);
       setReport(checks);
       setUsage(use);
       setAlerts(al);
@@ -65,6 +808,15 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
     }
   };
 
+  // Derive activeUsage: use live Sarvam usage when configured, else compute simulated usage from callLogs
+  const activeUsage = useMemo(() => {
+    if (usage && usage.configured && usage.days && usage.days.length > 0) {
+      return { ...usage, isSimulated: false };
+    }
+    const rate = Number(rateInput) || (usage && usage.rate) || 3.5;
+    return generateSimulatedUsage(callLogs, rate);
+  }, [usage, callLogs, rateInput]);
+
   const overallOk = report && report.overall === 'ok';
   const okCount = report ? report.checks.filter((c) => c.status === 'ok').length : 0;
   const failCount = report ? report.checks.filter((c) => c.status === 'fail').length : 0;
@@ -73,16 +825,27 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   return (
     <div className="space-y-6">
       {/* Overall status */}
-      <div className={`rounded-2xl border p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-        error || (report && !overallOk) ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50/60 border-emerald-200'
-      }`}>
+      <div
+        className={`rounded-2xl border p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          error || (report && !overallOk)
+            ? 'bg-rose-50 border-rose-200'
+            : 'bg-emerald-50/60 border-emerald-200'
+        }`}
+      >
         <div>
           <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">System Status</span>
           <h2 className="text-xl font-bold text-slate-900">
-            {error ? 'Backend not reachable' : !report ? 'Checking...' : overallOk ? 'Everything is connected' : 'Something needs attention'}
+            {error
+              ? 'Backend not reachable'
+              : !report
+              ? 'Checking...'
+              : overallOk
+              ? 'Everything is connected'
+              : 'Something needs attention'}
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            {error || (report ? `Checked ${String(report.checked_at).replace('T', ' ').slice(0, 19)} (India time)` : '')}
+            {error ||
+              (report ? `Checked ${String(report.checked_at).replace('T', ' ').slice(0, 19)} (India time)` : '')}
           </p>
         </div>
         <button
@@ -98,7 +861,9 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
       {/* Alerts for the team */}
       {alerts.length > 0 && (
         <div className="bg-white rounded-2xl border border-amber-200 divide-y divide-amber-100">
-          <div className="p-4 text-[11px] font-bold tracking-wider text-amber-700 uppercase">Needs the team ({alerts.length})</div>
+          <div className="p-4 text-[11px] font-bold tracking-wider text-amber-700 uppercase">
+            Needs the team ({alerts.length})
+          </div>
           {alerts.slice(0, 10).map((a, i) => (
             <div key={`${a.at}-${i}`} className="p-4 text-xs text-slate-700">
               <span className="font-semibold text-slate-900">{a.farmer_name || a.farmer_id || 'System'}</span>
@@ -119,12 +884,20 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
             className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50 rounded-2xl cursor-pointer"
           >
             <span className="text-sm font-bold text-slate-900">Connections</span>
-            <span className={`text-xs font-semibold ${failCount > 0 ? 'text-rose-600' : offCount > 0 ? 'text-slate-500' : 'text-emerald-600'}`}>
+            <span
+              className={`text-xs font-semibold ${
+                failCount > 0 ? 'text-rose-600' : offCount > 0 ? 'text-slate-500' : 'text-emerald-600'
+              }`}
+            >
               {okCount} of {report.checks.length} OK
               {failCount > 0 && `, ${failCount} with a problem`}
               {offCount > 0 && `, ${offCount} not set up`}
             </span>
-            <ChevronDown className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${checksOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown
+              className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${
+                checksOpen ? 'rotate-180' : ''
+              }`}
+            />
           </button>
           {checksOpen && (
             <div className="divide-y divide-slate-100 border-t border-slate-100">
@@ -152,35 +925,61 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
 
       {/* Usage from Sarvam's own call records */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-5 space-y-4">
-        <div>
-          <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Sarvam Usage</span>
-          <h3 className="text-base font-bold text-slate-900">Estimated amount, calls and billed minutes</h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Sarvam Usage</span>
+              {activeUsage?.isSimulated && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                  Simulated Data
+                </span>
+              )}
+            </div>
+            <h3 className="text-base font-bold text-slate-900">Estimated amount, calls and billed minutes</h3>
+          </div>
         </div>
 
         {usage && usage.exhausted && (
           <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>Sarvam has reported that credits are used up in the last 7 days. Add credits on Sarvam (Settings, Billing); calls resume at once.</span>
+            <span>
+              Sarvam has reported that credits are used up in the last 7 days. Add credits on Sarvam (Settings,
+              Billing); calls resume at once.
+            </span>
           </div>
         )}
 
-        {usage && !usage.configured && (
-          <p className="text-xs text-slate-500">Usage is read from Sarvam, so it is not available while the backend is in simulated mode.</p>
+        {activeUsage?.isSimulated && (
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-amber-800 text-xs">
+            <Info className="w-4 h-4 shrink-0 text-amber-600" />
+            <span>
+              Backend is in simulated mode. Telephony charts, cost splits, and answer ratios below are dynamically
+              computed from your {callLogs.length} local call records.
+            </span>
+          </div>
         )}
+
         {usage && usage.configured && usage.error && (
           <p className="text-xs text-rose-700">Could not read usage from Sarvam: {usage.error}</p>
         )}
 
-        {usage && usage.window && (
+        {activeUsage && activeUsage.window && (
           <>
+            {/* 3 Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <UsageCell title="Today" data={usage.today} />
-              <UsageCell title="Last 7 days" data={usage.week} />
-              <UsageCell title={`Last ${usage.window_days} days`} data={usage.window} />
+              <UsageCell title="Today" data={activeUsage.today} />
+              <UsageCell title="Last 7 days" data={activeUsage.week} />
+              <UsageCell title={`Last ${activeUsage.window_days || 14} days`} data={activeUsage.window} />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-              <label htmlFor="rate" className="font-semibold">Rate per billed minute (₹)</label>
+            {/* Cost Efficiency & Connection Ratio Summary Strip */}
+            <CostEfficiencyStrip usage={activeUsage} />
+
+            {/* Rate Adjustment Input */}
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100">
+              <label htmlFor="rate" className="font-semibold text-slate-700">
+                Rate per billed minute (₹)
+              </label>
               <input
                 id="rate"
                 type="number"
@@ -188,39 +987,55 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
                 step="0.05"
                 value={rateInput}
                 onChange={(e) => setRateInput(e.target.value)}
-                className="w-24 px-2 py-1 border border-slate-200 rounded-lg text-xs"
+                className="w-24 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-1 focus:ring-trust-navy focus:outline-hidden"
               />
               <button
                 onClick={handleSaveRate}
-                className="px-3 py-1 rounded-lg bg-trust-navy text-white font-semibold hover:bg-slate-800 transition-colors cursor-pointer"
+                className="px-3 py-1 rounded-lg bg-trust-navy text-white font-semibold hover:bg-slate-800 transition-colors cursor-pointer text-xs"
               >
                 Save rate
               </button>
               {rateMessage && (
-                <span className={rateMessage.ok ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold'}>{rateMessage.text}</span>
+                <span
+                  className={
+                    rateMessage.ok ? 'text-emerald-700 font-semibold text-xs' : 'text-rose-700 font-semibold text-xs'
+                  }
+                >
+                  {rateMessage.text}
+                </span>
               )}
-              <span className="text-slate-400">Sarvam pay-as-you-go is ₹3.50 (Pro 3.25, Growth 3.15), before GST.</span>
+              <span className="text-slate-400 text-[11px] ml-auto">
+                Sarvam pay-as-you-go is ₹3.50 (Pro 3.25, Growth 3.15), before GST.
+              </span>
             </div>
 
+            {/* Daily Calls & Cost Visualization */}
+            <InteractiveUsageChart
+              days={activeUsage.days || []}
+              rate={Number(activeUsage.rate || 3.5)}
+              isSimulated={Boolean(activeUsage.isSimulated)}
+            />
+
+            {/* Daily Breakdown Table */}
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="text-left text-[10px] uppercase tracking-wider text-slate-400">
-                    <th className="py-2 pr-4">Day</th>
-                    <th className="py-2 pr-4">Calls</th>
-                    <th className="py-2 pr-4">Connected</th>
-                    <th className="py-2 pr-4">Billed minutes</th>
-                    <th className="py-2">Amount (estimate)</th>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                    <th className="py-2.5 pr-4">Day</th>
+                    <th className="py-2.5 pr-4">Calls</th>
+                    <th className="py-2.5 pr-4">Connected</th>
+                    <th className="py-2.5 pr-4">Billed minutes</th>
+                    <th className="py-2.5">Amount (estimate)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {usage.days.map((d) => (
-                    <tr key={d.date}>
-                      <td className="py-2 pr-4 font-mono text-slate-700">{d.date}</td>
-                      <td className="py-2 pr-4">{d.calls}</td>
-                      <td className="py-2 pr-4">{d.connected}</td>
-                      <td className="py-2 pr-4">{d.billed_minutes}</td>
-                      <td className="py-2 font-semibold text-slate-900">{rupees(d.amount)}</td>
+                  {activeUsage.days.map((d) => (
+                    <tr key={d.date} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="py-2.5 pr-4 font-mono text-slate-700">{d.date}</td>
+                      <td className="py-2.5 pr-4 font-medium text-slate-900">{d.calls}</td>
+                      <td className="py-2.5 pr-4 font-medium text-trust-green">{d.connected}</td>
+                      <td className="py-2.5 pr-4 text-slate-600">{d.billed_minutes}</td>
+                      <td className="py-2.5 font-semibold text-slate-900">{rupees(d.amount)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -229,8 +1044,8 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
           </>
         )}
 
-        <p className="text-[11px] text-slate-500 leading-relaxed">
-          {usage ? usage.note : 'Remaining credits are shown only on Sarvam, under Settings, Billing ("Credits Left").'}
+        <p className="text-[11px] text-slate-500 leading-relaxed pt-1">
+          {activeUsage ? activeUsage.note : 'Remaining credits are shown only on Sarvam, under Settings, Billing ("Credits Left").'}
         </p>
       </div>
     </div>
