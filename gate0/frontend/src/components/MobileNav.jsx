@@ -1,16 +1,17 @@
 import React from 'react';
-import { PhoneCall, Users, ShieldCheck } from 'lucide-react';
+import { PhoneCall, Users, ShieldCheck, IndianRupee } from 'lucide-react';
 
 const TABS = [
   { id: 'overview', label: 'Calls', icon: PhoneCall },
   { id: 'farmers', label: 'Farmers', icon: Users },
+  { id: 'cost', label: 'Cost', icon: IndianRupee },
   { id: 'system', label: 'System', icon: ShieldCheck },
 ];
 
-// Phones: the three pages as a bar at the bottom, within thumb reach. The sidebar is for larger screens.
+// Phones: the pages as a bar at the bottom, within thumb reach. The sidebar is for larger screens.
 export const MobileNav = ({ activeTab, setActiveTab }) => (
   <nav
-    className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 grid grid-cols-3"
+    className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 grid grid-cols-4"
     style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     aria-label="Main navigation"
   >

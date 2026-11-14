@@ -16,6 +16,10 @@ function formatFullDate(dateStr) {
   return dateStr;
 }
 
+const pad2 = (n) => String(n).padStart(2, '0');
+// The day as the person at the screen sees it (toISOString would give the UTC day: the wrong one in the early morning in India)
+const localDateKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
 function getCallDateKey(call) {
   if (!call) return '';
   const raw = call.call_date || call.date || call.Date || call.call_timestamp || call.created_at || '';
@@ -34,7 +38,7 @@ function getCallDateKey(call) {
   }
   const parsed = new Date(str);
   if (!isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
+    return localDateKey(parsed);
   }
   return '';
 }
@@ -55,6 +59,10 @@ function getCallHour(call) {
 
   // 2. Direct ISO timestamp
   const ts = call.created_at || call.call_timestamp || call.timestamp;
+  if (typeof ts === 'string') {
+    const iso = ts.match(/^\d{4}-\d{2}-\d{2}[T ](\d{2}):\d{2}/);
+    if (iso) return parseInt(iso[1], 10);
+  }
   if (ts) {
     if (typeof ts === 'number') {
       const d = new Date(ts > 1e11 ? ts : ts * 1000);
@@ -70,7 +78,7 @@ function getCallHour(call) {
 function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
   const validCalls = (callLogs || []).filter((c) => !c.is_test);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDateKey(new Date());
   let targetCalls = validCalls.filter((c) => getCallDateKey(c) === todayStr);
   let isToday = true;
   let targetDateLabel = 'Today';
@@ -141,46 +149,11 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
     });
   }
 
-  // If timestamps lacked explicit hours, distribute across standard morning peak hours (8 AM - 12 PM)
-  const totalMappedCalls = hours.reduce((s, h) => s + h.calls, 0);
-  if (targetCalls.length > 0 && totalMappedCalls === 0) {
-    const morningHours = [8, 9, 10, 11];
-    targetCalls.forEach((c, idx) => {
-      const assignedH = morningHours[idx % morningHours.length];
-      const slot = hours.find((h) => h.hour === assignedH);
-      if (slot) {
-        slot.calls += 1;
-        const isConn = didFarmerPickUpAndTalk(c) || Number(c.duration_sec || 0) > 0;
-        if (isConn) {
-          slot.connected += 1;
-          const mins = Math.max(1, Math.ceil(Number(c.duration_sec || 60) / 60));
-          slot.billedMinutes += mins;
-          slot.spend = Math.round(slot.billedMinutes * rate * 100) / 100;
-        }
-      }
-    });
-
-    let distributedCum = 0;
-    hours.forEach((h) => {
-      distributedCum = Math.round((distributedCum + h.spend) * 100) / 100;
-      h.cumulativeSpend = distributedCum;
-      if (h.spend > peakSpend) {
-        peakSpend = h.spend;
-        peakHour = h.hour;
-      }
-    });
-    runningCumulative = distributedCum;
-  }
-
   const totalCalls = hours.reduce((s, h) => s + h.calls, 0);
   const totalConnected = hours.reduce((s, h) => s + h.connected, 0);
   const totalBilledMins = hours.reduce((s, h) => s + h.billedMinutes, 0);
   const activeHoursCount = hours.filter((h) => h.calls > 0).length || 1;
   const avgBurnRate = Math.round((runningCumulative / activeHoursCount) * 100) / 100;
-
-  const currentH = new Date().getHours();
-  const remainingHours = Math.max(0, endHour - currentH);
-  const projectedEod = Math.round((runningCumulative + avgBurnRate * Math.min(remainingHours, 4)) * 100) / 100;
 
   return {
     isToday,
@@ -193,7 +166,6 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
     peakHour,
     peakSpend,
     avgBurnRate,
-    projectedEod,
   };
 }
 
@@ -211,7 +183,7 @@ export const RealTimeCostChart = ({
     return computeHourlyTelemetry(callLogs, Number(rate || 3.5));
   }, [callLogs, rate]);
 
-  const { hours, totalSpend, totalCalls, totalConnected, totalBilledMins, avgBurnRate, projectedEod } = telemetry;
+  const { hours, totalSpend, totalCalls, totalConnected, totalBilledMins, avgBurnRate } = telemetry;
   const n = hours.length;
 
   // Coordinate setup for clean responsive vector rendering
@@ -419,18 +391,18 @@ export const RealTimeCostChart = ({
           </div>
           <div className="text-xl font-bold text-trust-navy mt-1">{rupees(rate)}/min</div>
           <div className="text-[11px] text-slate-500 mt-0.5">
-            Voice AI + ~₹0.50 pulse
+            Sarvam, per started minute
           </div>
         </div>
 
         <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Projected EOD</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Per Answered Call</span>
             <TrendingUp className="w-3.5 h-3.5 text-slate-600" />
           </div>
-          <div className="text-xl font-bold text-slate-900 mt-1">{rupees(projectedEod)}</div>
+          <div className="text-xl font-bold text-slate-900 mt-1">{rupees(totalConnected > 0 ? totalSpend / totalConnected : 0)}</div>
           <div className="text-[11px] text-slate-500 mt-0.5">
-            Based on active campaign pace
+            Spend divided by answered calls
           </div>
         </div>
       </div>
@@ -440,7 +412,7 @@ export const RealTimeCostChart = ({
         {/* Floating Tooltip */}
         {hoveredHour && (
           <div
-            className="absolute top-1 z-20 pointer-events-none transition-all duration-100"
+            className="absolute top-1 z-20 pointer-events-none"
             style={{
               left: `${((padLeft + hoveredIdx * slotW + slotW / 2) / svgWidth) * 100}%`,
               transform:
@@ -609,6 +581,7 @@ export const RealTimeCostChart = ({
                 fill="#1E6F43"
                 opacity="0.35"
                 className="animate-ping"
+                style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
               />
               <circle
                 cx={lastActivePoint.x}
