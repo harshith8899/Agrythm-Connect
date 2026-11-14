@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { didFarmerPickUpAndTalk, normalizeLanguage } from '../utils';
+import { didFarmerPickUpAndTalk, normalizeLanguage, pulsesFor, telephonyAmount } from '../utils';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
@@ -235,6 +235,7 @@ export const DonutAnalyticsGrid = ({
 
     // 1. Cost Split Data
     let totalBilledMins = 0;
+    let totalPulses = 0;
     validCalls.forEach((c) => {
       const isConn =
         didFarmerPickUpAndTalk(c) ||
@@ -245,11 +246,12 @@ export const DonutAnalyticsGrid = ({
       if (isConn) {
         const sec = Number(c.duration_sec ?? c.duration ?? 0);
         totalBilledMins += Math.max(1, Math.ceil(sec / 60));
+        totalPulses += pulsesFor(sec);
       }
     });
 
     const voiceAiCost = Math.round(totalBilledMins * rate * 100) / 100;
-    const carriageCost = Math.round(totalBilledMins * 0.5 * 100) / 100;
+    const carriageCost = telephonyAmount(totalPulses);
     const totalCombinedSpend = voiceAiCost + carriageCost;
 
     const costSplitSlices = [
@@ -262,10 +264,10 @@ export const DonutAnalyticsGrid = ({
       },
       {
         id: 'carriage',
-        label: 'Carrier Telephony',
+        label: 'Sarvam Telephony',
         value: carriageCost,
         color: '#0F2444', // Trust Navy
-        secondaryText: 'Carrier (assumed ~₹0.50/min)',
+        secondaryText: `${totalPulses} pulses × ₹0.20 (per started 30 s)`,
       },
     ];
 
@@ -339,8 +341,10 @@ export const DonutAnalyticsGrid = ({
       langCounts[norm] = (langCounts[norm] || 0) + 1;
 
       const sec = Number(c.duration_sec ?? c.duration ?? 0);
-      const mins = Math.max(1, Math.ceil(sec / 60));
-      const cost = Math.round(mins * (rate + 0.5) * 100) / 100;
+      const answered = didFarmerPickUpAndTalk(c) || sec > 0
+        || ['completed', 'delivered', 'connected', 'answered'].includes(String(c.call_status || c.status || '').toLowerCase());
+      const mins = answered ? Math.max(1, Math.ceil(sec / 60)) : 0;        // calls that were not answered cost nothing
+      const cost = answered ? Math.round((mins * rate + telephonyAmount(pulsesFor(sec))) * 100) / 100 : 0;
       langSpend[norm] = Math.round(((langSpend[norm] || 0) + cost) * 100) / 100;
     });
 
@@ -393,28 +397,28 @@ export const DonutAnalyticsGrid = ({
     const durationSlices = [
       {
         id: 'short',
-        label: '< 1 min (1 pulse)',
+        label: 'Under 1 min',
         value: tierShort,
         color: '#06B6D4',
         secondaryText: 'Quick weather delivery',
       },
       {
         id: 'standard',
-        label: '1 – 2 mins (2 pulses)',
+        label: '1 – 2 mins',
         value: tierStandard,
         color: '#1E6F43',
         secondaryText: 'Full forecast confirmation',
       },
       {
         id: 'extended',
-        label: '2 – 3 mins (3 pulses)',
+        label: '2 – 3 mins',
         value: tierExtended,
         color: '#F59E0B',
         secondaryText: 'Forecast + Q&A dialogue',
       },
       {
         id: 'deep',
-        label: '> 3 mins (4+ pulses)',
+        label: 'Over 3 mins',
         value: tierDeep,
         color: '#6366F1',
         secondaryText: 'Extended advisory consultation',
@@ -478,7 +482,7 @@ export const DonutAnalyticsGrid = ({
         {(activeFilter === 'all' || activeFilter === 'cost') && (
           <SvgDonutCard
             title="Telephony Cost Allocation"
-            subtitle="Voice AI engine vs carrier pulse carriage"
+            subtitle="Sarvam voice agent vs Sarvam telephony"
             slices={analytics.costSplitSlices}
             centerTitle="Total Cost"
             centerValue={rupees(analytics.totalSpend)}
@@ -512,11 +516,11 @@ export const DonutAnalyticsGrid = ({
         {(activeFilter === 'all' || activeFilter === 'durations') && (
           <SvgDonutCard
             title="Call Duration Tiers"
-            subtitle="Conversation duration & pulse billing"
+            subtitle="How long the calls lasted"
             slices={analytics.durationSlices}
             centerTitle="Calls Billed"
             centerValue={String(analytics.totalCallsCount)}
-            badge="Pulse Tiers"
+            badge="By length"
           />
         )}
       </div>

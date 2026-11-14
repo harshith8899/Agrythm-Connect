@@ -10,7 +10,7 @@ import pytest
 from weathercall.adapters.dialers import MockDialler
 from weathercall.server import make_handler
 from weathercall.service import DashboardService, IST
-from weathercall.system import SystemChecks, billed_minutes
+from weathercall.system import SystemChecks, billed_minutes, telephony_pulses
 
 UTC = timezone.utc
 NOW = datetime(2026, 11, 6, 12, 0, tzinfo=IST)          # 06:30 UTC
@@ -63,6 +63,12 @@ def test_a_call_is_billed_in_started_minutes(seconds, minutes):
 def test_calls_that_never_connected_cost_nothing():
     for status in ("no_answer", "busy", "failed"):
         assert billed_minutes(status, 30) == 0
+        assert telephony_pulses(status, 30) == 0
+
+
+@pytest.mark.parametrize("seconds, pulses", [(0, 0), (1, 1), (30, 1), (31, 2), (45, 2), (60, 2), (61, 3), (125, 5)])
+def test_telephony_is_counted_in_started_30_second_pulses(seconds, pulses):
+    assert telephony_pulses("connected", seconds) == pulses
 
 
 # ---- usage (real call records only; the balance itself is only on Sarvam's Billing page) ------------------------------
@@ -76,11 +82,16 @@ def test_usage_counts_calls_and_billed_minutes_from_sarvams_records(tmp_path):
                 attempt(60 * 24 * 3, seconds=125),                  # three days ago: in the week, not today
                 attempt(60 * 24 * 20, seconds=30)]                  # twenty days ago: in the window only
     u = system(tmp_path, FakeUsage(attempts)).usage()
-    assert u["today"] == {"calls": 4, "connected": 2, "billed_minutes": 3, "amount": 10.5}      # 45 s -> 1, 61 s -> 2
-    assert u["week"] == {"calls": 5, "connected": 3, "billed_minutes": 6, "amount": 21.0}       # + 125 s -> 3
-    assert u["window"] == {"calls": 6, "connected": 4, "billed_minutes": 7, "amount": 24.5}
+    # agent minutes are started 60-second minutes (45 s -> 1, 61 s -> 2); telephony pulses are started 30-second pulses
+    # at Rs 0.20 (45 s -> 2, 61 s -> 3, 125 s -> 5, 30 s -> 1)
+    assert u["today"] == {"calls": 4, "connected": 2, "billed_minutes": 3, "amount": 10.5,
+                          "telephony_pulses": 5, "telephony_amount": 1.0}
+    assert u["week"] == {"calls": 5, "connected": 3, "billed_minutes": 6, "amount": 21.0,
+                         "telephony_pulses": 10, "telephony_amount": 2.0}
+    assert u["window"] == {"calls": 6, "connected": 4, "billed_minutes": 7, "amount": 24.5,
+                           "telephony_pulses": 11, "telephony_amount": 2.2}
     assert u["rate"] == 3.5 and u["currency"] == "INR"                                          # Sarvam pay-as-you-go
-    assert set(u["today"]) == {"calls", "connected", "billed_minutes", "amount"}     # an estimate; there is still no balance
+    assert set(u["today"]) == {"calls", "connected", "billed_minutes", "amount", "telephony_pulses", "telephony_amount"}  # an estimate; there is still no balance
 
 
 def test_daily_breakdown_is_by_india_date(tmp_path):

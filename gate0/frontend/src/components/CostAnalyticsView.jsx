@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, AlertTriangle, Info, PieChart } from 'lucide-react';
-import { getUsage, saveUsageRate, didFarmerPickUpAndTalk } from '../utils';
+import { getUsage, saveUsageRate, didFarmerPickUpAndTalk, pulsesFor, telephonyAmount } from '../utils';
 import { RealTimeCostChart } from './RealTimeCostChart';
 import { DonutAnalyticsGrid } from './DonutAnalyticsGrid';
 
@@ -42,7 +42,7 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
     const key = localDateKey(d);
-    dayMap[key] = { date: key, calls: 0, connected: 0, billed_minutes: 0, amount: 0 };
+    dayMap[key] = { date: key, calls: 0, connected: 0, billed_minutes: 0, amount: 0, telephony_pulses: 0, telephony_amount: 0 };
   }
 
   // Aggregate stats from local callLogs
@@ -52,7 +52,7 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5) {
     if (!dateKey) return;
 
     if (!dayMap[dateKey]) {
-      dayMap[dateKey] = { date: dateKey, calls: 0, connected: 0, billed_minutes: 0, amount: 0 };
+      dayMap[dateKey] = { date: dateKey, calls: 0, connected: 0, billed_minutes: 0, amount: 0, telephony_pulses: 0, telephony_amount: 0 };
     }
 
     const day = dayMap[dateKey];
@@ -71,6 +71,8 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5) {
       const mins = Math.max(1, Math.ceil(sec / 60));
       day.billed_minutes += mins;
       day.amount = Math.round(day.billed_minutes * rate * 100) / 100;
+      day.telephony_pulses += pulsesFor(sec);
+      day.telephony_amount = telephonyAmount(day.telephony_pulses);
     }
   });
 
@@ -78,7 +80,7 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5) {
   const days = sortedDescending.slice(0, 14);
 
   const todayStr = localDateKey(today);
-  const todayTotals = dayMap[todayStr] || { calls: 0, connected: 0, billed_minutes: 0, amount: 0 };
+  const todayTotals = dayMap[todayStr] || { calls: 0, connected: 0, billed_minutes: 0, amount: 0, telephony_pulses: 0, telephony_amount: 0 };
 
   const weekStart = new Date(today);
   weekStart.setDate(weekStart.getDate() - 6); // today and the 6 days before it
@@ -89,6 +91,8 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5) {
     connected: weekCalls.reduce((s, d) => s + d.connected, 0),
     billed_minutes: weekCalls.reduce((s, d) => s + d.billed_minutes, 0),
     amount: Math.round(weekCalls.reduce((s, d) => s + d.amount, 0) * 100) / 100,
+    telephony_pulses: weekCalls.reduce((s, d) => s + d.telephony_pulses, 0),
+    telephony_amount: Math.round(weekCalls.reduce((s, d) => s + d.telephony_amount, 0) * 100) / 100,
   };
 
   const windowTotals = {
@@ -96,6 +100,8 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5) {
     connected: days.reduce((s, d) => s + d.connected, 0),
     billed_minutes: days.reduce((s, d) => s + d.billed_minutes, 0),
     amount: Math.round(days.reduce((s, d) => s + d.amount, 0) * 100) / 100,
+    telephony_pulses: days.reduce((s, d) => s + d.telephony_pulses, 0),
+    telephony_amount: Math.round(days.reduce((s, d) => s + d.telephony_amount, 0) * 100) / 100,
   };
 
   return {
@@ -154,6 +160,8 @@ const CostEfficiencyStrip = ({ usage }) => {
     connected: (usage?.days || []).reduce((s, d) => s + d.connected, 0),
     billed_minutes: (usage?.days || []).reduce((s, d) => s + d.billed_minutes, 0),
     amount: (usage?.days || []).reduce((s, d) => s + d.amount, 0),
+    telephony_pulses: (usage?.days || []).reduce((s, d) => s + (d.telephony_pulses || 0), 0),
+    telephony_amount: (usage?.days || []).reduce((s, d) => s + (d.telephony_amount || 0), 0),
   };
 
   const totalCalls = windowData.calls || 0;
@@ -164,11 +172,12 @@ const CostEfficiencyStrip = ({ usage }) => {
   const billedMins = windowData.billed_minutes || 0;
   const avgMinsPerCall = connected > 0 ? (billedMins / connected).toFixed(1) : '0.0';
 
-  // Sarvam Voice AI usage vs Estimated telephony carrier charges (an assumption, not Sarvam's figure) (~₹0.50/min pulse in India)
+  // Sarvam voice agent (started minutes at the plan rate) plus Sarvam telephony (Rs 0.20 per started 30-second pulse of connected
+  // calls). Both are Sarvam's own rates, before GST; they come from Sarvam's call records when Sarvam is set up.
   const rate = Number(usage?.rate || 3.5);
   const voiceCost = windowData.amount || billedMins * rate;
-  const telephonyPulseRate = 0.5;
-  const telephonyCost = Math.round(billedMins * telephonyPulseRate * 100) / 100;
+  const telephonyPulses = windowData.telephony_pulses ?? billedMins * 2;      // an upper bound when the pulses are not known
+  const telephonyCost = windowData.telephony_amount ?? telephonyAmount(telephonyPulses);
   const totalTelephonyCombined = voiceCost + telephonyCost;
   const voiceSharePct = totalTelephonyCombined > 0 ? Math.round((voiceCost / totalTelephonyCombined) * 100) : 88;
   const carriageSharePct = 100 - voiceSharePct;
@@ -180,7 +189,7 @@ const CostEfficiencyStrip = ({ usage }) => {
           Cost Efficiency & Telephony Pulse Analysis
         </span>
         <span className="text-[11px] text-slate-500">
-          Aggregated across {totalCalls} calls ({usage?.window_days || 14}-day window). The carrier share is an estimate; Sarvam's own figure is the first card.
+          Aggregated across {totalCalls} calls ({usage?.window_days || 14}-day window). Telephony is Sarvam's rate, ₹0.20 per started 30 seconds of a connected call; all prices are before GST.
         </span>
       </div>
 
@@ -246,7 +255,7 @@ const CostEfficiencyStrip = ({ usage }) => {
               <div
                 className="h-full bg-trust-navy transition-all duration-300"
                 style={{ width: `${carriageSharePct}%` }}
-                title={`Telephony Carrier: ${carriageSharePct}%`}
+                title={`Sarvam telephony: ${carriageSharePct}%`}
               />
             </div>
           </div>
@@ -257,7 +266,7 @@ const CostEfficiencyStrip = ({ usage }) => {
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-trust-navy inline-block shrink-0" />
-              Carrier (assumed ₹0.50/min): <strong className="text-slate-800">{rupees(telephonyCost)}</strong>
+              Telephony ({telephonyPulses} × ₹0.20): <strong className="text-slate-800">{rupees(telephonyCost)}</strong>
             </span>
           </div>
         </div>

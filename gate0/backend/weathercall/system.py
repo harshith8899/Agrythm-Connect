@@ -30,6 +30,16 @@ _AUTO = object()
 _EXHAUSTED = re.compile(r"insufficient[_ ]quota|\b402\b", re.I)
 
 
+TELEPHONY_PULSE_SECONDS = 30          # Sarvam telephony is metered in started 30-second pulses of connected calls
+TELEPHONY_PULSE_RATE = 0.20           # INR a pulse, before GST (docs.sarvam.ai/voice-agents/pricing), the same on every plan
+
+
+def telephony_pulses(status: str, seconds) -> int:
+    """Started 30-second pulses of a connected call (45 s = 2); unanswered, busy and failed calls cost nothing."""
+    s = float(seconds or 0)
+    return math.ceil(s / TELEPHONY_PULSE_SECONDS) if status == "connected" and s > 0 else 0
+
+
 def billed_minutes(status: str, seconds) -> int:
     """Started 60-second minutes of a connected call; unanswered, busy and failed calls cost nothing."""
     s = float(seconds or 0)
@@ -94,8 +104,10 @@ class SystemChecks:
     @staticmethod
     def _totals(rows: list[dict], rate: float) -> dict:
         minutes = sum(billed_minutes(a["connectivity_status"], a["duration_in_seconds"]) for a in rows)
+        pulses = sum(telephony_pulses(a["connectivity_status"], a["duration_in_seconds"]) for a in rows)
         return {"calls": len(rows), "connected": sum(1 for a in rows if a["connectivity_status"] == "connected"),
-                "billed_minutes": minutes, "amount": round(minutes * rate, 2)}
+                "billed_minutes": minutes, "amount": round(minutes * rate, 2),
+                "telephony_pulses": pulses, "telephony_amount": round(pulses * TELEPHONY_PULSE_RATE, 2)}
 
     def usage(self, refresh: bool = False) -> dict:
         rate = self.rate()
@@ -103,8 +115,9 @@ class SystemChecks:
                "window": None, "window_days": USAGE_DAYS, "days": [], "rate": rate, "currency": "INR",
                "note": "Minutes are counted the way Sarvam bills: started 60-second minutes of connected calls. "
                        "Calls not picked up, busy or failed cost nothing. The amount is an estimate (billed minutes "
-                       "times the rate, before GST); the exact figure and the credit balance are on Sarvam's "
-                       "Settings, Usage and Billing pages."}
+                       "times the rate, before GST). Telephony on Sarvam's own number is Rs 0.20 per started 30-second "
+                       "pulse of connected calls, also before GST. The exact figures and the credit balance are on "
+                       "Sarvam's Settings, Usage and Billing pages."}
         rows, error = self._attempts(refresh)
         if rows is None:
             out["error"] = "" if error == "not configured" else error
