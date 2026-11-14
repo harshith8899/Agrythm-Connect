@@ -32,7 +32,7 @@ who finds the address could read farmer data and press "Send now" (real calls co
 2. Fill the values marked as secrets: `GATE0_DATABASE_URL` (the Supabase Session pooler address), `GATE0_API_TOKEN`, `SARVAM_AGENT_API_KEY`, `SARVAM_ORG_ID`,
    `SARVAM_WORKSPACE_ID`, `SARVAM_APP_ID`, `SARVAM_CONNECTION_ID`, `SARVAM_AGENT_PHONE` (same values as your local
    `gate0/.env`). Make the token with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and keep a copy for
-   step 2 below. `SARVAM_APP_VERSION` is 11 in `render.yaml`; change it there when a new agent version is committed.
+   step 2 below. `SARVAM_APP_VERSION` is 12 in `render.yaml`; change it there when a new agent version is committed.
 3. Deploy. Open `https://<service>.onrender.com/api/health`: it must answer `{"status": "ok"}`. Any other `/api` address
    answers 401 without the token, which is correct.
 4. The API refuses to start on a public address without `GATE0_API_TOKEN`; a failed start usually means that is missing.
