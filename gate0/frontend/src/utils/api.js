@@ -58,16 +58,25 @@ const checkAuthResponse = (response) => {
 
 /**
  * Asks the server whether it is awake (/api/health needs no sign-in). On the free hosting plan a sleeping server answers the first
- * request only after up to a minute, so this is also how the sign-in page wakes it early. Never throws: true when it answered.
+ * request only after up to a minute, so this is also how the sign-in page wakes it early. Never throws: { ok, status, message }.
  */
-export const pingServer = async (timeoutMs = 70000) => {
+export const pingServer = async (timeoutMs = 100000) => {
+  // A sleeping free-plan server answers its first request after 20 to 60 seconds, so a request is never cut short before that.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${API_BASE}/api/health`, { cache: 'no-store', signal: controller.signal });
-    return response.ok;
+    let message = '';
+    if (!response.ok) {
+      try {
+        message = String((await response.json()).error || '');
+      } catch {
+        message = '';
+      }
+    }
+    return { ok: response.ok, status: response.status, message };
   } catch {
-    return false;
+    return { ok: false, status: 0, message: '' };
   } finally {
     clearTimeout(timer);
   }

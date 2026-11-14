@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Lock, User, Eye, EyeOff, Loader2, ShieldCheck, Server, CheckCircle2 } from 'lucide-react';
 import { loginAdmin, pingServer } from '../utils';
 
-const GIVE_UP_AFTER_S = 180;      // a start normally takes under a minute; after this it is a real problem, not a slow start
+const NOT_CONNECTED = 'This dashboard is not connected to the server. In Cloudflare, open the Worker, Settings, Variables and Secrets, and check that BACKEND_URL and API_TOKEN are both there (type Secret), then deploy.';
+const TOO_LONG = 'The server did not answer. Check that the Render service shows Live, then press Sign in again.';
+
+const SLOW_AFTER_S = 180;         // a start normally takes under a minute; after this the note changes, but waking never stops
+const MAX_WAIT_S = 600;           // how long a pressed Sign in waits for the server before it says so
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const LoginScreen = ({ onLoginSuccess }) => {
@@ -11,33 +15,50 @@ export const LoginScreen = ({ onLoginSuccess }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [server, setServer] = useState('waking');      // waking | ready | down
+  const [server, setServer] = useState('waking');      // waking | ready | unconfigured
   const [seconds, setSeconds] = useState(0);
   const ready = useRef(false);
+  const unconfigured = useRef('');
 
-  // Wake the server the moment this page opens, so it is up by the time the password is typed.
+  // Wake the server the moment this page opens (the password can be typed and Sign in pressed meanwhile: it waits for the server).
+  // Keeps asking until the server answers; a dashboard that is not connected to a server at all is told apart at once.
   useEffect(() => {
     let stopped = false;
     const startedAt = Date.now();
     const tick = setInterval(() => setSeconds(Math.round((Date.now() - startedAt) / 1000)), 1000);
     (async () => {
       while (!stopped) {
-        if (await pingServer(20000)) {
+        const answer = await pingServer();
+        if (stopped) return;
+        if (answer.ok) {
           ready.current = true;
-          if (!stopped) setServer('ready');
+          unconfigured.current = '';
+          setServer('ready');
           return;
         }
-        if (Date.now() - startedAt > GIVE_UP_AFTER_S * 1000) {
-          if (!stopped) setServer('down');
-          return;
+        if (answer.status === 503 && /not configured/i.test(answer.message)) {
+          unconfigured.current = answer.message;
+          setServer('unconfigured');
+          await wait(10000);                 // maybe the settings are being fixed: keep looking
+        } else {
+          unconfigured.current = '';
+          setServer('waking');
+          await wait(3000);
         }
-        await wait(2500);
       }
     })();
     return () => { stopped = true; clearInterval(tick); };
   }, []);
 
-  const retryWake = () => { window.location.reload(); };
+  // Resolves when the server answers. Rejects when the dashboard is not connected to a server, or after MAX_WAIT_S.
+  const untilReady = async () => {
+    const startedAt = Date.now();
+    while (!ready.current) {
+      if (unconfigured.current) throw Object.assign(new Error(NOT_CONNECTED), { fatal: true });
+      if (Date.now() - startedAt > MAX_WAIT_S * 1000) throw Object.assign(new Error(TOO_LONG), { fatal: true });
+      await wait(400);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -50,15 +71,14 @@ export const LoginScreen = ({ onLoginSuccess }) => {
     setError('');
 
     try {
-      // While the server is still starting the sign-in is tried again by itself (a wrong password is never retried).
-      for (let attempt = 0; ; attempt += 1) {
+      await untilReady();                                // signs in the moment the server is up
+      for (let attempt = 0; ; attempt += 1) {            // a start-up error right after is retried; a wrong password never is
         try {
           await loginAdmin(username.trim(), password);
           break;
         } catch (err) {
-          if (!err.transient || attempt >= 24) throw err;
-          setError('The server is waking up. Signing in as soon as it is ready...');
-          await wait(5000);
+          if (!err.transient || attempt >= 10) throw err;
+          await wait(3000);
         }
       }
       setError('');
@@ -66,7 +86,8 @@ export const LoginScreen = ({ onLoginSuccess }) => {
         onLoginSuccess();
       }
     } catch (err) {
-      setError(err.transient ? 'The server did not answer. Check that the Render service shows Live, then try again.' : (err.message || 'Invalid username or password.'));
+      setError(err.message === NOT_CONNECTED ? 'Cannot sign in yet: the dashboard is not connected to the server (see above).'
+        : (err.fatal ? err.message : (err.transient ? TOO_LONG : (err.message || 'Invalid username or password.'))));
     } finally {
       setLoading(false);
     }
@@ -112,8 +133,11 @@ export const LoginScreen = ({ onLoginSuccess }) => {
             <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2" role="status" aria-live="polite">
               <Server className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
               <span>
-                <strong>Waking up the server...</strong> It sleeps when idle and can take up to a minute. You can already type your
-                details; sign-in continues by itself. {seconds} s
+                <strong>Waking up the server...</strong>{' '}
+                {seconds < SLOW_AFTER_S
+                  ? 'It sleeps when idle and can take up to a minute. Type your details and press Sign in: you are signed in as soon as it is ready.'
+                  : 'This is taking longer than usual. Still trying; you can keep this page open and press Sign in.'}{' '}
+                {seconds} s
               </span>
             </div>
           )}
@@ -123,10 +147,9 @@ export const LoginScreen = ({ onLoginSuccess }) => {
               <span>Server is ready.</span>
             </div>
           )}
-          {server === 'down' && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between gap-3" role="alert">
-              <span>The server has not answered for {Math.floor(GIVE_UP_AFTER_S / 60)} minutes. Check that the Render service shows Live.</span>
-              <button type="button" onClick={retryWake} className="shrink-0 px-3 py-1.5 rounded-lg bg-rose-600 text-white font-bold cursor-pointer">Retry</button>
+          {server === 'unconfigured' && (
+            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs" role="alert">
+              {NOT_CONNECTED}
             </div>
           )}
 
@@ -206,7 +229,7 @@ export const LoginScreen = ({ onLoginSuccess }) => {
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>{error ? 'Waiting for the server...' : 'Verifying credentials...'}</span>
+                  <span>{server === 'ready' ? 'Verifying credentials...' : 'Waiting for the server, then signing in...'}</span>
                 </>
               ) : (
                 <span>Sign In to Dashboard</span>

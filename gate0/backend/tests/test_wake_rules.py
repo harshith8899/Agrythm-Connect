@@ -69,8 +69,8 @@ def test_the_daily_send_wakes_the_backend_only_when_auto_send_is_on(world):
     _, needed, run = world
     assert needed(at(8, 58)) is None                        # auto-send is off by default: never wake for the daily send
     run("insert into dash_settings values('auto_dispatch','on')")
-    assert needed(at(8, 50)) is None                        # too early
-    assert needed(at(8, 57, 30)) == "daily send due"
+    assert needed(at(8, 40)) is None                        # too early
+    assert needed(at(8, 47, 30)) == "daily send due"      # from 08:47: the free plan sleeps after about 15 idle minutes, the timer keeps it up till 09:00
     assert needed(at(14, 0)) == "daily send due"            # backend was down: still wanted until it runs, inside the window
     assert needed(at(22, 30)) is None                       # after 22:00 the backend skips the day: no need to wake it
     run("insert into dash_settings values('last_auto_run_date','2026-11-09')")
