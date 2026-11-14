@@ -23,7 +23,7 @@ services:
       - key: GATE0_TELEPHONY
         value: sarvam_agent
       - key: SARVAM_APP_VERSION
-        value: "10"
+        value: "11"
       # Secrets and ids: filled in the Render dashboard, never committed.
       - key: GATE0_DATABASE_URL        # the Supabase Session pooler address, with the password in it
         sync: false
