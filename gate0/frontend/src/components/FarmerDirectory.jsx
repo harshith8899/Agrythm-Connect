@@ -50,6 +50,9 @@ const RETRYABLE = ['Retrying', 'Unanswered', 'Not Confirmed', 'Failed'];
 const callAction = (farmer, todayCall) => {
   if (farmer.active === 'No') return { disabled: true, label: 'Call', why: 'Inactive farmer' };
   if (farmer.call_consent === 'No') return { disabled: true, label: 'Call', why: 'No call consent' };
+  if (todayCall && (todayCall.status === 'In Call' || todayCall.status === 'In Queue')) {
+    return { disabled: true, label: 'Call', why: todayCall.status === 'In Call' ? 'A call is in progress' : 'Waiting in the queue' };
+  }
   // retryWhy: why "follow the retry rules" is not possible right now (a test call always is)
   if (!todayCall) return { label: 'Call', hint: 'No call yet today', first: true };
   const used = Number(todayCall.attempts_used || 0);
