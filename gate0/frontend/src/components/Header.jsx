@@ -17,9 +17,10 @@ export const Header = ({
     switch (activeTab) {
       case 'farmers':
         return 'Farmer Profiles Directory';
-      case 'system':
       case 'cost':
-        return 'System Status & Cost';
+        return 'Cost Analytics';
+      case 'system':
+        return 'System Status';
       case 'overview':
       default:
         return 'Call Overview';
