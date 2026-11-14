@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, AlertTriangle, Info } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Info, PieChart } from 'lucide-react';
 import { getUsage, saveUsageRate, didFarmerPickUpAndTalk } from '../utils';
 import { RealTimeCostChart } from './RealTimeCostChart';
+import { DonutAnalyticsGrid } from './DonutAnalyticsGrid';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
@@ -266,7 +267,7 @@ const CostEfficiencyStrip = ({ usage }) => {
 };
 
 const InteractiveUsageChart = ({ days = [], rate = 3.5, isSimulated = false, callLogs = [] }) => {
-  const [chartView, setChartView] = useState('realtime'); // 'realtime' | 'volume' | 'cost'
+  const [chartView, setChartView] = useState('realtime'); // 'realtime' | 'donuts' | 'volume' | 'cost'
   const [hoveredIdx, setHoveredIdx] = useState(null);
 
   const chronologicalDays = useMemo(() => {
@@ -335,11 +336,13 @@ const InteractiveUsageChart = ({ days = [], rate = 3.5, isSimulated = false, cal
           <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
             {chartView === 'realtime'
               ? 'Real-Time Intraday Cost Analytics'
+              : chartView === 'donuts'
+              ? 'Categorical Donut & Pie Analytics'
               : chartView === 'volume'
               ? 'Daily Call Volume & Connectivity'
               : 'Daily Cost Trend (₹)'}
           </span>
-          {chartView !== 'realtime' && (
+          {chartView !== 'realtime' && chartView !== 'donuts' && (
             <span className="text-[11px] font-medium text-slate-400">(last {n} days with calls)</span>
           )}
           {isSimulated && (
@@ -350,7 +353,7 @@ const InteractiveUsageChart = ({ days = [], rate = 3.5, isSimulated = false, cal
         </div>
 
         {/* View toggle buttons */}
-        <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200/60 self-start sm:self-auto">
+        <div className="inline-flex flex-wrap p-1 rounded-xl bg-slate-100 border border-slate-200/60 self-start sm:self-auto gap-0.5">
           <button
             type="button"
             onClick={() => {
@@ -368,6 +371,21 @@ const InteractiveUsageChart = ({ days = [], rate = 3.5, isSimulated = false, cal
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
             Real-Time Intraday (₹)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setChartView('donuts');
+              setHoveredIdx(null);
+            }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              chartView === 'donuts'
+                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <PieChart className="w-3.5 h-3.5 text-trust-green" />
+            Pie & Donut Charts
           </button>
           <button
             type="button"
@@ -410,8 +428,17 @@ const InteractiveUsageChart = ({ days = [], rate = 3.5, isSimulated = false, cal
         />
       )}
 
-      {/* 2 & 3. 14-Day Chronological Daily Charts */}
-      {chartView !== 'realtime' && (
+      {/* 2. Categorical Donut & Pie Analytics View */}
+      {chartView === 'donuts' && (
+        <DonutAnalyticsGrid
+          callLogs={callLogs}
+          rate={rate}
+          embedded={true}
+        />
+      )}
+
+      {/* 3 & 4. 14-Day Chronological Daily Charts */}
+      {chartView !== 'realtime' && chartView !== 'donuts' && (
         <>
           {n === 0 ? (
             <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
