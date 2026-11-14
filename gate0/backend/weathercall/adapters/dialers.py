@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.parse
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from ..contracts import ProviderCallResult
 from .mock import MockTelephony
@@ -73,9 +73,41 @@ class SarvamDialler(SarvamAgentTelephony):
             self._sleep(10)
         return {}
 
+    def _transcript_with_english(self, interaction_id: str) -> list[dict]:
+        try:
+            day = datetime.strptime(interaction_id[:8], "%Y%m%d")
+            q = urllib.parse.urlencode({
+                "start_datetime": (day - timedelta(days=1)).isoformat(timespec="seconds"),
+                "end_datetime": (day + timedelta(days=2)).isoformat(timespec="seconds"),
+                "include_transcript": "true", "limit": 5,
+                "filter_conditions": json.dumps([{"field": "interaction_id", "operator": "equals", "value": interaction_id}])})
+            items = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/interactions?{q}").get("items", [])
+        except Exception:
+            return []
+        item = next((i for i in items if i.get("interaction_id") == interaction_id), None)
+        original = (item or {}).get("original_transcript") or []
+        english = (item or {}).get("translate_transcript") or []
+        out = []
+        for n, entry in enumerate(original):                      # entry n of the English list translates entry n of the original
+            text = scrub(entry.get("text") or "")
+            if not text:
+                continue
+            en = scrub((english[n].get("text") if n < len(english) else "") or "")
+            turn = {"speaker": "Agent" if entry.get("role") in ("agent", "assistant") else "Farmer", "text": text}
+            if en and en != text:
+                turn["en"] = en
+            out.append(turn)
+        return out
+
     def _transcript(self, interaction_id: str | None) -> list[dict]:
+        """What was said, in the language of the call, with Sarvam's English translation of each message (key "en") when Sarvam has
+        one. The interactions list returns both side by side (include_transcript); the transcript endpoint has the original only,
+        so it is the fallback."""
         if not interaction_id:
             return []
+        paired = self._transcript_with_english(interaction_id)
+        if paired:
+            return paired
         try:
             iid = urllib.parse.quote(interaction_id, safe="")
             data = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/transcripts/{iid}")

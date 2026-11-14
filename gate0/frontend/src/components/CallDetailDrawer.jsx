@@ -388,6 +388,12 @@ export const CallDetailDrawer = ({ call, onClose }) => {
                         >
                           {text}
                         </p>
+                        {turn.en && String(turn.en).trim() !== text && (
+                          <p className="mt-1.5 pt-1.5 border-t border-slate-200/70 text-[12px] leading-5 text-slate-500 italic whitespace-pre-line">
+                            <span className="not-italic font-bold text-[9px] tracking-wider uppercase text-blue-600 mr-1.5">English</span>
+                            {String(turn.en).replace(/\s*\n\s*/g, ' ').trim()}
+                          </p>
+                        )}
                       </div>
                     </div>
                   );
