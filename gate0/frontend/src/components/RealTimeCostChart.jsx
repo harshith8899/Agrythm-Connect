@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Activity, TrendingUp, Zap, Clock, RefreshCw } from 'lucide-react';
+import { Activity, TrendingUp, Zap, Clock, RefreshCw, PieChart } from 'lucide-react';
 import { didFarmerPickUpAndTalk } from '../utils';
+import { DonutAnalyticsGrid } from './DonutAnalyticsGrid';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
@@ -178,6 +179,7 @@ export const RealTimeCostChart = ({
 }) => {
   const [hoveredIdx, setHoveredIdx] = useState(null);
   const [displayMode, setDisplayMode] = useState('cumulative'); // 'cumulative' | 'hourly'
+  const [chartType, setChartType] = useState('timeline'); // 'timeline' | 'donuts'
 
   const telemetry = useMemo(() => {
     return computeHourlyTelemetry(callLogs, Number(rate || 3.5));
@@ -275,37 +277,66 @@ export const RealTimeCostChart = ({
           </div>
 
           {/* Display mode buttons & Refresh */}
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {/* View Selector: Timeline vs Pie & Donut */}
             <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60">
               <button
                 type="button"
-                onClick={() => {
-                  setDisplayMode('cumulative');
-                  setHoveredIdx(null);
-                }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  displayMode === 'cumulative'
+                onClick={() => setChartType('timeline')}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  chartType === 'timeline'
                     ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Cumulative (₹)
+                Timeline
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setDisplayMode('hourly');
-                  setHoveredIdx(null);
-                }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  displayMode === 'hourly'
+                onClick={() => setChartType('donuts')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  chartType === 'donuts'
                     ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Hourly Burn (₹)
+                <PieChart className="w-3 h-3 text-trust-green" />
+                Donut & Pie
               </button>
             </div>
+
+            {chartType === 'timeline' && (
+              <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDisplayMode('cumulative');
+                    setHoveredIdx(null);
+                  }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                    displayMode === 'cumulative'
+                      ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Cumulative (₹)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDisplayMode('hourly');
+                    setHoveredIdx(null);
+                  }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                    displayMode === 'hourly'
+                      ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Hourly Burn (₹)
+                </button>
+              </div>
+            )}
 
             {onRefresh && (
               <button
@@ -322,46 +353,82 @@ export const RealTimeCostChart = ({
 
       {/* Intraday Sub-bar when embedded */}
       {embedded && (
-        <div className="flex items-center justify-between gap-2 pb-1">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1">
           <div className="flex items-center gap-2 text-xs text-slate-600">
             <span className="font-semibold text-slate-800">Intraday Window:</span>
             <span>{telemetry.targetDateLabel} (06:00 – 21:00)</span>
           </div>
-          <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60">
-            <button
-              type="button"
-              onClick={() => {
-                setDisplayMode('cumulative');
-                setHoveredIdx(null);
-              }}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                displayMode === 'cumulative'
-                  ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Cumulative (₹)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setDisplayMode('hourly');
-                setHoveredIdx(null);
-              }}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                displayMode === 'hourly'
-                  ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Hourly Burn (₹)
-            </button>
+
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {/* View Selector: Timeline vs Pie & Donut */}
+            <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60">
+              <button
+                type="button"
+                onClick={() => setChartType('timeline')}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  chartType === 'timeline'
+                    ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Timeline
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartType('donuts')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  chartType === 'donuts'
+                    ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <PieChart className="w-3 h-3 text-trust-green" />
+                Donut & Pie
+              </button>
+            </div>
+
+            {chartType === 'timeline' && (
+              <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDisplayMode('cumulative');
+                    setHoveredIdx(null);
+                  }}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                    displayMode === 'cumulative'
+                      ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Cumulative (₹)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDisplayMode('hourly');
+                    setHoveredIdx(null);
+                  }}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                    displayMode === 'hourly'
+                      ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Hourly Burn (₹)
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* 4 Quick Telemetry Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+      {chartType === 'donuts' ? (
+        <DonutAnalyticsGrid callLogs={callLogs} rate={rate} embedded={true} />
+      ) : (
+        <>
+          {/* 4 Quick Telemetry Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Spend</span>
@@ -663,6 +730,8 @@ export const RealTimeCostChart = ({
           <span>Total: <strong className="text-slate-900">{rupees(totalCombined)}</strong></span>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };
