@@ -23,7 +23,7 @@ who finds the address could read farmer data and press "Send now" (real calls co
   `docs/TRIGGER.md` (one-time setup after the first deploy). For many farmers, switch `plan` to `starter` in `render.yaml`
   (about 7 USD a month, always on).
 - **Costs:** Render free plan 0 (Starter about 7 USD a month if you switch). Cloudflare Pages and Access (up to 50 users) and the Supabase free plan
-  cost nothing. Sarvam and Exotel are billed separately.
+  cost nothing. Sarvam (voice agent and its telephony number) is billed separately.
 - **Farmers are real data and are not in git.** Copy your local data into Supabase with
   `python -m weathercall.migrate_db` (see `docs/SUPABASE.md`), or import the sheet again in the hosted dashboard.
 

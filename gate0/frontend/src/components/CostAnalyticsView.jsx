@@ -164,7 +164,7 @@ const CostEfficiencyStrip = ({ usage }) => {
   const billedMins = windowData.billed_minutes || 0;
   const avgMinsPerCall = connected > 0 ? (billedMins / connected).toFixed(1) : '0.0';
 
-  // Sarvam Voice AI usage vs Estimated Exotel Telephony pulse carriage charges (~₹0.50/min pulse in India)
+  // Sarvam Voice AI usage vs Estimated telephony carrier charges (an assumption, not Sarvam's figure) (~₹0.50/min pulse in India)
   const rate = Number(usage?.rate || 3.5);
   const voiceCost = windowData.amount || billedMins * rate;
   const telephonyPulseRate = 0.5;

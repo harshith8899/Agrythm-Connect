@@ -265,7 +265,7 @@ export const DonutAnalyticsGrid = ({
         label: 'Carrier Telephony',
         value: carriageCost,
         color: '#0F2444', // Trust Navy
-        secondaryText: 'Exotel Pulses (~₹0.50/min)',
+        secondaryText: 'Carrier (assumed ~₹0.50/min)',
       },
     ];
 

@@ -221,23 +221,23 @@ class SystemChecks:
     def _sarvam_checks(self, refresh: bool) -> tuple[dict, dict]:
         if self.usage_reader is None:
             return (self._check("sarvam", "Sarvam", "off", "Not set up. The backend is in simulated mode."),
-                    self._check("phone", "Phone line (Exotel)", "off", "Needs Sarvam to be set up first."))
+                    self._check("phone", "Phone line", "off", "Needs Sarvam to be set up first."))
         t = time.monotonic()
         rows, error = self._attempts(True if refresh else False)
         if rows is None:
             return (self._check("sarvam", "Sarvam", "fail", f"Request failed: {error}", t),
-                    self._check("phone", "Phone line (Exotel)", "off", "Cannot be judged while Sarvam fails."))
+                    self._check("phone", "Phone line", "off", "Cannot be judged while Sarvam fails."))
         version = getattr(self.usage_reader, "app_version", "?")
         sarvam = self._check("sarvam", "Sarvam", "ok", f"Key accepted. Agent version {version} configured.", t)
         cutoff = self._now().astimezone(UTC) - timedelta(hours=24)
         recent = sorted((a for a in rows if _when(a) >= cutoff), key=_when)
         if not recent:
-            return sarvam, self._check("phone", "Phone line (Exotel)", "off", "No call in the last 24 hours to judge by.")
+            return sarvam, self._check("phone", "Phone line", "off", "No call in the last 24 hours to judge by.")
         last = recent[-1]
         ago = max(int((self._now().astimezone(UTC) - _when(last)).total_seconds() // 60), 0)
         status = last["connectivity_status"]
         if status == "failed":
-            return sarvam, self._check("phone", "Phone line (Exotel)", "fail",
+            return sarvam, self._check("phone", "Phone line", "fail",
                                        f"Last call failed {ago} min ago: {_reason_text(last.get('failure_reason') or '')}")
         word = "connected" if status == "connected" else "rang but was not picked up"
-        return sarvam, self._check("phone", "Phone line (Exotel)", "ok", f"Last call {word} {ago} min ago.")
+        return sarvam, self._check("phone", "Phone line", "ok", f"Last call {word} {ago} min ago.")
