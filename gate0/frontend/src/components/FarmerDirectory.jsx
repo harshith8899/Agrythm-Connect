@@ -50,6 +50,7 @@ const RETRYABLE = ['Retrying', 'Unanswered', 'Not Confirmed', 'Failed'];
 const callAction = (farmer, todayCall) => {
   if (farmer.active === 'No') return { disabled: true, label: 'Call', why: 'Inactive farmer' };
   if (farmer.call_consent === 'No') return { disabled: true, label: 'Call', why: 'No call consent' };
+  if (farmer.located === false) return { disabled: true, label: 'Call', why: 'No weather location: edit the village or district' };
   if (todayCall && (todayCall.status === 'In Call' || todayCall.status === 'In Queue')) {
     return { disabled: true, label: 'Call', why: todayCall.status === 'In Call' ? 'A call is in progress' : 'Waiting in the queue' };
   }
@@ -531,11 +532,11 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
     setError('');
     setSavedNote('');
     try {
-      if (editing) await updateFarmer(farmer.farmer_id, form);
-      else await addFarmer(form);
-      onSaved();
+      const saved = editing ? await updateFarmer(farmer.farmer_id, form) : await addFarmer(form);
+      onSaved(saved);
       if (again && !editing) {
-        setSavedNote(`Saved ${form.farmer_name}. Add the next farmer.`);
+        const noPlace = saved && saved.located === false ? ' No weather location was found for that place, so there is no call until it is fixed.' : '';
+        setSavedNote(`Saved ${form.farmer_name}.${noPlace} Add the next farmer.`);
         setForm({ ...BLANK, state: form.state, district: form.district, preferred_language: form.preferred_language });
         setPinVillages([]);
         setPlaces([]);
@@ -697,6 +698,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null); // null: closed, 'new': add form, or the farmer being edited
   const [toggleError, setToggleError] = useState('');
+  const [saveWarning, setSaveWarning] = useState(null); // a farmer just saved whose place could not be located
   const [callNote, setCallNote] = useState({}); // farmer id -> { ok, text } shown on the card
   const [calling, setCalling] = useState({});
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -927,7 +929,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
           <ImportCsvButton onImported={onImported} />
           <AddFarmerButton onClick={() => setEditing('new')} />
         </div>
-        {editing && <FarmerFormModal farmer={editing === 'new' ? null : editing} farmers={farmers} onClose={() => setEditing(null)} onSaved={() => onImported && onImported()} />}
+        {editing && <FarmerFormModal farmer={editing === 'new' ? null : editing} farmers={farmers} onClose={() => setEditing(null)} onSaved={(saved) => { if (onImported) onImported(); if (saved && saved.located === false) setSaveWarning(saved); }} />}
       </div>
     );
   }
@@ -965,7 +967,19 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
       </div>
 
       {toggleError && <p className="text-xs font-semibold text-rose-700">{toggleError}</p>}
-      {editing && <FarmerFormModal farmer={editing === 'new' ? null : editing} farmers={farmers} onClose={() => setEditing(null)} onSaved={() => onImported && onImported()} />}
+      {saveWarning && (
+        <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs" role="status">
+          <span>
+            <strong>{saveWarning.farmer_name}</strong> was saved, but no weather location was found for {[saveWarning.village, saveWarning.district].filter(Boolean).join(', ')}.
+            With no location there is no weather, so this farmer is not called. Check the spelling or pick the village from the list.
+          </span>
+          <span className="flex gap-2">
+            <button type="button" onClick={() => { setEditing(saveWarning); setSaveWarning(null); }} className="px-3 py-1 rounded-lg bg-amber-600 text-white font-semibold cursor-pointer">Edit now</button>
+            <button type="button" onClick={() => setSaveWarning(null)} className="px-3 py-1 rounded-lg bg-white border border-amber-200 font-semibold cursor-pointer">Dismiss</button>
+          </span>
+        </div>
+      )}
+      {editing && <FarmerFormModal farmer={editing === 'new' ? null : editing} farmers={farmers} onClose={() => setEditing(null)} onSaved={(saved) => { if (onImported) onImported(); if (saved && saved.located === false) setSaveWarning(saved); }} />}
 
       {/* Regional Filters & Select All Toolbar */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
@@ -1180,6 +1194,11 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                     No consent
                   </span>
                 )}
+                {farmer.located === false && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                    No location
+                  </span>
+                )}
                 {farmer.talkedToday && (
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-trust-green border border-emerald-200">
                     Talked Today
@@ -1208,6 +1227,9 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                 <MapPin className="w-3.5 h-3.5 text-slate-400" />
                 <span>{farmer.village || 'N/A'}, {farmer.district || 'N/A'}</span>
               </div>
+              {farmer.located === false && (
+                <p className="text-[11px] font-semibold text-amber-700">No weather location found for this place, so no call. Edit the village or district.</p>
+              )}
             </div>
 
             <div className="flex items-center justify-between text-xs">

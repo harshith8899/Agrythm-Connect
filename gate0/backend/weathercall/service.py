@@ -371,8 +371,8 @@ class DashboardService:
             state = str(data["state"]).strip()
         if not (village or district):
             raise ValueError("village or district is required")
-        if moved:
-            lat, lon = self._locate(village, district, state)       # the place changed: find its weather location again
+        if moved or not (lat or lon):
+            lat, lon = self._locate(village, district, state)       # the place changed, or it was never found: look it up again
         if "call_consent" in data:
             consent = int(self._yes_no(data["call_consent"], "call consent"))
         if "active" in data:
