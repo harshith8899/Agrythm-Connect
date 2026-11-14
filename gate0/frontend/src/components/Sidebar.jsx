@@ -3,6 +3,7 @@ import {
   PhoneCall,
   Users,
   ShieldCheck,
+  IndianRupee,
   X,
   LogOut
 } from 'lucide-react';
@@ -25,6 +26,11 @@ export const Sidebar = ({
       id: 'farmers',
       label: 'Farmer Directory',
       icon: Users,
+    },
+    {
+      id: 'cost',
+      label: 'Cost Analytics',
+      icon: IndianRupee,
     },
     {
       id: 'system',

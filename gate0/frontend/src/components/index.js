@@ -11,5 +11,6 @@ export * from './MobileNav';
 export * from './SliderLoader';
 export * from './ServerBanner';
 export * from './SystemStatusView';
+export * from './CostAnalyticsView';
 export * from './RealTimeCostChart';
 export * from './LoginScreen';

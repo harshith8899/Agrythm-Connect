@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Server } from 'lucide-react';
 import { SliderLoader } from './SliderLoader';
 
+const SHOW_AFTER_S = 4;      // a normal first load is quicker than this, so no banner flashes by
 const GIVE_UP_AFTER_S = 120; // after this long without an answer it is an error, not just a slow start
 
 // Shown while the dashboard is waiting for the backend. On the free hosting plan the server sleeps when idle and takes up to
@@ -18,6 +19,8 @@ export const ServerBanner = ({ isOnline, loading, hasConnected, waitingSince, on
 
   if (!waiting) return null;
   const seconds = Math.max(0, Math.round((now - (waitingSince || now)) / 1000));
+  // The first load of a server that is already awake takes a moment: say nothing until it is really slow.
+  if (seconds < SHOW_AFTER_S) return null;
 
   if (seconds >= GIVE_UP_AFTER_S) {
     return (
