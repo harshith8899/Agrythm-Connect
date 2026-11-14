@@ -113,7 +113,7 @@ def test_a_call_that_cannot_be_placed_ends_as_failed_not_stuck_in_call(tmp_path)
     assert s.db.execute("SELECT COUNT(*) FROM dash_live").fetchone()[0] == 0
 
 
-def test_a_row_left_by_a_stopped_process_is_dropped_and_a_new_process_starts_clean(tmp_path):
+def test_a_row_left_by_a_stopped_process_is_dropped_from_the_log_and_kept_for_recovery(tmp_path):
     d = Watching([A.ANSWERED])
     s, clock = make(tmp_path, d)
     s.import_csv(ONE)
@@ -123,7 +123,7 @@ def test_a_row_left_by_a_stopped_process_is_dropped_and_a_new_process_starts_cle
     assert statuses(s) == {}
     s._live_set("F1", D, "daily", 1, "queued")
     s2, _ = make(tmp_path, Watching([]), name="l.db")                            # a new process on the same database
-    assert s2.db.execute("SELECT COUNT(*) FROM dash_live").fetchone()[0] == 0
+    assert s2.db.execute("SELECT COUNT(*) FROM dash_live").fetchone()[0] == 1      # kept: recover_live looks the call up (test_recover_live.py)
 
 
 def test_a_live_row_for_another_day_does_not_change_todays_result_row(tmp_path):

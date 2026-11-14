@@ -12,6 +12,7 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python -m weathercall.server
     healthCheckPath: /api/health
+    maxShutdownDelaySeconds: 300   # a deploy waits (up to 5 minutes) for a call that is on the phone to finish and be saved
     autoDeployTrigger: checksPass   # deploys a commit only after its GitHub checks (CI) pass
     envVars:
       - key: PYTHON_VERSION

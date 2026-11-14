@@ -299,6 +299,21 @@ def run(port: int | None = None) -> None:
     print(f"Agrythm Connect API on http://{host}:{port}  (database: {'Postgres (Supabase)' if is_postgres(db) else 'SQLite file'}; calls: {service.dialler.mode}; "
           f"weather: {getattr(service._weather, 'label', 'Open-Meteo') if service.real_weather else 'mock'}; daily auto-send: "
           f"{'ON' if service.auto_dispatch_enabled() else 'off'})" + (f"\n  note: {service.note}" if service.note else ""))
+    # The host (Render) stops the process on every deploy: stop taking new calls, let the ones on the phone finish (their
+    # results are then saved as usual), and only then exit. render.yaml gives the host time to wait (maxShutdownDelaySeconds).
+    import signal
+
+    def _stop(signum, frame):
+        service.draining = True
+
+        def finish():
+            service.wait_idle(float(os.environ.get("GATE0_DRAIN_SECONDS", 240)))
+            server.shutdown()
+        threading.Thread(target=finish, daemon=True).start()
+    try:
+        signal.signal(signal.SIGTERM, _stop)
+    except (ValueError, OSError, AttributeError):
+        pass
     try:
         server.serve_forever()
     except KeyboardInterrupt:

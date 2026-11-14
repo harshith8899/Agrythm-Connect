@@ -38,6 +38,7 @@ CALL_FROM, CALL_TO = dtime(5, 0), dtime(22, 0)   # callbacks only inside these h
 GRACE_MINUTES = 30        # a callback not placed within this long after its time is marked missed, not called late
 MAX_RELATIVE_MINUTES = 12 * 60
 NETWORK_DROP = "network_drop"   # set by the Sarvam adapter when a connected call was cut by the network
+LIVE_RECOVER_MINUTES = 6     # an In Queue or In Call row this old belongs to a process that stopped (a call is given up after 5 minutes)
 LIVE_STALE_MINUTES = 20      # an In Queue or In Call row older than this belongs to a process that stopped: it is dropped
 INTERRUPTED_MINUTES = 10     # a retry or callback still 'calling' after this long means the process stopped mid-call
 MAX_FREE_RETRIES = 2        # a dropped call (network) is retried twice a day without counting as an attempt
@@ -152,8 +153,6 @@ class DashboardService:
         self.db.executescript(_SCHEMA)
         if "reschedules" not in table_columns(self.db, "dash_callbacks"):      # databases made before the reschedule limit
             self.db.execute("ALTER TABLE dash_callbacks ADD COLUMN reschedules INT DEFAULT 0")
-        self.db.execute("DELETE FROM dash_live")           # nothing is in progress in a process that has just started
-        self.db.commit()
         self.settings = Settings.from_env()
         self.dialler, self.note = (dialler, note) if dialler else make_dialler(env)
         e = env if env is not None else os.environ
@@ -165,6 +164,7 @@ class DashboardService:
         self.cb_lock = threading.Lock()
         self._tick_lock = threading.Lock()
         self._manual: set[str] = set()          # farmers with a call placed by hand in progress
+        self.draining = False                   # set when the host asks the process to stop: finish the calls, start no new one
 
     def _make_ports(self) -> Ports:
         return Ports(DBFarmers(self.db, self.lock), SQLiteLedger(self.db_path), StoredWeather(
@@ -652,6 +652,8 @@ class DashboardService:
             for fid in ids:                                 # everyone waiting shows as In Queue from the start
                 self._live_set(fid, day, "daily", 1, "queued")
             for fid in ids:
+                if self.draining:                           # stopping: the rest stay In Queue and are reported after the restart
+                    break
                 try:
                     outcome = self.fire_one(fid, day)
                 except Exception as exc:                    # one farmer never stops the others
@@ -685,6 +687,8 @@ class DashboardService:
         request and the calling hours still apply."""
         if mode not in ("retry", "test"):
             raise ValueError('mode must be "retry" or "test"')
+        if self.draining:
+            raise ValueError("the server is restarting: try again in a minute")
         now = self._now()
         day = now.date()
         with self.lock:
@@ -1048,7 +1052,10 @@ class DashboardService:
         return True
 
     def _tick_once(self) -> None:
+        if self.draining:
+            return
         self.recover_interrupted()
+        self.recover_live()
         self.run_due_callbacks()
         self.run_due_retries()
         now = self._now()
@@ -1070,6 +1077,120 @@ class DashboardService:
             except Exception:
                 pass
             _t.sleep(every)
+
+    # -- calls that were on the phone when the process stopped (a deploy, a restart, a crash) ------------------------
+    def recover_live(self, now: datetime | None = None) -> int:
+        """In Queue and In Call rows older than LIVE_RECOVER_MINUTES belong to a process that stopped: a call is given up after
+        5 minutes, so nobody is still waiting. For a first call, a hand-placed call or a test call, ask Sarvam what happened and
+        save the result as if nothing had happened, so the call log shows it. A call Sarvam has no record of is dropped and the
+        team is told (nobody is dialled twice on a guess). A daily send that was cut short is reported once. Retries and callbacks
+        that were claimed are recovered by recover_interrupted. Returns how many calls were recovered."""
+        now = now or self._now()
+        with self.lock:
+            try:
+                rows = self.db.execute("SELECT farmer_id, call_date, kind, attempt_no, state, since FROM dash_live").fetchall()
+            except OperationalError:
+                return 0
+        limit = timedelta(minutes=LIVE_RECOVER_MINUTES)
+
+        def is_old(since) -> bool:
+            try:
+                return datetime.fromisoformat(since) + limit < now
+            except (TypeError, ValueError):
+                return True
+        old = [r for r in rows if is_old(r[5])]
+        if not old:
+            return 0
+        recovered, unsent = 0, []
+        with self.cb_lock:
+            ports = None
+            for fid, day, kind, attempt, state, since in old:
+                if kind == "callback":                       # its claim in dash_callbacks is recovered by recover_interrupted
+                    continue
+                if kind == "retry":
+                    with self.lock:
+                        claimed = self.db.execute("SELECT 1 FROM dash_retries WHERE farmer_id=? AND call_date=? AND status='calling'",
+                                                  (fid, day)).fetchone()
+                    if claimed:
+                        continue
+                if state == "queued":
+                    if kind == "daily":
+                        unsent.append(fid)
+                    self._live_clear(fid)
+                    continue
+                ports = ports or self._make_ports()
+                try:
+                    recovered += self._recover_call(ports, fid, day, kind, int(attempt or 1), since)
+                except Exception:
+                    pass                                     # never stops the others; the row is dropped below
+                self._live_clear(fid)
+        if unsent:
+            self._alert("send_interrupted", "", f"Today's send was interrupted by a restart: {len(unsent)} farmers in the queue were "
+                                                "not called. Press Send now to call them; farmers already called are skipped.")
+        return recovered
+
+    def _recover_call(self, ports: Ports, fid: str, day: str, kind: str, attempt: int, since: str) -> int:
+        farmer = ports.farmers.get_context(fid)
+        if farmer is None:
+            return 0
+        found = self._find_call(ports, fid, datetime.fromisoformat(since))
+        if found is None:
+            if kind != "test":
+                self._alert("interrupted_call", fid, "A call was interrupted by a restart and no call was found at the provider. "
+                                                     "Use the Call button if the farmer still needs one.")
+            return 0
+        res, ended = found
+        ended = ended.astimezone(self._now().tzinfo or IST)
+        out = self._outputs(res)
+        if kind == "test":                                   # its own Test row; saved once
+            with self.lock:
+                seen = self.db.execute("SELECT 1 FROM dash_tests WHERE attempt_id=?", (res.provider_call_id,)).fetchone()
+            if seen:
+                return 0
+            self._save_test(fid, since, res.status.value, res.error, {}, res.provider_call_id, farmer.language.value,
+                            res.duration_s or 0, out)
+            return 1
+        with self.lock:
+            done = self.db.execute("SELECT 1 FROM dash_results WHERE farmer_id=? AND call_date=? AND attempt_id=?",
+                                   (fid, day, res.provider_call_id)).fetchone()
+        if done:                                             # the process saved it just before it stopped
+            return 0
+        d = date.fromisoformat(day)
+        try:
+            ports.ledger.record_attempt(CallAttempt(
+                farmer_id=fid, call_date=d, attempt_no=attempt, status=res.status, language=farmer.language,
+                message_text="(recovered)", provider_call_id=res.provider_call_id, duration_s=res.duration_s,
+                error=res.error, weather_source="recovered"))
+        except IntegrityError:
+            ports.ledger.db.rollback()
+        try:
+            if attempt == 1:
+                ports.ledger.record_day_result(FarmerDayResult(fid, d, final_result(res.status), 1))
+            else:
+                ports.ledger.db.execute("UPDATE day_results SET result=?, attempts=? WHERE farmer_id=? AND call_date=?",
+                                        (final_result(res.status).value, attempt, fid, day))
+                ports.ledger.db.commit()
+        except Exception:
+            ports.ledger.db.rollback()
+        self._store_outcome(fid, d, farmer, None, attempt, res, out, at=ended, weather=self._saved_weather(fid, day) or {})
+        return 1
+
+    def wait_idle(self, timeout: float = 240.0) -> bool:
+        """Waits until no call is on the phone (the daily send, a retry, a callback, a hand-placed call), up to timeout seconds.
+        Used when the host asks the process to stop. True when idle."""
+        import time as _t
+        end = _t.monotonic() + timeout
+        while _t.monotonic() < end:
+            with self.lock:
+                busy = self.running or bool(self._manual)
+                try:
+                    calling = self.db.execute("SELECT COUNT(*) FROM dash_live WHERE state='calling'").fetchone()[0]
+                except OperationalError:
+                    calling = 0
+            if not busy and not calling:
+                return True
+            _t.sleep(1)
+        return False
 
     # -- reading results for the dashboard -------------------------------------------------------------------------
     def _all_attempts(self) -> dict[tuple[str, str], list[dict]]:
