@@ -8,7 +8,6 @@ import {
   CallDetailDrawer, 
   FarmerDirectory, 
   SystemStatusView,
-  CostAnalyticsView,
   RealTimeCostChart,
   ConfirmHost,
   MobileNav,
@@ -187,12 +186,8 @@ function Dashboard({ onLogout }) {
             />
           )}
 
-          {activeTab === 'cost' && (
-            <CostAnalyticsView isBackendOnline={isBackendOnline} callLogs={callLogs} />
-          )}
-
-          {activeTab === 'system' && (
-            <SystemStatusView isBackendOnline={isBackendOnline} />
+          {(activeTab === 'system' || activeTab === 'cost') && (
+            <SystemStatusView isBackendOnline={isBackendOnline} callLogs={callLogs} />
           )}
         </main>
       </div>
