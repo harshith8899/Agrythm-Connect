@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Activity, TrendingUp, Zap, Clock, RefreshCw, PieChart } from 'lucide-react';
-import { didFarmerPickUpAndTalk } from '../utils';
+import { didFarmerPickUpAndTalk, pulsesFor, telephonyAmount } from '../utils';
 import { DonutAnalyticsGrid } from './DonutAnalyticsGrid';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
@@ -126,6 +126,7 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
       return sum + Math.max(1, Math.ceil(sec / 60));
     }, 0);
 
+    const pulses = connected.reduce((sum, c) => sum + pulsesFor(c.duration_sec ?? c.duration), 0);   // Sarvam telephony: started 30-second pulses
     const spend = Math.round(billedMinutes * rate * 100) / 100;
     runningCumulative = Math.round((runningCumulative + spend) * 100) / 100;
 
@@ -145,6 +146,7 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
       calls: hourCalls.length,
       connected: connected.length,
       billedMinutes,
+      pulses,
       spend,
       cumulativeSpend: runningCumulative,
     });
@@ -153,6 +155,7 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
   const totalCalls = hours.reduce((s, h) => s + h.calls, 0);
   const totalConnected = hours.reduce((s, h) => s + h.connected, 0);
   const totalBilledMins = hours.reduce((s, h) => s + h.billedMinutes, 0);
+  const totalPulses = hours.reduce((s, h) => s + h.pulses, 0);
   const activeHoursCount = hours.filter((h) => h.calls > 0).length || 1;
   const avgBurnRate = Math.round((runningCumulative / activeHoursCount) * 100) / 100;
 
@@ -164,6 +167,7 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
     totalCalls,
     totalConnected,
     totalBilledMins,
+    totalPulses,
     peakHour,
     peakSpend,
     avgBurnRate,
@@ -185,7 +189,7 @@ export const RealTimeCostChart = ({
     return computeHourlyTelemetry(callLogs, Number(rate || 3.5));
   }, [callLogs, rate]);
 
-  const { hours, totalSpend, totalCalls, totalConnected, totalBilledMins, avgBurnRate } = telemetry;
+  const { hours, totalSpend, totalCalls, totalConnected, totalBilledMins, totalPulses, avgBurnRate } = telemetry;
   const n = hours.length;
 
   // Coordinate setup for clean responsive vector rendering
@@ -240,8 +244,7 @@ export const RealTimeCostChart = ({
 
   // Telephony pulse estimation:
   const voiceCost = totalSpend;
-  const telephonyPulseRate = 0.5;
-  const carriageCost = Math.round(totalBilledMins * telephonyPulseRate * 100) / 100;
+  const carriageCost = telephonyAmount(totalPulses);                    // Sarvam telephony: Rs 0.20 per started 30 seconds
   const totalCombined = voiceCost + carriageCost;
 
   const containerClass = embedded
@@ -723,7 +726,7 @@ export const RealTimeCostChart = ({
         </div>
 
         <div className="text-[11px] text-slate-500 flex items-center gap-2">
-          <span>Carrier pulse: <strong className="text-slate-700">{rupees(carriageCost)}</strong></span>
+          <span>Telephony ({totalPulses} pulses × ₹0.20): <strong className="text-slate-700">{rupees(carriageCost)}</strong></span>
           <span>·</span>
           <span>Voice AI: <strong className="text-slate-700">{rupees(voiceCost)}</strong></span>
           <span>·</span>
