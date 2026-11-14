@@ -42,8 +42,9 @@ begin
     return 'callback due';
   end if;
 
-  -- 3. the daily send (only when auto-send is on), inside the calling window; the backend starts it at 09:00
-  if enabled and ist::time >= time '08:57' and ist::time <= time '22:00' then
+  -- 3. the daily send (only when auto-send is on), inside the calling window; the backend starts it at 09:00. The timer starts
+  --    waking it at 08:47 and then pings it every minute, so the free plan (which sleeps after about 15 idle minutes) stays up.
+  if enabled and ist::time >= time '08:47' and ist::time <= time '22:00' then
     if last_day <> today then
       return 'daily send due';
     end if;

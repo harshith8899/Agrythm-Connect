@@ -18,7 +18,7 @@ Supabase (every minute)                              Render (free, sleeps when i
 |---|---|
 | `retry due` | a retry is pending and due within 3 minutes (or already due) |
 | `callback due` | a callback the farmer asked for is pending and due within 3 minutes (or already due) |
-| `daily send due` | auto-send is on, it is between 08:57 and 22:00, and today's send has not started |
+| `daily send due` | auto-send is on, it is between 08:47 and 22:00, and today's send has not started |
 | `daily send running` | the send started in the last 2 hours and an active, consenting farmer still has no result today |
 
 Everything else is quiet, so the service sleeps. A wake-up that is early, repeated or late changes nothing: `POST /api/tick`
