@@ -58,6 +58,26 @@ def _get(url: str, params: dict, opener=default_opener, customer_url: str | None
         return json.load(resp)
 
 
+# Old spellings and common misspellings of places, and the name the place services know them by. A search tries what was typed
+# first and then this name, so "Banglore" or "Mysore" still finds the place.
+PLACE_ALIASES = {
+    "bangalore": "Bengaluru", "banglore": "Bengaluru", "bengalore": "Bengaluru", "bangaluru": "Bengaluru",
+    "bangaloreurban": "Bengaluru", "bengaluruurban": "Bengaluru", "bangalorerural": "Bengaluru Rural",
+    "mysore": "Mysuru", "belgaum": "Belagavi", "bellary": "Ballari", "bijapur": "Vijayapura", "gulbarga": "Kalaburagi",
+    "shimoga": "Shivamogga", "tumkur": "Tumakuru", "chikmagalur": "Chikkamagaluru", "mangalore": "Mangaluru",
+    "chikballapur": "Chikkaballapura", "ramanagar": "Ramanagara", "bagalkot": "Bagalkote", "coorg": "Kodagu",
+    "hubli": "Hubballi", "davangere": "Davanagere",
+}
+
+
+def name_variants(name: str) -> list[str]:
+    """The name as typed, then the name the services know it by (when it is a known old or misspelled name)."""
+    typed = str(name or "").strip()
+    key = "".join(ch for ch in typed.lower() if ch.isalnum())
+    alias = PLACE_ALIASES.get(key)
+    return [typed] + ([alias] if alias and alias.lower() != typed.lower() else [])
+
+
 def _same(a: object, b: str) -> bool:
     norm = lambda s: "".join(ch for ch in str(s or "").lower() if ch.isalnum())  # noqa: E731
     return bool(b) and norm(a) == norm(b)
@@ -73,24 +93,26 @@ class Place:
 
 def geocode(village: str, district: str, state: str, opener=default_opener) -> Place | None:
     """Village first; if the village is unknown, the district centre. None when nothing matches confidently."""
+    districts = name_variants(district)
     for name, level in ((village, "village"), (district, "district")):
         if not name:
             continue
-        query = {"name": name, "count": 10, "language": "en", "format": "json", "countryCode": "IN"}
-        try:
-            results = _get(GEOCODE_URL, query, opener, CUSTOMER_GEOCODE_URL).get("results") or []
-        except urllib.error.HTTPError:
-            if not api_key():
-                raise
-            results = _get(GEOCODE_URL, query, opener).get("results") or []     # the plan may not cover place search: the free one is enough
-        in_state = [r for r in results if not state or _same(r.get("admin1"), state)]
-        in_district = [r for r in in_state
-                       if not district or any(_same(r.get(k), district) for k in ("admin2", "admin3", "name"))]
-        # without a district to check, accept only a single match inside the state
-        pick = in_district[0] if in_district else (in_state[0] if not district and len(in_state) == 1 else None)
-        if pick:
-            where = ", ".join(str(pick.get(k)) for k in ("name", "admin2", "admin1") if pick.get(k))
-            return Place(float(pick["latitude"]), float(pick["longitude"]), f"{where} ({level})", level)
+        for asked in name_variants(name):
+            query = {"name": asked, "count": 10, "language": "en", "format": "json", "countryCode": "IN"}
+            try:
+                results = _get(GEOCODE_URL, query, opener, CUSTOMER_GEOCODE_URL).get("results") or []
+            except urllib.error.HTTPError:
+                if not api_key():
+                    raise
+                results = _get(GEOCODE_URL, query, opener).get("results") or []     # the plan may not cover place search: the free one is enough
+            in_state = [r for r in results if not state or _same(r.get("admin1"), state)]
+            in_district = [r for r in in_state
+                           if not district or any(_same(r.get(k), d) for k in ("admin2", "admin3", "name") for d in districts)]
+            # without a district to check, accept only a single match inside the state
+            pick = in_district[0] if in_district else (in_state[0] if not district and len(in_state) == 1 else None)
+            if pick:
+                where = ", ".join(str(pick.get(k)) for k in ("name", "admin2", "admin1") if pick.get(k))
+                return Place(float(pick["latitude"]), float(pick["longitude"]), f"{where} ({level})", level)
     return None
 
 

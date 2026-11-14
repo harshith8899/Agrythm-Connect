@@ -17,7 +17,7 @@ from datetime import date
 
 from ..contracts import WeatherReport
 from . import open_meteo as om
-from .open_meteo import Place, _same, default_opener
+from .open_meteo import Place, _same, default_opener, name_variants
 
 FORECAST_URL = "https://api.weatherapi.com/v1/forecast.json"
 SEARCH_URL = "https://api.weatherapi.com/v1/search.json"
@@ -48,13 +48,14 @@ def geocode(village: str, district: str, state: str, opener=default_opener) -> P
     for name, level in ((village, "village"), (district, "district")):
         if not name:
             continue
-        results = _get(SEARCH_URL, {"q": name}, opener) or []
-        in_india = [r for r in results if _same(r.get("country"), "india")]
-        in_state = [r for r in in_india if not state or _same(r.get("region"), state)]
-        pick = next((r for r in in_state if _same(r.get("name"), name)), None) or (in_state[0] if len(in_state) == 1 else None)
-        if pick:
-            where = ", ".join(str(pick.get(k)) for k in ("name", "region") if pick.get(k))
-            return Place(float(pick["lat"]), float(pick["lon"]), f"{where} ({level})", level)
+        for asked in name_variants(name):                  # as typed, then the name the service knows it by
+            results = _get(SEARCH_URL, {"q": asked}, opener) or []
+            in_india = [r for r in results if _same(r.get("country"), "india")]
+            in_state = [r for r in in_india if not state or _same(r.get("region"), state)]
+            pick = next((r for r in in_state if _same(r.get("name"), asked)), None) or (in_state[0] if len(in_state) == 1 else None)
+            if pick:
+                where = ", ".join(str(pick.get(k)) for k in ("name", "region") if pick.get(k))
+                return Place(float(pick["lat"]), float(pick["lon"]), f"{where} ({level})", level)
     return None
 
 
