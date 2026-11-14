@@ -1,0 +1,15 @@
+{
+  // The dashboard as a Cloudflare Worker with static assets (what Cloudflare's "Set up your application" screen creates).
+  "name": "agrythm-connect",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // BACKEND_URL and API_TOKEN are set in the dashboard as Secrets; a deploy must never remove them.
+  "keep_vars": true,
+  "observability": { "enabled": true }
+}

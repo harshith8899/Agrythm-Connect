@@ -45,7 +45,7 @@ export const TopFilterBar = ({
   availableDistricts = [],
   availableLanguages = [],
 }) => {
-  const isFiltered = searchQuery || dateFilter !== 'all' || customDate || districtFilter !== 'all' || languageFilter !== 'all' || statusFilter !== 'all';
+  const isFiltered = searchQuery || dateFilter !== 'today' || districtFilter !== 'all' || languageFilter !== 'all' || statusFilter !== 'all';
 
   const handleDatePresetClick = (presetId) => {
     if (presetId === 'today') {
@@ -88,23 +88,24 @@ export const TopFilterBar = ({
     { id: 'yesterday', label: 'Yesterday' },
   ];
 
-  const statuses = ['All Status', 'Completed', 'Callback Scheduled', 'Retrying', 'Not Confirmed', 'Declined', 'Unanswered', 'Failed', 'Skipped'];
+  const statuses = ['All Status', 'In Call', 'In Queue', 'Completed', 'Callback Scheduled', 'Callback Missed', 'Callback Done', 'Retrying', 'Not Confirmed', 'Declined', 'Unanswered', 'Failed', 'Skipped'];
 
-  const box = 'flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs';
-  const select = 'bg-transparent text-xs font-medium text-slate-700 focus:outline-hidden cursor-pointer';
+  const box = 'flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs min-w-0';
+  const select = 'bg-transparent text-xs font-medium text-slate-700 focus:outline-hidden cursor-pointer w-full min-w-0 sm:w-auto';
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 p-3 shadow-2xs">
-      {/* One row: date, quick dates, search, dropdowns, reset, count (wraps only on small screens) */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className={box}>
+      {/* Phones: a tidy two-column grid (date, quick dates, search full width; district and language side by side; status full
+          width; reset and count on the last line). From sm up: one wrapping row. */}
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <div className={`${box} col-span-2`}>
           <CalendarIcon className="w-3.5 h-3.5 text-trust-green" />
           <input
             type="date"
             value={customDate || ''}
             onChange={handleDateInputChange}
             aria-label="Filter by date"
-            className="bg-transparent border-none text-xs font-bold text-slate-900 focus:outline-hidden cursor-pointer"
+            className="bg-transparent border-none text-xs font-bold text-slate-900 focus:outline-hidden cursor-pointer flex-1 min-w-0"
           />
           {customDate && (
             <button type="button" onClick={clearDateInput} title="Reset date to all" className="text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer">
@@ -113,13 +114,13 @@ export const TopFilterBar = ({
           )}
         </div>
 
-        <div className="flex items-center gap-1 p-0.5 bg-slate-50 rounded-xl border border-slate-200/80">
+        <div className="col-span-2 grid grid-cols-3 gap-1 p-0.5 bg-slate-50 rounded-xl border border-slate-200/80 sm:flex sm:items-center">
           {datePresets.map((preset) => (
             <button
               key={preset.id}
               type="button"
               onClick={() => handleDatePresetClick(preset.id)}
-              className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              className={`px-2.5 py-1.5 sm:py-1 text-xs font-medium rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
                 dateFilter === preset.id
                   ? 'bg-trust-navy text-white shadow-2xs font-semibold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white'
@@ -130,7 +131,7 @@ export const TopFilterBar = ({
           ))}
         </div>
 
-        <div className="relative flex-1 min-w-[180px]">
+        <div className="relative col-span-2 sm:flex-1 sm:min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             type="text"
@@ -146,27 +147,27 @@ export const TopFilterBar = ({
           )}
         </div>
 
-        <div className={box}>
+        <div className={`${box} col-span-1`}>
           <MapPin className="w-3.5 h-3.5 text-slate-400" />
           <select value={districtFilter} onChange={(e) => setDistrictFilter(e.target.value)} className={select}>
-            <option value="all">All Districts ({availableDistricts.length})</option>
+            <option value="all">All districts</option>
             {availableDistricts.map((d) => (
               <option key={d} value={d}>{d}</option>
             ))}
           </select>
         </div>
 
-        <div className={box}>
+        <div className={`${box} col-span-1`}>
           <Languages className="w-3.5 h-3.5 text-slate-400" />
           <select value={languageFilter} onChange={(e) => setLanguageFilter(e.target.value)} className={select}>
-            <option value="all">All Languages ({availableLanguages.length})</option>
+            <option value="all">All languages</option>
             {availableLanguages.map((l) => (
               <option key={l} value={l}>{l}</option>
             ))}
           </select>
         </div>
 
-        <div className={box}>
+        <div className={`${box} col-span-2 sm:col-span-1`}>
           <Filter className="w-3.5 h-3.5 text-slate-400" />
           <select
             value={statusFilter === 'all' ? 'All Status' : statusFilter}
@@ -179,6 +180,7 @@ export const TopFilterBar = ({
           </select>
         </div>
 
+        <div className="col-span-2 flex items-center justify-between gap-2 sm:contents">
         {isFiltered && (
           <button
             onClick={resetFilters}
@@ -189,9 +191,10 @@ export const TopFilterBar = ({
           </button>
         )}
 
-        <span className="text-xs text-slate-500 whitespace-nowrap">
+        <span className="text-xs text-slate-500 whitespace-nowrap ml-auto sm:ml-0">
           <strong className="font-bold text-slate-900">{filteredCount}</strong> of {totalCount} calls
         </span>
+        </div>
       </div>
     </div>
   );

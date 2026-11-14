@@ -10,7 +10,7 @@ import pytest
 from weathercall.adapters.dialers import MockDialler
 from weathercall.server import make_handler
 from weathercall.service import DashboardService, IST
-from weathercall.system import SystemChecks, billed_minutes
+from weathercall.system import SystemChecks, billed_minutes, telephony_pulses
 
 UTC = timezone.utc
 NOW = datetime(2026, 11, 6, 12, 0, tzinfo=IST)          # 06:30 UTC
@@ -63,6 +63,12 @@ def test_a_call_is_billed_in_started_minutes(seconds, minutes):
 def test_calls_that_never_connected_cost_nothing():
     for status in ("no_answer", "busy", "failed"):
         assert billed_minutes(status, 30) == 0
+        assert telephony_pulses(status, 30) == 0
+
+
+@pytest.mark.parametrize("seconds, pulses", [(0, 0), (1, 1), (30, 1), (31, 2), (45, 2), (60, 2), (61, 3), (125, 5)])
+def test_telephony_is_counted_in_started_30_second_pulses(seconds, pulses):
+    assert telephony_pulses("connected", seconds) == pulses
 
 
 # ---- usage (real call records only; the balance itself is only on Sarvam's Billing page) ------------------------------
@@ -76,11 +82,16 @@ def test_usage_counts_calls_and_billed_minutes_from_sarvams_records(tmp_path):
                 attempt(60 * 24 * 3, seconds=125),                  # three days ago: in the week, not today
                 attempt(60 * 24 * 20, seconds=30)]                  # twenty days ago: in the window only
     u = system(tmp_path, FakeUsage(attempts)).usage()
-    assert u["today"] == {"calls": 4, "connected": 2, "billed_minutes": 3, "amount": 10.5}      # 45 s -> 1, 61 s -> 2
-    assert u["week"] == {"calls": 5, "connected": 3, "billed_minutes": 6, "amount": 21.0}       # + 125 s -> 3
-    assert u["window"] == {"calls": 6, "connected": 4, "billed_minutes": 7, "amount": 24.5}
+    # agent minutes are started 60-second minutes (45 s -> 1, 61 s -> 2); telephony pulses are started 30-second pulses
+    # at Rs 0.20 (45 s -> 2, 61 s -> 3, 125 s -> 5, 30 s -> 1)
+    assert u["today"] == {"calls": 4, "connected": 2, "billed_minutes": 3, "amount": 10.5,
+                          "telephony_pulses": 5, "telephony_amount": 1.0}
+    assert u["week"] == {"calls": 5, "connected": 3, "billed_minutes": 6, "amount": 21.0,
+                         "telephony_pulses": 10, "telephony_amount": 2.0}
+    assert u["window"] == {"calls": 6, "connected": 4, "billed_minutes": 7, "amount": 24.5,
+                           "telephony_pulses": 11, "telephony_amount": 2.2}
     assert u["rate"] == 3.5 and u["currency"] == "INR"                                          # Sarvam pay-as-you-go
-    assert set(u["today"]) == {"calls", "connected", "billed_minutes", "amount"}     # an estimate; there is still no balance
+    assert set(u["today"]) == {"calls", "connected", "billed_minutes", "amount", "telephony_pulses", "telephony_amount"}  # an estimate; there is still no balance
 
 
 def test_daily_breakdown_is_by_india_date(tmp_path):
@@ -128,20 +139,36 @@ def test_everything_ok(tmp_path):
     r = s.checks()
     c = by_id(r)
     assert r["overall"] == "ok" and [x["id"] for x in r["checks"]] == ["backend", "database", "weather", "sarvam", "phone"]
-    assert all(x["status"] == "ok" for x in r["checks"])
+    assert all(x["status"] == "ok" for x in r["checks"] if x["id"] != "weather") and c["weather"]["status"] == "off"
     assert "1 farmers" in c["database"]["detail"] and "version 9" in c["sarvam"]["detail"]
     assert "connected" in c["phone"]["detail"].lower()
 
 
-def test_weather_api_down_is_reported_without_stopping_the_other_checks(tmp_path):
-    r = system(tmp_path, FakeUsage([attempt(5)]), FakeWeather(error=TimeoutError("slow"))).checks()
-    c = by_id(r)
-    assert r["overall"] == "fail" and c["weather"]["status"] == "fail" and "TimeoutError" in c["weather"]["detail"]
-    assert c["backend"]["status"] == "ok" and c["database"]["status"] == "ok" and c["sarvam"]["status"] == "ok"
+def test_the_weather_check_never_asks_the_weather_service(tmp_path):
+    """Weather is fetched only when a call is made: opening or polling System Status costs no weather request."""
+    w = FakeWeather()
+    s = system(tmp_path, FakeUsage([attempt(5)]), w)
+    for _ in range(3):
+        s.checks(refresh=True)
+    assert w.calls == 0
 
 
-def test_weather_that_answers_without_today_is_a_failure(tmp_path):
-    assert by_id(system(tmp_path, FakeUsage(), FakeWeather(empty=True)).checks())["weather"]["status"] == "fail"
+def test_the_weather_check_reports_the_last_saved_fetch(tmp_path):
+    s = system(tmp_path, FakeUsage([attempt(5)]))
+    assert by_id(s.checks())["weather"]["status"] == "off"
+    with s.service.lock:
+        s.service.db.execute("CREATE TABLE IF NOT EXISTS weather(place_key TEXT, fetched_at TEXT)")
+        s.service.db.execute("INSERT INTO weather VALUES('mandya','2026-11-10T09:00:03')")
+        s.service.db.execute("INSERT INTO weather VALUES('mandya','2026-11-10T09:00:03')")
+        s.service.db.commit()
+    c = by_id(s.checks(refresh=True))["weather"]
+    assert c["status"] == "ok" and "10 Nov 09:00" in c["detail"] and "2 forecast days" in c["detail"]
+
+
+def test_weatherapi_without_a_key_is_a_failure_that_names_the_setting(tmp_path):
+    from weathercall.adapters.weatherapi import WeatherApiWeather
+    c = by_id(system(tmp_path, FakeUsage(), WeatherApiWeather(), name="nokey.db").checks())["weather"]
+    assert c["status"] == "fail" and "WEATHERAPI_KEY" in c["detail"] and "WeatherAPI.com" in c["name"]
 
 
 def test_sarvam_key_rejected_is_a_failure_with_the_reason(tmp_path):
@@ -164,13 +191,11 @@ def test_not_configured_is_off_not_failed(tmp_path):
 
 
 def test_checks_are_cached_briefly_and_refresh_forces_a_new_run(tmp_path):
-    w = FakeWeather()
-    s = system(tmp_path, FakeUsage(), w)
-    s.checks()
-    s.checks()
-    assert w.calls == 1
-    s.checks(refresh=True)
-    assert w.calls == 2
+    usage = FakeUsage([attempt(5)])
+    s = system(tmp_path, usage)
+    first = s.checks()
+    assert s.checks() is first                      # cached
+    assert s.checks(refresh=True) is not first      # a new run
 
 
 # ---- API -------------------------------------------------------------------------------------------------------------
@@ -203,3 +228,18 @@ def test_api_checks_and_usage(api):
     assert api("/api/usage", json.dumps({"sarvam_rate": -2}).encode())[0] == 400
     assert api("/api/usage", b"nope")[0] == 400
     assert api("/api/credits")[0] == 404                       # there is no balance to read or set
+
+
+# ---- where the backend runs ---------------------------------------------------------------------------------------------------
+def test_the_backend_check_says_it_is_hosted_on_render(tmp_path):
+    svc = DashboardService(str(tmp_path / "r.db"), dialler=MockDialler(), env={"GATE0_WEATHER": "mock"}, now=lambda: NOW)
+    hosted = {"RENDER": "true", "RENDER_SERVICE_NAME": "agrythm-connect", "RENDER_GIT_COMMIT": "abcdef1234567"}
+    c = by_id(SystemChecks(svc, usage=None, weather=FakeWeather(), now=lambda: NOW, env=hosted).checks())["backend"]
+    assert "Hosted on Render (agrythm-connect, version abcdef1)" in c["detail"] and "computer" not in c["detail"]
+
+
+def test_the_backend_check_says_when_it_is_not_on_render(tmp_path):
+    c = by_id(system(tmp_path, FakeUsage([attempt(5)])).checks())["backend"]
+    assert "Running on a computer, not on Render" in c["detail"]
+
+

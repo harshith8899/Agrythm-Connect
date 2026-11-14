@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pilot-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: Pilot/requirements.txt
+      - run: pip install -r Pilot/requirements.txt
+      - run: python -m pytest -q
+        working-directory: Pilot
+
+  gate0-backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: gate0/backend/requirements.txt
+      - run: pip install -r gate0/backend/requirements.txt
+      - run: python -m pytest -q
+        working-directory: gate0/backend
+
+  gate0-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gate0/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: gate0/frontend/package-lock.json
+      - run: npm ci
+      - run: npx oxlint src
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: gate0/frontend/dist
+          retention-days: 3
+
+  # Frontend goes to Cloudflare Pages when the tests pass on main. The backend deploys itself on Render
+  # (autoDeployTrigger: checksPass in render.yaml), so it waits for the same checks.
+  deploy-frontend:
+    # Runs only once the Cloudflare secrets are in and the repository variable DEPLOY_FRONTEND is set to true (docs/DEPLOY.md)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_FRONTEND == 'true'
+    needs: [pilot-tests, gate0-backend-tests, gate0-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: gate0/frontend/dist
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: gate0/frontend
+          command: pages deploy dist --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || 'agrythm-connect' }} --branch=main

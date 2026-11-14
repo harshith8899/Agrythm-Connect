@@ -1,26 +1,26 @@
 import React from 'react';
-import { Menu, RefreshCw, Play, Clock } from 'lucide-react';
+import { RefreshCw, Play, Clock, LogOut } from 'lucide-react';
 
 export const Header = ({ 
-  onToggleSidebar, 
   onRefresh, 
   refreshing, 
-  syncStatus, 
+  syncStatus: _syncStatus, 
   isBackendOnline = true,
   activeTab,
   onTriggerDemo,
   triggeringDemo,
   autoDispatcher,
-  onToggleAutoDispatcher
+  onToggleAutoDispatcher,
+  onLogout
 }) => {
   const getTabTitle = () => {
     switch (activeTab) {
       case 'farmers':
         return 'Farmer Profiles Directory';
-      case 'weather':
-        return 'District Weather Advisories & Alerts';
+      case 'cost':
+        return 'Cost Analytics';
       case 'system':
-        return 'System Status & Sarvam Usage';
+        return 'System Status';
       case 'overview':
       default:
         return 'Call Overview';
@@ -31,17 +31,10 @@ export const Header = ({
   const isLive = Boolean(autoDispatcher?.live);
 
   return (
-    <header className="w-full bg-white border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 py-3 sticky top-0 z-30 shadow-2xs">
+    <header className="w-full bg-white border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 py-3 sm:sticky sm:top-0 z-30 shadow-2xs">
       <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Left: Mobile Toggle & Active Title */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={onToggleSidebar}
-            className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-            aria-label="Toggle Navigation Menu"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
 
           <img
             src="/agrythm-logo.png"
@@ -60,9 +53,9 @@ export const Header = ({
                   Live Sync
                 </span>
               ) : (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-200 shadow-2xs">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping" />
-                  Backend Offline
+                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full border border-amber-200 shadow-2xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Waking up…
                 </span>
               )}
             </div>
@@ -115,7 +108,7 @@ export const Header = ({
             ) : (
               <>
                 <Play className={`w-3.5 h-3.5 fill-current ${isBackendOnline ? 'text-emerald-400' : 'text-slate-400'}`} />
-                <span>Send now{isLive ? '' : ' (simulated)'}</span>
+                <span>Send now<span className="hidden sm:inline">{isLive ? '' : ' (simulated)'}</span></span>
               </>
             )}
           </button>
@@ -130,6 +123,18 @@ export const Header = ({
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-trust-navy' : ''}`} />
             <span className="hidden xl:inline">{refreshing ? 'Syncing...' : 'Refresh'}</span>
           </button>
+
+          {/* Logout Button */}
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+              title="Sign out of admin session"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

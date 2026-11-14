@@ -53,6 +53,7 @@ GATE0_CORS_ORIGINS=https://your-dashboard.example.com python -m weathercall.serv
 | `GET /api/orchestrator/status`, `POST /api/orchestrator/auto-dispatch` | Mode (real or simulated), last send, daily auto-send switch |
 | `GET /api/weather?lat=&lon=` | Today's weather for a place |
 | `GET /api/system/checks` | Backend, database, weather API, Sarvam and phone line: ok, fail or not set up |
+| `POST /api/farmers/<id>/call` | Place a call now for one farmer: the day's first call, or the next retry |
 | `POST /api/farmers`, `PUT /api/farmers/<id>` | Add one farmer by hand; edit a farmer (name, phone, language, place, consent, active) |
 | `GET /api/alerts` | Things the team must act on (stop requests, failed calls, skipped runs); shown on System Status |
 | `GET /api/usage`, `POST /api/usage` | Calls, billed minutes and the estimated amount from Sarvam's call records; POST saves the per-minute rate |
@@ -73,3 +74,16 @@ gate0/
 
 `gate0/backend/index.js`, `routes/`, `services/` and `database/` are the earlier Node simulation. They are not used by the
 dashboard any more (`npm run backend:node-legacy` still starts them) and can be removed once the team agrees.
+
+## Running the dashboard against the hosted backend (Render)
+By default `npm run frontend` forwards `/api` to the backend on this computer (`http://localhost:8000`). To use the hosted
+backend instead, create `gate0/frontend/.env.local` (it is not committed; `.env.example` shows the shape):
+
+```
+GATE0_PROXY_TARGET=https://your-service.onrender.com
+GATE0_API_TOKEN=the-same-token-the-backend-uses
+```
+
+Then restart `npm run frontend`. The dev server adds the token to every call, so the browser never holds it. On the free Render
+plan the first call after a quiet period can take up to a minute while the service wakes; the page may show "Backend API
+Disconnected" until then, so press Retry.

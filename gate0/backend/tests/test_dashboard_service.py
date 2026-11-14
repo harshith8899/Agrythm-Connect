@@ -128,7 +128,7 @@ def test_failure_notes_never_hold_phone_numbers(tmp_path):
     class Boom(Scripted):
         def place(self, *a):
             raise ConnectionError("down")
-    s = make(tmp_path, Boom())
+    s = make(tmp_path, Boom(), now=lambda: T0)     # fixed clock: a real one after 21:30 puts the retry past 22:00
     s.import_csv(ONE)
     s.fire(D)
     c = s.calls()[0]
@@ -640,3 +640,286 @@ def test_api_add_and_edit_a_farmer(api):
     assert call("/api/farmers", json.dumps({**NEW, "phone_number": "1"}).encode())[0] == 400
     assert call("/api/farmers", b"nope")[0] == 400
     assert "9876543299" not in json.dumps(call("/api/farmers")[1])
+
+
+# ---- the Call button on a farmer card --------------------------------------------------------------------------------------
+def wait_idle(s, seconds=5):
+    deadline = time.time() + seconds
+    while time.time() < deadline and (s._manual or s.running):
+        time.sleep(0.02)
+    time.sleep(0.05)
+
+
+def test_call_button_places_the_days_first_call(tmp_path):
+    d = Scripted((A.ANSWERED,))
+    s, _ = timed(tmp_path, d)
+    s.import_csv(ONE)
+    assert s.manual_call("F1") == {"started": True, "kind": "first", "attempt": 1, "max_attempts": 3}
+    wait_idle(s)
+    assert len(d.calls) == 1 and s.calls()[0]["status"] == "Completed" and s.calls()[0]["attempts_used"] == 1
+
+
+def test_call_button_on_a_retryable_result_is_the_next_attempt_and_replaces_the_waiting_retry(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.NO_ANSWER, A.ANSWERED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    assert s.calls()[0]["attempts_used"] == 1 and s.calls()[0]["next_attempt_at"] == "05 Nov, 09:30 AM"
+    clock["now"] = T0 + timedelta(minutes=5)
+    assert s.manual_call("F1")["attempt"] == 2
+    wait_idle(s)
+    c = s.calls()[0]
+    assert len(d.calls) == 2 and c["attempts_used"] == 2
+    assert c["next_attempt_at"] == "05 Nov, 10:05 AM"                  # the 30-min retry was replaced; next gap is 1 hour
+    assert s.manual_call("F1")["attempt"] == 3                         # the last one
+    wait_idle(s)
+    assert s.calls()[0]["attempts_used"] == 3 and s.calls()[0]["status"] == "Completed"
+
+
+@pytest.mark.parametrize("setup, message", [
+    ("done", "already completed"), ("declined", "do not need"), ("exhausted", "attempts are used"),
+    ("callback", "callback"), ("inactive", "inactive"), ("noconsent", "consent"), ("paused", "stopped"),
+    ("night", "between 05:00 and 22:00")])
+def test_call_button_is_refused_with_a_reason(tmp_path, setup, message):
+    start = datetime(2026, 11, 5, 23, 0, tzinfo=IST) if setup == "night" else T0
+    d = Scripted((A.ANSWERED, A.NO_ANSWER, A.NO_ANSWER, A.NO_ANSWER), understood="declined" if setup == "declined" else "yes")
+    s, clock = timed(tmp_path, d, start=start)
+    s.import_csv(ONE)
+    if setup in ("done", "declined"):
+        s.fire(D)
+    elif setup == "exhausted":
+        d.statuses = [A.NO_ANSWER] * 3
+        s.fire(D)
+        for minutes in (30, 90):
+            clock["now"] = T0 + timedelta(minutes=minutes)
+            s.run_due_retries()
+    elif setup == "callback":
+        d.cb, d.statuses = "17:30", [A.ANSWERED]
+        s.fire(D)
+    elif setup == "inactive":
+        s.update_farmer("F1", {"active": False})
+    elif setup == "noconsent":
+        s.update_farmer("F1", {"call_consent": False})
+    elif setup == "paused":
+        s._note_stop("F1", D - timedelta(days=1))
+        s._note_stop("F1", D)
+    placed = len(d.calls)
+    with pytest.raises(ValueError, match=message):
+        s.manual_call("F1")
+    wait_idle(s)
+    assert len(d.calls) == placed                                       # nothing was dialled
+
+
+def test_call_button_refuses_a_second_press_while_a_call_is_in_progress(tmp_path):
+    s, _ = timed(tmp_path, Scripted((A.ANSWERED,)))
+    s.import_csv(ONE)
+    s._manual.add("F1")
+    with pytest.raises(ValueError, match="in progress"):
+        s.manual_call("F1")
+    s._manual.clear()
+    with pytest.raises(KeyError):
+        s.manual_call("nope")
+
+
+def test_api_call_button(api):
+    call, s = api
+    s._now = lambda: T0                                                 # fixed clock: a real one after 22:00 is out of hours
+    s.import_csv(ONE)
+    code, body, _ = call("/api/farmers/F1/call", b"{}")
+    assert code == 202 and body["kind"] == "first"
+    wait_idle(s)
+    assert call("/api/farmers/F1/call", b"{}")[0] == 400               # already completed today (simulated call understood)
+    assert call("/api/farmers/zzz/call", b"{}")[0] == 404
+
+
+# ---- test calls: the Call button with "ignore the retry rules" ------------------------------------------------------------
+def test_a_test_call_is_its_own_row_and_never_touches_the_real_day(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED, A.ANSWERED), understood="yes")
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)                                                          # a real first call: not picked up, retry waiting
+    real = s.calls()[0]
+    assert real["status"] == "Retrying" and real["attempts_used"] == 1 and real["next_attempt_at"] == "05 Nov, 09:30 AM"
+    assert s.manual_call("F1", "test")["kind"] == "test"
+    wait_idle(s)
+    rows = s.calls()
+    test = next(c for c in rows if c.get("is_test"))
+    assert test["status"] == "Completed" and test["disposition"].startswith("Test call") and test["farmer_name"] == "Ramesh"
+    assert test["call_id"].startswith("TEST") and test["attempts_used"] == 0 and test["next_attempt_at"] is None
+    day = next(c for c in rows if not c.get("is_test"))
+    assert (day["status"], day["attempts_used"], day["next_attempt_at"]) == ("Retrying", 1, "05 Nov, 09:30 AM")   # untouched
+    assert s.call(test["call_id"])["is_test"] is True
+    assert s.alerts() == [] and s.callbacks() == []
+
+
+def test_a_test_call_can_be_repeated_even_when_the_day_is_complete_or_attempts_are_used(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED, A.ANSWERED), understood="yes")
+    s, _ = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)                                                          # completed today: "retry" mode is refused
+    with pytest.raises(ValueError, match="already completed"):
+        s.manual_call("F1")
+    for _ in range(2):
+        s.manual_call("F1", "test")
+        wait_idle(s)
+    assert len(d.calls) == 3 and sum(1 for c in s.calls() if c.get("is_test")) == 2
+    assert next(c for c in s.calls() if not c.get("is_test"))["attempts_used"] == 1
+
+
+def test_a_test_call_records_no_stop_decline_or_callback(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED), callback_text="17:30", stop="yes")
+    s, _ = timed(tmp_path, d)
+    s.import_csv(ONE)
+    for _ in range(2):
+        s.manual_call("F1", "test")
+        wait_idle(s)
+    assert s.callbacks() == [] and not s._is_paused("F1") and s.alerts() == []
+
+
+@pytest.mark.parametrize("setup, message", [("inactive", "inactive"), ("noconsent", "consent"), ("paused", "stopped"),
+                                            ("night", "between 05:00 and 22:00")])
+def test_a_test_call_keeps_the_safety_checks(tmp_path, setup, message):
+    d = Scripted((A.ANSWERED,))
+    s, _ = timed(tmp_path, d, start=datetime(2026, 11, 5, 23, 0, tzinfo=IST) if setup == "night" else T0)
+    s.import_csv(ONE)
+    if setup == "inactive":
+        s.update_farmer("F1", {"active": False})
+    elif setup == "noconsent":
+        s.update_farmer("F1", {"call_consent": False})
+    elif setup == "paused":
+        s._note_stop("F1", D - timedelta(days=1))
+        s._note_stop("F1", D)
+    with pytest.raises(ValueError, match=message):
+        s.manual_call("F1", "test")
+    assert d.calls == []
+
+
+def test_api_call_button_modes(api):
+    call, s = api
+    s._now = lambda: T0
+    s.import_csv(ONE)
+    assert call("/api/farmers/F1/call", json.dumps({"mode": "nonsense"}).encode())[0] == 400
+    code, body, _ = call("/api/farmers/F1/call", json.dumps({"mode": "test"}).encode())
+    assert code == 202 and body["kind"] == "test"
+    wait_idle(s)
+    assert any(c.get("is_test") for c in s.calls())
+
+
+def test_a_second_send_keeps_the_real_failure_reason(tmp_path):
+    d = Scripted((A.FAILED,))
+    s, _ = timed(tmp_path, d, start=datetime(2026, 11, 5, 21, 45, tzinfo=IST))      # no retry fits before 22:00
+    s.import_csv(ONE)
+    s.fire(D)
+    first = s.calls()[0]
+    s.fire(D)
+    again = s.calls()[0]
+    assert again["status"] == "Failed" and again["note"] == first["note"] and "already called" not in again["note"]
+    assert again["disposition"] == first["disposition"]
+
+# ---- a hosted API needs its token -------------------------------------------------------------------------------------
+@pytest.fixture
+def locked_api(tmp_path):
+    s = make(tmp_path, MockDialler())
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(s, {"*"}, token="s3cret-token"))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def call(path, token=None, data=None):
+        req = urllib.request.Request(base + path, data=data, method="POST" if data is not None else "GET")
+        if token is not None:
+            req.add_header("X-API-Token", token)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+    yield call
+    srv.shutdown()
+
+
+def test_the_api_refuses_calls_without_the_token_but_health_stays_open(locked_api):
+    assert locked_api("/api/health") == 200                      # for the host's health check
+    for path in ("/api/farmers", "/api/calls", "/api/usage", "/api/alerts"):
+        assert locked_api(path) == 401 and locked_api(path, "wrong") == 401
+        assert locked_api(path, "s3cret-token") == 200
+    assert locked_api("/api/calls/send-now", data=b"{}") == 401  # no calls placed without the token
+    assert locked_api("/api/farmers", data=json.dumps(NEW).encode()) == 401
+
+
+def test_run_refuses_a_public_address_without_a_token(tmp_path, monkeypatch):
+    from weathercall import server
+    monkeypatch.setenv("GATE0_API_HOST", "0.0.0.0")
+    monkeypatch.delenv("GATE0_API_TOKEN", raising=False)
+    monkeypatch.setenv("GATE0_DB", str(tmp_path / "x.db"))
+    monkeypatch.setattr(server, "load_env_file", lambda p: None)
+    with pytest.raises(SystemExit, match="GATE0_API_TOKEN"):
+        server.run(port=0)
+
+
+# ---- the wake-up call from an outside timer: runs what is due, never twice ----------------------------------------------------
+def test_tick_runs_what_is_due_and_only_one_pass_at_a_time(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)                                                               # not picked up: a retry is waiting for 09:30
+    clock["now"] = T0 + timedelta(minutes=31)
+    assert s._tick_lock.acquire(blocking=False)                             # a pass is already running...
+    assert s.tick() is False and s.start_tick() is False                    # ...so a second one does nothing
+    assert len(d.calls) == 1
+    s._tick_lock.release()
+    assert s.tick() is True                                                 # the retry is due now and is placed
+    assert len(d.calls) == 2 and s.calls()[0]["status"] == "Completed"
+    assert s.tick() is True and len(d.calls) == 2                           # nothing left to do: no second call
+
+
+def test_tick_before_the_due_time_places_nothing(tmp_path):
+    d = Scripted((A.NO_ANSWER, A.ANSWERED))
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    clock["now"] = T0 + timedelta(minutes=27)                               # a wake-up 3 minutes early: still nothing due
+    s.tick()
+    assert len(d.calls) == 1 and s.calls()[0]["next_attempt_at"] == "05 Nov, 09:30 AM"
+
+
+def test_tick_starts_the_daily_send_once(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED))
+    s, clock = timed(tmp_path, d, start=datetime(2026, 11, 5, 9, 2, tzinfo=IST))
+    s.import_csv(ONE)
+    s.set_auto_dispatch(True)
+    assert s.tick() is True
+    wait_idle(s)
+    assert len(d.calls) == 1
+    s.tick()
+    wait_idle(s)
+    assert len(d.calls) == 1                                                # a second wake-up the same day calls nobody again
+
+
+def test_api_tick(api):
+    call, s = api
+    s._now = lambda: T0
+    code, body, _ = call("/api/tick", b"{}")
+    assert code == 202 and body["started"] in (True, False) and body["at"].startswith("2026-11-05T09:00")
+
+
+def test_a_callback_the_system_could_not_place_in_time_shows_as_missed_not_scheduled(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED), callback_text="09:35")
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    assert s.calls()[0]["status"] == "Callback Scheduled"
+    clock["now"] = T0 + timedelta(minutes=70)                                  # the backend only comes back an hour later
+    s.run_due_callbacks()
+    c = s.calls()[0]
+    assert (c["status"], c["disposition"]) == ("Callback Missed", "Callback not placed in time")
+    assert c["scheduled_callback_time"] == "05 Nov, 09:35 AM" and len(d.calls) == 1
+
+
+def test_a_callback_that_was_placed_shows_as_done(tmp_path):
+    d = Scripted((A.ANSWERED, A.ANSWERED), callback_text="09:35")
+    s, clock = timed(tmp_path, d)
+    s.import_csv(ONE)
+    s.fire(D)
+    clock["now"] = T0 + timedelta(minutes=36)
+    s.run_due_callbacks()
+    assert s.calls()[0]["status"] == "Callback Done" and len(d.calls) == 2

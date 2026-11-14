@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
+from ..db import connect
 from ..contracts import (
     CallAttempt, CallStatusView, FarmerContext, FarmerDayResult, FinalResult, Language, SkipReason,
 )
@@ -48,7 +49,7 @@ CREATE TABLE IF NOT EXISTS day_results(
 
 class SQLiteLedger:
     def __init__(self, path: str = ":memory:"):
-        self.db = sqlite3.connect(path)
+        self.db = connect(path)
         self.db.executescript(_SCHEMA)
 
     def record_attempt(self, a: CallAttempt) -> None:

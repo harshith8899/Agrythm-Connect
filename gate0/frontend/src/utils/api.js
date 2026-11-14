@@ -1,21 +1,119 @@
 import { API_BASE, API_CONFIG } from './constants';
 
-const getJson = async (url) => {
-  const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
+const AUTH_TOKEN_KEY = 'gate0_session_token';
+const AUTH_USER_KEY = 'gate0_admin_user';
+
+export const getSessionToken = () => {
+  try {
+    return sessionStorage.getItem(AUTH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
 };
 
-const postJson = async (path, options = {}) => {
-  const response = await fetch(`${API_BASE}${path}`, { method: 'POST', ...options });
+export const getAdminUser = () => {
+  try {
+    return sessionStorage.getItem(AUTH_USER_KEY) || 'Admin';
+  } catch {
+    return 'Admin';
+  }
+};
+
+export const setSessionAuth = (token, username) => {
+  try {
+    if (token) sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+    if (username) sessionStorage.setItem(AUTH_USER_KEY, username);
+    window.dispatchEvent(new Event('gate0-auth-change'));
+  } catch {
+    // Storage unavailable
+  }
+};
+
+export const clearSessionAuth = () => {
+  try {
+    sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    sessionStorage.removeItem(AUTH_USER_KEY);
+    window.dispatchEvent(new Event('gate0-auth-change'));
+    window.dispatchEvent(new Event('gate0-unauthorized'));
+  } catch {
+    // Storage unavailable
+  }
+};
+
+const authHeaders = (customHeaders = {}) => {
+  const headers = new Headers(customHeaders);
+  const token = getSessionToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  return headers;
+};
+
+const checkAuthResponse = (response) => {
+  if (response.status === 401) {
+    clearSessionAuth();
+    throw new Error('Unauthorized');
+  }
+};
+
+/**
+ * Asks the server whether it is awake (/api/health needs no sign-in). On the free hosting plan a sleeping server answers the first
+ * request only after up to a minute, so this is also how the sign-in page wakes it early. Never throws: { ok, status, message }.
+ */
+export const pingServer = async (timeoutMs = 100000) => {
+  // A sleeping free-plan server answers its first request after 20 to 60 seconds, so a request is never cut short before that.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${API_BASE}/api/health`, { cache: 'no-store', signal: controller.signal });
+    let message = '';
+    if (!response.ok) {
+      try {
+        message = String((await response.json()).error || '');
+      } catch {
+        message = '';
+      }
+    }
+    return { ok: response.ok, status: response.status, message };
+  } catch {
+    return { ok: false, status: 0, message: '' };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/** An error that means "the server is not ready yet", not "wrong password": the caller may simply try again. */
+const notReady = () => Object.assign(new Error('The server is still waking up. Trying again...'), { transient: true });
+
+export const loginAdmin = async (username, password) => {
+  let response;
+  try {
+    response = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+  } catch {
+    throw notReady();                                    // no answer at all: asleep or restarting
+  }
   let body = null;
   try {
     body = await response.json();
   } catch {
     body = null;
   }
-  if (!response.ok) throw new Error((body && body.error) || `HTTP ${response.status}`);
+  if (response.status >= 500 || response.status === 429) throw notReady();    // the host's "starting up" and proxy errors
+  if (!response.ok) {
+    throw new Error((body && body.error) || 'Invalid username or password');
+  }
+  if (body && body.token) {
+    setSessionAuth(body.token, body.username || username);
+  }
   return body;
+};
+
+export const logoutAdmin = () => {
+  clearSessionAuth();
 };
 
 /** Farmers saved in the backend database (phone numbers arrive already masked). */
@@ -56,10 +154,43 @@ export const updateDispatcherStatus = (enabled) =>
     body: JSON.stringify({ enabled }),
   });
 
-const sendJson = async (method, path, payload) => {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+const getJson = async (url) => {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: authHeaders({ Accept: 'application/json' }),
+    cache: 'no-store',
   });
+  checkAuthResponse(response);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+};
+
+const postJson = async (path, options = {}) => {
+  const headers = authHeaders(options.headers || {});
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    ...options,
+    headers,
+  });
+  checkAuthResponse(response);
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  if (!response.ok) throw new Error((body && body.error) || `HTTP ${response.status}`);
+  return body;
+};
+
+const sendJson = async (method, path, payload) => {
+  const headers = authHeaders({ 'Content-Type': 'application/json' });
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers,
+    body: JSON.stringify(payload),
+  });
+  checkAuthResponse(response);
   let body = null;
   try {
     body = await response.json();
@@ -75,6 +206,10 @@ export const addFarmer = (fields) => sendJson('POST', '/api/farmers', fields);
 
 /** Changes the fields sent for one farmer (name, phone, language, place, call_consent, active). */
 export const updateFarmer = (farmerId, fields) => sendJson('PUT', `/api/farmers/${encodeURIComponent(farmerId)}`, fields);
+
+/** Places a call now for one farmer. mode 'retry' follows the retry rules (first call or next attempt); 'test' is a one-off test row outside them. Returns at once. */
+export const callFarmer = (farmerId, mode = 'retry') =>
+  postJson(`/api/farmers/${encodeURIComponent(farmerId)}/call`, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
 
 /** Uploads a farmers CSV (Farmer ID, Farmer Name, Mobile Number, Village, District, State, Language, Consent). */
 export const importFarmersCsv = async (file) =>

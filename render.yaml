@@ -1,0 +1,52 @@
+# Render blueprint for the Gate Zero API. See gate0/docs/DEPLOY.md.
+# One instance only: the daily scheduler (daily send, retries, callbacks) runs inside the process. Data lives in Supabase.
+# Free plan: the service sleeps after about 15 minutes without a visit. A timer in Supabase (gate0/supabase, docs/TRIGGER.md)
+# wakes it about 3 minutes before anything is due. For many farmers or a stricter promise, change plan to starter (always on).
+services:
+  - type: web
+    name: agrythm-gate0-api
+    runtime: python
+    region: singapore            # closest to India
+    plan: free
+    rootDir: gate0/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m weathercall.server
+    healthCheckPath: /api/health
+    maxShutdownDelaySeconds: 300   # a deploy waits (up to 5 minutes) for a call that is on the phone to finish and be saved
+    autoDeployTrigger: checksPass   # deploys a commit only after its GitHub checks (CI) pass
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: GATE0_API_HOST
+        value: 0.0.0.0
+      - key: GATE0_WEATHER
+        value: open_meteo
+      - key: GATE0_TELEPHONY
+        value: sarvam_agent
+      - key: SARVAM_APP_VERSION
+        value: "10"
+      # Secrets and ids: filled in the Render dashboard, never committed.
+      - key: GATE0_DATABASE_URL        # the Supabase Session pooler address, with the password in it
+        sync: false
+      - key: WEATHERAPI_KEY            # the free WeatherAPI.com key: when set, it is the weather source
+        sync: false
+      - key: OPEN_METEO_API_KEY        # optional: the paid Open-Meteo key (leave empty to use the free service)
+        sync: false
+      - key: GATE0_API_TOKEN
+        sync: false
+      - key: GATE0_ADMIN_USER
+        sync: false
+      - key: GATE0_ADMIN_PASSWORD
+        sync: false
+      - key: SARVAM_AGENT_API_KEY
+        sync: false
+      - key: SARVAM_ORG_ID
+        sync: false
+      - key: SARVAM_WORKSPACE_ID
+        sync: false
+      - key: SARVAM_APP_ID
+        sync: false
+      - key: SARVAM_CONNECTION_ID
+        sync: false
+      - key: SARVAM_AGENT_PHONE
+        sync: false

@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   loadFarmersData, 
   loadCallLogsData, 
   sendCallsNow,
   getDispatcherStatus,
   updateDispatcherStatus,
-  getFarmersReachedMetrics,
+  confirmDialog,
   isCallOnDate,
   getCallDate,
   getCallTime,
@@ -13,6 +13,12 @@ import {
   extractWeatherFromMessage,
   maskPhoneNumber
 } from '../utils';
+
+// Today's date in the browser's own calendar (YYYY-MM-DD), the default view of the overview
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 export const useVoiceAgentData = () => {
   const [farmers, setFarmers] = useState([]);
@@ -23,6 +29,10 @@ export const useVoiceAgentData = () => {
   const [lastSynced, setLastSynced] = useState(null);
   const [syncStatus, setSyncStatus] = useState('syncing');
   const [isBackendOnline, setIsBackendOnline] = useState(true);
+  const [hasConnected, setHasConnected] = useState(false);   // the backend has answered at least once
+  const [offlineSince, setOfflineSince] = useState(null);     // when it stopped answering (ms)
+  const [mountedAt] = useState(() => Date.now());          // when the page started waiting
+  const inFlight = useRef(false);
   const [sarvamLive, setSarvamLive] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
@@ -41,8 +51,8 @@ export const useVoiceAgentData = () => {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [dateFilter, setDateFilter] = useState('all');
-  const [customDate, setCustomDate] = useState('');
+  const [dateFilter, setDateFilter] = useState('today');   // a fresh day starts with an empty overview
+  const [customDate, setCustomDate] = useState(localToday);
   const [districtFilter, setDistrictFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -51,6 +61,8 @@ export const useVoiceAgentData = () => {
 
   // Primary Fetch Function
   const fetchAllData = useCallback(async (isSilent = false) => {
+    if (inFlight.current) return;      // a slow first answer (the server waking up) must not pile up more requests
+    inFlight.current = true;
     if (!isSilent) {
       setRefreshing(true);
     }
@@ -71,6 +83,12 @@ export const useVoiceAgentData = () => {
       const isOnline = callLogsRes.source === 'sqlite_live' || farmersRes.source === 'sqlite_live';
       setIsBackendOnline(isOnline);
       setSyncStatus(isOnline ? 'connected' : 'disconnected');
+      if (isOnline) {
+        setHasConnected(true);
+        setOfflineSince(null);
+      } else {
+        setOfflineSince((prev) => prev ?? mountedAt);
+      }
 
       if (dispRes) {
         setAutoDispatcher(dispRes);
@@ -88,14 +106,16 @@ export const useVoiceAgentData = () => {
     } catch (err) {
       console.error('Error refreshing voice agent data:', err);
       setIsBackendOnline(false);
+      setOfflineSince((prev) => prev ?? mountedAt);
       setSarvamLive(false);
       setSyncStatus('disconnected');
       setErrorMessage(err.message || 'Failed to connect to backend server');
     } finally {
+      inFlight.current = false;
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [mountedAt]);
 
   // Initial load via microtask
   useEffect(() => {
@@ -111,16 +131,20 @@ export const useVoiceAgentData = () => {
   }, [fetchAllData]);
 
   // Periodic polling (faster while a send is running, so results appear as calls finish)
-  const sending = Boolean(autoDispatcher.running);
+  // a call that is waiting or on the phone right now (the call log shows it as In Queue or In Call)
+  const callLive = callLogs.some((c) => c.status === 'In Call' || c.status === 'In Queue');
+  const sending = Boolean(autoDispatcher.running) || callLive;
   useEffect(() => {
     if (!autoPollInterval || autoPollInterval <= 0) return;
 
+    // 3 s while a send runs, 5 s while the server is not answering (so the page fills in soon after it wakes), else 15 s
+    const every = sending ? 3 : !isBackendOnline ? 5 : autoPollInterval;
     const timer = setInterval(() => {
       fetchAllData(true);
-    }, (sending ? 3 : autoPollInterval) * 1000);
+    }, every * 1000);
 
     return () => clearInterval(timer);
-  }, [autoPollInterval, sending, fetchAllData]);
+  }, [autoPollInterval, sending, isBackendOnline, fetchAllData]);
 
   // Combined Farmer Map for fast lookup
   const farmersMap = useMemo(() => {
@@ -151,16 +175,17 @@ export const useVoiceAgentData = () => {
       // Status resolution: the backend sends the dashboard's own status words
       const rawStatus = call.status || call.call_status || 'Completed';
       const statusWords = {
-        'completed': 'Completed', 'answered': 'Completed', 'callback scheduled': 'Callback Scheduled',
+        'completed': 'Completed', 'answered': 'Completed', 'callback scheduled': 'Callback Scheduled', 'callback missed': 'Callback Missed', 'callback done': 'Callback Done',
         'not confirmed': 'Not Confirmed', 'declined': 'Declined', 'unanswered': 'Unanswered', 'busy': 'Unanswered', 'no_answer': 'Unanswered',
         'retrying': 'Retrying', 'failed': 'Failed', 'skipped': 'Skipped', 'escalated': 'Escalated',
         'requires escalation': 'Escalated', 'calling': 'Calling', 'scheduled': 'Scheduled',
+        'in call': 'In Call', 'in queue': 'In Queue',
       };
       const normalizedStatus = statusWords[String(rawStatus).toLowerCase()] || String(rawStatus);
 
       const retryCount = call.retry_count || 0;
       const attemptNumber = call.attempts_log?.length || (retryCount + 1);
-      const attemptDisplay = `Attempt ${attemptNumber}/3`;
+      const attemptDisplay = call.is_test ? 'Test' : `Attempt ${attemptNumber}/3`;
 
       // Parse transcript
       let parsedTranscript = call.transcript;
@@ -292,50 +317,32 @@ export const useVoiceAgentData = () => {
     });
   }, [enrichedCallLogs, searchQuery, districtFilter, languageFilter, statusFilter, dateFilter, customDate]);
 
-  // Summary metrics calculated from the call records the backend returns
+  // Summary cards: one row per farmer per day, for the date picked in the filter bar (all dates when none is picked).
+  // Skipped farmers (no consent, inactive, no weather) are not calls, and test calls never count.
   const summaryMetrics = useMemo(() => {
-    const totalCalls = enrichedCallLogs.length;
-    const completedCount = enrichedCallLogs.filter(c => c.status === 'Completed').length;
-    const retryingCount = enrichedCallLogs.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length;
-    const failedCount = enrichedCallLogs.filter(c => c.status === 'Failed').length;
-    const needsAttentionCount = enrichedCallLogs.filter(c => ['Failed', 'Not Confirmed'].includes(c.status)).length;
-    const escalationCount = needsAttentionCount;
-    const callbackCount = enrichedCallLogs.filter(c => Boolean(c.scheduled_callback_time) || c.disposition === 'Callback Requested').length;
-
-    // Callbacks still waiting to be placed (the backend places each one at the time the farmer asked for)
-    const callbacksScheduled = enrichedCallLogs.filter(c => c.callback_status === 'pending').length;
-
-    // Unique farmers reached (answered weather or resolved callback/escalation)
-    const reachedFarmerIds = new Set();
-    enrichedCallLogs.forEach(c => {
-      if (['Completed', 'Escalated'].includes(c.status) || ['Weather Delivered', 'Callback Requested', 'Non-Weather Inquiry'].includes(c.disposition)) {
-        if (c.farmer_id) reachedFarmerIds.add(String(c.farmer_id).trim());
-      }
-    });
-    const farmersReached = reachedFarmerIds.size;
-
-    const severeWeatherAlerts = enrichedCallLogs.filter(c => {
-      const chance = parseInt(String(c.rainfall_chance || c.weather_rainfall || '0').replace('%', ''), 10) || 0;
-      const forecast = String(c.weather_forecast || '').toLowerCase();
-      return chance >= 60 || forecast.includes('heavy') || forecast.includes('alert') || forecast.includes('storm');
-    }).length;
+    const inScope = (c) => {
+      if (dateFilter === 'all' || !customDate) return true;
+      const raw = getCallDate(c);
+      return Boolean(raw) && isCallOnDate(raw, customDate);
+    };
+    const scoped = enrichedCallLogs.filter(c => !c.is_test && inScope(c));
+    const waiting = (c) => c.status === 'In Call' || c.status === 'In Queue';
+    const called = scoped.filter(c => c.status !== 'Skipped' && !waiting(c));       // calls that have a result
+    const scopeLabel = dateFilter === 'today' ? 'Today' : dateFilter === 'yesterday' ? 'Yesterday'
+      : customDate ? customDate : 'All dates';
 
     return {
-      totalCalls,
-      completedCount,
-      deliveredCount: completedCount,
-      farmersReached,
-      retryingCount,
-      failedCount,
-      escalationCount,
-      needsAttentionCount,
-      callbackCount,
-      callbacksScheduled,
-      severeWeatherAlerts,
-      totalRegisteredFarmers: farmers.length,
-      confidenceRate: '98.5%'
+      scopeLabel,
+      totalCalls: called.length,
+      completedCount: called.filter(c => c.status === 'Completed').length,
+      retryingCount: called.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length,
+      needsAttentionCount: called.filter(c => ['Failed', 'Not Confirmed', 'Callback Missed'].includes(c.status)).length,
+      declinedCount: called.filter(c => c.status === 'Declined').length,
+      callbacksScheduled: scoped.filter(c => c.callback_status === 'pending').length,
+      skippedCount: scoped.filter(c => c.status === 'Skipped').length,
+      inProgressCount: scoped.filter(waiting).length,
     };
-  }, [enrichedCallLogs, farmers]);
+  }, [enrichedCallLogs, dateFilter, customDate]);
 
   // Send today's calls now to every eligible farmer
   const triggerDemo = async () => {
@@ -345,7 +352,12 @@ export const useVoiceAgentData = () => {
       return;
     }
     // Real calls cost credits and ring farmers' phones: ask first when calls are live
-    if (autoDispatcher.live && !window.confirm('This will place REAL calls to every eligible farmer today. Continue?')) {
+    if (autoDispatcher.live && !(await confirmDialog({
+      title: "Send today's calls now?",
+      message: 'This will place REAL calls to every eligible farmer today and uses Sarvam credits.',
+      confirmLabel: 'Send now',
+      tone: 'danger',
+    }))) {
       return undefined;
     }
     setTriggeringDemo(true);
@@ -368,7 +380,12 @@ export const useVoiceAgentData = () => {
   const toggleAutoDispatcher = async () => {
     try {
       const nextState = !autoDispatcher.enabled;
-      if (nextState && autoDispatcher.live && !window.confirm('Turn on automatic REAL calls every day at 9:00 AM IST?')) {
+      if (nextState && autoDispatcher.live && !(await confirmDialog({
+        title: 'Turn on the daily 9:00 AM calls?',
+        message: 'Real calls will be placed to every eligible farmer every day at 9:00 AM IST.',
+        confirmLabel: 'Turn on',
+        tone: 'danger',
+      }))) {
         return;
       }
       const res = await updateDispatcherStatus(nextState);
@@ -383,8 +400,8 @@ export const useVoiceAgentData = () => {
   // Reset all filters
   const resetFilters = () => {
     setSearchQuery('');
-    setDateFilter('all');
-    setCustomDate('');
+    setDateFilter('today');
+    setCustomDate(localToday());
     setDistrictFilter('all');
     setLanguageFilter('all');
     setStatusFilter('all');
@@ -400,6 +417,8 @@ export const useVoiceAgentData = () => {
     lastSynced,
     syncStatus,
     isBackendOnline,
+    hasConnected,
+    waitingSince: !isBackendOnline ? offlineSince : (!hasConnected ? mountedAt : null),
     sarvamLive,
     errorMessage,
     summaryMetrics,

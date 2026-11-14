@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import json
+import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -18,6 +20,10 @@ from ..contracts import WeatherReport
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+# The paid (commercial) service: its own addresses and the key as an apikey parameter. Used only when OPEN_METEO_API_KEY is set;
+# the free service is for non-commercial use and throttles shared hosting addresses (HTTP 429).
+CUSTOMER_GEOCODE_URL = "https://customer-geocoding-api.open-meteo.com/v1/search"
+CUSTOMER_FORECAST_URL = "https://customer-api.open-meteo.com/v1/forecast"
 
 # WMO weather codes in short spoken words
 _WMO = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "cloudy", 45: "foggy", 48: "foggy",
@@ -28,14 +34,48 @@ _WMO = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "cloudy", 45: "fog
         95: "thunderstorms", 96: "thunderstorms with hail", 99: "thunderstorms with hail"}
 
 
+# Say who is asking. A hosting provider's shared address that arrives as a bare "Python-urllib" is the kind of client that
+# public APIs throttle or block; a named one with a contact is treated as a normal, polite caller.
+USER_AGENT = "AgrythmConnect/1.0 (daily weather calls for farmers; https://github.com/harshith8899/Agrythm-Connect)"
+_client = urllib.request.build_opener()
+_client.addheaders = [("User-Agent", USER_AGENT), ("Accept", "application/json")]
+default_opener = _client.open
+
 FORECAST_DAYS = 7
 DAILY_FIELDS = ("weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
                 "wind_speed_10m_max,relative_humidity_2m_mean")
 
 
-def _get(url: str, params: dict, opener=urllib.request.urlopen) -> dict:
+def api_key() -> str:
+    return os.environ.get("OPEN_METEO_API_KEY", "").strip()
+
+
+def _get(url: str, params: dict, opener=default_opener, customer_url: str | None = None) -> dict:
+    key = api_key()
+    if key and customer_url:                      # the key travels in the request only, never in a log or a message
+        url, params = customer_url, {**params, "apikey": key}
     with opener(f"{url}?{urllib.parse.urlencode(params)}", timeout=20) as resp:
         return json.load(resp)
+
+
+# Old spellings and common misspellings of places, and the name the place services know them by. A search tries what was typed
+# first and then this name, so "Banglore" or "Mysore" still finds the place.
+PLACE_ALIASES = {
+    "bangalore": "Bengaluru", "banglore": "Bengaluru", "bengalore": "Bengaluru", "bangaluru": "Bengaluru",
+    "bangaloreurban": "Bengaluru", "bengaluruurban": "Bengaluru", "bangalorerural": "Bengaluru Rural",
+    "mysore": "Mysuru", "belgaum": "Belagavi", "bellary": "Ballari", "bijapur": "Vijayapura", "gulbarga": "Kalaburagi",
+    "shimoga": "Shivamogga", "tumkur": "Tumakuru", "chikmagalur": "Chikkamagaluru", "mangalore": "Mangaluru",
+    "chikballapur": "Chikkaballapura", "ramanagar": "Ramanagara", "bagalkot": "Bagalkote", "coorg": "Kodagu",
+    "hubli": "Hubballi", "davangere": "Davanagere",
+}
+
+
+def name_variants(name: str) -> list[str]:
+    """The name as typed, then the name the services know it by (when it is a known old or misspelled name)."""
+    typed = str(name or "").strip()
+    key = "".join(ch for ch in typed.lower() if ch.isalnum())
+    alias = PLACE_ALIASES.get(key)
+    return [typed] + ([alias] if alias and alias.lower() != typed.lower() else [])
 
 
 def _same(a: object, b: str) -> bool:
@@ -51,27 +91,40 @@ class Place:
     level: str          # village | district
 
 
-def geocode(village: str, district: str, state: str, opener=urllib.request.urlopen) -> Place | None:
+def geocode(village: str, district: str, state: str, opener=default_opener) -> Place | None:
     """Village first; if the village is unknown, the district centre. None when nothing matches confidently."""
+    districts = name_variants(district)
     for name, level in ((village, "village"), (district, "district")):
         if not name:
             continue
-        results = _get(GEOCODE_URL, {"name": name, "count": 10, "language": "en", "format": "json",
-                                     "countryCode": "IN"}, opener).get("results") or []
-        in_state = [r for r in results if not state or _same(r.get("admin1"), state)]
-        in_district = [r for r in in_state
-                       if not district or any(_same(r.get(k), district) for k in ("admin2", "admin3", "name"))]
-        # without a district to check, accept only a single match inside the state
-        pick = in_district[0] if in_district else (in_state[0] if not district and len(in_state) == 1 else None)
-        if pick:
-            where = ", ".join(str(pick.get(k)) for k in ("name", "admin2", "admin1") if pick.get(k))
-            return Place(float(pick["latitude"]), float(pick["longitude"]), f"{where} ({level})", level)
+        for asked in name_variants(name):
+            query = {"name": asked, "count": 10, "language": "en", "format": "json", "countryCode": "IN"}
+            try:
+                results = _get(GEOCODE_URL, query, opener, CUSTOMER_GEOCODE_URL).get("results") or []
+            except urllib.error.HTTPError:
+                if not api_key():
+                    raise
+                results = _get(GEOCODE_URL, query, opener).get("results") or []     # the plan may not cover place search: the free one is enough
+            in_state = [r for r in results if not state or _same(r.get("admin1"), state)]
+            in_district = [r for r in in_state
+                           if not district or any(_same(r.get(k), d) for k in ("admin2", "admin3", "name") for d in districts)]
+            # without a district to check, accept only a single match inside the state
+            pick = in_district[0] if in_district else (in_state[0] if not district and len(in_state) == 1 else None)
+            if pick:
+                where = ", ".join(str(pick.get(k)) for k in ("name", "admin2", "admin1") if pick.get(k))
+                return Place(float(pick["latitude"]), float(pick["longitude"]), f"{where} ({level})", level)
     return None
 
 
 class OpenMeteoWeather:
-    def __init__(self, opener=urllib.request.urlopen):
+    label = "Open-Meteo"
+
+    def __init__(self, opener=default_opener):
         self._open = opener
+
+    @property
+    def uses_key(self) -> bool:
+        return bool(api_key())
 
     def get_forecast(self, place_name: str, latitude: float, longitude: float, start: date) -> dict[date, WeatherReport]:
         """The next 7 days from `start`. Days with a missing or implausible field are left out."""
@@ -81,7 +134,7 @@ class OpenMeteoWeather:
             "latitude": latitude, "longitude": longitude, "timezone": "Asia/Kolkata", "start_date": start.isoformat(),
             "end_date": (start + timedelta(days=FORECAST_DAYS - 1)).isoformat(), "daily": DAILY_FIELDS,
             "wind_speed_unit": "kmh",
-        }, self._open).get("daily") or {}
+        }, self._open, CUSTOMER_FORECAST_URL).get("daily") or {}
         out: dict[date, WeatherReport] = {}
         for n, day in enumerate(daily.get("time") or []):
             try:

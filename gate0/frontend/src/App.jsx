@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sidebar, 
   Header, 
@@ -8,13 +7,20 @@ import {
   CallHistoryTable, 
   CallDetailDrawer, 
   FarmerDirectory, 
-  WeatherAlertsView,
-  SystemStatusView
+  SystemStatusView,
+  CostAnalyticsView,
+  RealTimeCostChart,
+  ConfirmHost,
+  MobileNav,
+  ServerBanner,
+  LoginScreen
 } from './components';
 import { useVoiceAgentData } from './hooks';
+import { getSessionToken, logoutAdmin } from './utils';
 
-function App() {
+function Dashboard({ onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showCostChart, setShowCostChart] = useState(false);
 
   const {
     farmers,
@@ -22,10 +28,13 @@ function App() {
     filteredCallLogs,
     refreshing,
     triggeringDemo,
-    lastSynced,
+    lastSynced: _lastSynced,
     syncStatus,
+    loading,
     isBackendOnline,
-    errorMessage,
+    hasConnected,
+    waitingSince,
+    errorMessage: _errorMessage,
     summaryMetrics,
     autoDispatcher,
     toggleAutoDispatcher,
@@ -53,7 +62,7 @@ function App() {
   } = useVoiceAgentData();
 
   // Check if any filter is active
-  const isFiltered = Boolean(searchQuery || dateFilter !== 'all' || districtFilter !== 'all' || languageFilter !== 'all' || statusFilter !== 'all');
+  const isFiltered = Boolean(searchQuery || dateFilter !== 'today' || districtFilter !== 'all' || languageFilter !== 'all' || statusFilter !== 'all');
 
   // Handle clicking "View Call Logs" from Farmer Directory
   const handleSelectFarmerFromDirectory = (farmerName) => {
@@ -69,55 +78,68 @@ function App() {
         setActiveTab={setActiveTab}
         isOpen={sidebarOpen}
         setIsOpen={setSidebarOpen}
-        weatherAlertsCount={summaryMetrics.severeWeatherAlerts}
+        onLogout={onLogout}
       />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Sticky Header with Triggers */}
         <Header
-          onToggleSidebar={() => setSidebarOpen(true)}
           onRefresh={() => fetchAllData(false)}
           refreshing={refreshing}
           syncStatus={syncStatus}
-          isBackendOnline={isBackendOnline}
+          isBackendOnline={isBackendOnline && hasConnected}
           activeTab={activeTab}
           onTriggerDemo={triggerDemo}
           triggeringDemo={triggeringDemo}
           autoDispatcher={autoDispatcher}
           onToggleAutoDispatcher={toggleAutoDispatcher}
+          onLogout={onLogout}
         />
 
         {/* Tab Content */}
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 space-y-6">
-          {/* Global Backend Offline Alert Banner */}
-          {!isBackendOnline && (
-            <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-900 shadow-xs animate-in fade-in duration-200">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
-                  <AlertTriangle className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-xs sm:text-sm font-bold text-rose-950">
-                    Backend API Disconnected
-                  </div>
-                  <div className="text-xs text-rose-700 mt-0.5 leading-relaxed">
-                    Cannot reach the API. Run <code className="bg-rose-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-950">npm run backend</code> in your terminal to start it.
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={() => fetchAllData(false)}
-                className="shrink-0 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer inline-flex items-center justify-center gap-1.5"
-              >
-                <span>Retry Connection</span>
-              </button>
-            </div>
-          )}
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 md:py-8 pb-24 lg:pb-8 space-y-4 sm:space-y-6">
+          {/* Waking up / offline banner */}
+          <ServerBanner
+            isOnline={isBackendOnline}
+            loading={loading}
+            hasConnected={hasConnected}
+            waitingSince={waitingSince}
+            onRetry={() => fetchAllData(false)}
+          />
           {activeTab === 'overview' && (
             <>
               {/* KPI Metrics */}
-              <KpiMetrics metrics={summaryMetrics} />
+              <KpiMetrics metrics={summaryMetrics} loading={!hasConnected} />
+
+              {/* Real-Time Cost Analytics Chart Toggle & Panel */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between px-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowCostChart((prev) => !prev)}
+                    className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-white border border-slate-200/80 text-slate-700 hover:text-slate-900 hover:border-slate-300 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span>{showCostChart ? 'Hide Real-Time Cost Chart' : 'Show Real-Time Cost Analytics'}</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-trust-green border border-emerald-200">
+                      Live ₹
+                    </span>
+                  </button>
+                </div>
+
+                {showCostChart && (
+                  <RealTimeCostChart
+                    callLogs={callLogs}
+                    rate={3.5}
+                    isLive={Boolean(autoDispatcher?.live)}
+                    onRefresh={() => fetchAllData(false)}
+                  />
+                )}
+              </div>
 
               {/* Filters, below the summary cards */}
               <TopFilterBar
@@ -148,6 +170,8 @@ function App() {
                 onResetFilters={resetFilters}
                 isFiltered={isFiltered}
                 isBackendOnline={isBackendOnline}
+                loading={!hasConnected}
+                refreshing={refreshing}
                 onRefresh={() => fetchAllData(false)}
               />
             </>
@@ -159,11 +183,12 @@ function App() {
               callLogs={callLogs}
               onSelectFarmer={handleSelectFarmerFromDirectory}
               onImported={() => fetchAllData(false)}
+              isLive={Boolean(autoDispatcher?.live)}
             />
           )}
 
-          {activeTab === 'weather' && (
-            <WeatherAlertsView callLogs={callLogs} />
+          {activeTab === 'cost' && (
+            <CostAnalyticsView isBackendOnline={isBackendOnline} callLogs={callLogs} />
           )}
 
           {activeTab === 'system' && (
@@ -171,6 +196,9 @@ function App() {
           )}
         </main>
       </div>
+
+      <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      <ConfirmHost />
 
       {/* Slide-over Inspection Drawer for Call Details */}
       {selectedCall && (
@@ -181,6 +209,28 @@ function App() {
       )}
     </div>
   );
+}
+
+function App() {
+  const [sessionToken, setSessionToken] = useState(() => getSessionToken());
+
+  useEffect(() => {
+    const handleAuth = () => {
+      setSessionToken(getSessionToken());
+    };
+    window.addEventListener('gate0-auth-change', handleAuth);
+    window.addEventListener('gate0-unauthorized', handleAuth);
+    return () => {
+      window.removeEventListener('gate0-auth-change', handleAuth);
+      window.removeEventListener('gate0-unauthorized', handleAuth);
+    };
+  }, []);
+
+  if (!sessionToken) {
+    return <LoginScreen onLoginSuccess={() => setSessionToken(getSessionToken())} />;
+  }
+
+  return <Dashboard onLogout={logoutAdmin} />;
 }
 
 export default App;

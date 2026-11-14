@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   X, 
   CloudRain, 
@@ -10,18 +10,17 @@ import {
   MessageSquare,
   Clock,
   Calendar,
-  AlertCircle,
-  CheckCircle2,
-  RefreshCw,
   User,
-  Bot,
-  Languages
+  Bot
 } from 'lucide-react';
 
-import { maskPhoneNumber, formatTranscriptText, hasIndicScript } from '../utils';
+import { maskPhoneNumber } from '../utils';
+
+const LANG_CODES = { Hindi: 'hi', Kannada: 'kn', Telugu: 'te', English: 'en' };
+// Fonts that carry the Indian scripts, so Kannada, Telugu and Hindi are drawn properly on every device
+const INDIC_FONTS = "'Noto Sans Kannada', 'Noto Sans Telugu', 'Noto Sans Devanagari', 'Nirmala UI', 'Mangal', Inter, system-ui, sans-serif";
 
 export const CallDetailDrawer = ({ call, onClose }) => {
-  const [transcriptMode, setTranscriptMode] = useState('romanized'); // 'romanized' | 'translated' | 'original'
 
   if (!call) return null;
 
@@ -80,7 +79,7 @@ export const CallDetailDrawer = ({ call, onClose }) => {
       {/* Backdrop */}
       <div 
         onClick={onClose}
-        className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 transition-opacity"
+        className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 transition-opacity"
       />
 
       {/* Drawer Container */}
@@ -111,6 +110,11 @@ export const CallDetailDrawer = ({ call, onClose }) => {
 
         {/* Drawer Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-5 md:p-6 space-y-6">
+          {(call.status === 'In Call' || call.status === 'In Queue') && (
+            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-xs font-semibold" role="status">
+              {call.status === 'In Call' ? 'This call is in progress.' : 'This call is waiting in the queue.'} The result, transcript and weather appear here when it ends.
+            </div>
+          )}
           {/* Farmer Profile Card */}
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
             <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
@@ -325,114 +329,64 @@ export const CallDetailDrawer = ({ call, onClose }) => {
             </div>
           )}
 
-          {/* Full Conversation Transcript */}
+          {/* Conversation: what was actually said, in the language of the call, with the English summary on top */}
           <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-3.5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-100">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                    Dialogue Transcript
-                  </span>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                    {call.primary_language || 'Kannada'}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  {transcriptMode === 'romanized' && 'Showing spoken language in English script'}
-                  {transcriptMode === 'translated' && 'Showing English translation'}
-                  {transcriptMode === 'original' && 'Showing original regional script'}
-                </p>
-              </div>
-
-              {/* Segmented Script / Translate Toggle */}
-              <div className="inline-flex p-0.5 rounded-lg bg-slate-100 border border-slate-200 text-[11px] font-semibold self-start sm:self-auto shadow-2xs">
-                <button
-                  type="button"
-                  onClick={() => setTranscriptMode('romanized')}
-                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
-                    transcriptMode === 'romanized'
-                      ? 'bg-white text-trust-navy shadow-xs font-bold'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                  title="Display in English text preserving the spoken language (Transliteration)"
-                >
-                  English Script
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTranscriptMode('translated')}
-                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
-                    transcriptMode === 'translated'
-                      ? 'bg-white text-trust-navy shadow-xs font-bold'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                  title="Translate dialogue into English"
-                >
-                  <Languages className="w-3 h-3 text-trust-green" />
-                  Translate
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTranscriptMode('original')}
-                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
-                    transcriptMode === 'original'
-                      ? 'bg-white text-trust-navy shadow-xs font-bold'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                  title="View original native script (Kannada / Hindi)"
-                >
-                  Original
-                </button>
-              </div>
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
+              <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">Conversation</span>
+              {(call.language || call.primary_language) && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                  {call.language || call.primary_language}
+                </span>
+              )}
             </div>
+
+            {call.summary && (
+              <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-100 text-xs text-slate-700 leading-relaxed">
+                <strong className="block text-[10px] font-bold tracking-wider text-blue-700 uppercase mb-0.5">In English</strong>
+                {call.summary}
+              </div>
+            )}
 
             {transcriptItems.length > 0 ? (
               <div className="space-y-3 pt-1">
                 {transcriptItems.map((turn, idx) => {
-                  // Normalize both internal schema ({ speaker, text }) and Sarvam Agent schema ({ role, content, language_name })
+                  // Both schemas: { speaker, text } from the backend and { role, content } from the provider
                   const rawSpeaker = turn.speaker || turn.role || turn.author || (idx % 2 === 0 ? 'Agent' : 'Farmer');
                   const isAgent = /agent|bot|assistant/i.test(rawSpeaker);
                   const isSystem = /system|notice/i.test(rawSpeaker);
-                  const displaySpeaker = isSystem ? 'System' : (isAgent ? 'Agent' : 'Farmer');
-                  const turnText = turn.text || turn.content || turn.message || (typeof turn === 'string' ? turn : '');
+                  const text = String(turn.text || turn.content || turn.message || (typeof turn === 'string' ? turn : ''))
+                    .replace(/\s*\n\s*/g, '\n').trim();
+                  if (!text) return null;
 
                   if (isSystem) {
                     return (
-                      <div key={idx} className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
-                        <strong>System Notice:</strong> {formatTranscriptText(turnText, transcriptMode)}
+                      <div key={idx} className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+                        <strong>Note:</strong> {text}
                       </div>
                     );
                   }
 
-                  const renderedText = formatTranscriptText(turnText, transcriptMode);
-
                   return (
-                    <div 
-                      key={idx} 
-                      className={`flex gap-2.5 ${isAgent ? 'items-start' : 'items-start flex-row-reverse'}`}
-                    >
+                    <div key={idx} className={`flex gap-2.5 ${isAgent ? 'items-start' : 'items-start flex-row-reverse'}`}>
                       <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 shadow-2xs ${
                         isAgent ? 'bg-trust-navy text-white' : 'bg-emerald-600 text-white'
                       }`}>
                         {isAgent ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
                       </div>
-                      <div className={`p-3.5 rounded-2xl max-w-[85%] text-xs leading-relaxed shadow-2xs ${
-                        isAgent 
-                          ? 'bg-slate-50 text-slate-800 border border-slate-200/60 rounded-tl-xs' 
+                      <div className={`px-3.5 py-3 rounded-2xl max-w-[85%] shadow-2xs ${
+                        isAgent
+                          ? 'bg-slate-50 text-slate-800 border border-slate-200/60 rounded-tl-xs'
                           : 'bg-emerald-50/80 text-emerald-950 border border-emerald-200/80 rounded-tr-xs'
                       }`}>
-                        <div className="flex items-center justify-between gap-3 mb-1.5">
-                          <span className="font-bold text-[10px] uppercase tracking-wider text-slate-400">
-                            {displaySpeaker}
-                          </span>
-                          {transcriptMode !== 'original' && hasIndicScript(turnText) && (
-                            <span className="text-[9px] font-medium px-1.5 py-0.2 rounded bg-white text-slate-500 border border-slate-200 shadow-2xs">
-                              {transcriptMode === 'romanized' ? 'English script' : 'English translation'}
-                            </span>
-                          )}
+                        <div className="font-bold text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+                          {isAgent ? 'Agent' : (call.farmer_name || 'Farmer')}
                         </div>
-                        <p className="whitespace-pre-line text-slate-800 font-sans">
-                          {renderedText}
+                        <p
+                          lang={LANG_CODES[call.language || call.primary_language] || undefined}
+                          className="whitespace-pre-line text-[14px] leading-7 break-words"
+                          style={{ fontFamily: INDIC_FONTS }}
+                        >
+                          {text}
                         </p>
                       </div>
                     </div>
@@ -440,13 +394,13 @@ export const CallDetailDrawer = ({ call, onClose }) => {
                 })}
               </div>
             ) : rawTranscript ? (
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed font-sans">
-                {formatTranscriptText(rawTranscript, transcriptMode)}
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-800 leading-7 whitespace-pre-line" style={{ fontFamily: INDIC_FONTS }}>
+                {String(rawTranscript).trim()}
               </div>
             ) : (
               <div className="p-6 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 text-slate-400 text-xs">
                 <MessageSquare className="w-5 h-5 mx-auto mb-1.5 text-slate-400" />
-                No transcript preview provided in the database for this call.
+                No conversation was recorded for this call (it may not have been picked up).
               </div>
             )}
           </div>

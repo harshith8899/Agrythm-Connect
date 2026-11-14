@@ -2,9 +2,10 @@ import React from 'react';
 import {
   PhoneCall,
   Users,
-  CloudRain,
   ShieldCheck,
-  X
+  IndianRupee,
+  X,
+  LogOut
 } from 'lucide-react';
 
 export const Sidebar = ({
@@ -12,7 +13,7 @@ export const Sidebar = ({
   setActiveTab,
   isOpen,
   setIsOpen,
-  weatherAlertsCount = 0
+  onLogout,
 }) => {
   const navItems = [
     {
@@ -27,15 +28,9 @@ export const Sidebar = ({
       icon: Users,
     },
     {
-      id: 'weather',
-      label: 'Weather Advisories',
-      icon: CloudRain,
-      badge: weatherAlertsCount > 0
-        ? `${weatherAlertsCount} Alert${weatherAlertsCount > 1 ? 's' : ''}`
-        : '0 Alerts',
-      badgeColor: weatherAlertsCount > 0
-        ? 'bg-amber-100 text-amber-800 border border-amber-200'
-        : 'bg-slate-100 text-slate-500 border border-slate-200',
+      id: 'cost',
+      label: 'Cost Analytics',
+      icon: IndianRupee,
     },
     {
       id: 'system',
@@ -50,13 +45,13 @@ export const Sidebar = ({
       {isOpen && (
         <div
           onClick={() => setIsOpen(false)}
-          className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-40 lg:hidden"
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 lg:hidden"
         />
       )}
 
       {/* Sidebar container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-white border-r border-slate-200/80 flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:z-auto ${isOpen ? 'translate-x-0' : '-translate-x-full'
+        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-white border-r border-slate-200/80 flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 lg:sticky lg:top-0 lg:h-screen lg:shrink-0 lg:z-auto ${isOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
       >
         {/* Brand Header with Agrythm Logo */}
@@ -140,6 +135,32 @@ export const Sidebar = ({
             );
           })}
         </nav>
+
+        {/* Admin Profile & Logout Footer */}
+        <div className="p-3 border-t border-slate-100">
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200/70">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-trust-navy text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                A
+              </div>
+              <div className="truncate">
+                <div className="text-xs font-bold text-slate-800 truncate">Administrator</div>
+                <div className="text-[10px] text-slate-400 font-medium">Session Active</div>
+              </div>
+            </div>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                title="Log out of console"
+                aria-label="Log out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
 
       </aside>
     </>

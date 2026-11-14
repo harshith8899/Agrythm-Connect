@@ -1,44 +1,27 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, CheckCircle2, XCircle, MinusCircle, AlertTriangle, ChevronDown } from 'lucide-react';
-import { getSystemChecks, getUsage, saveUsageRate, getAlerts } from '../utils';
-
-const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
+import { RefreshCw, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
+import { getSystemChecks, getAlerts } from '../utils';
 
 const STATUS_STYLE = {
   ok: { icon: CheckCircle2, color: 'text-emerald-600', label: 'OK' },
   fail: { icon: XCircle, color: 'text-rose-600', label: 'Problem' },
-  off: { icon: MinusCircle, color: 'text-slate-400', label: 'Not set up' },
+  off: { icon: MinusCircle, color: 'text-slate-400', label: 'Not active' },
 };
 
-const UsageCell = ({ title, data }) => (
-  <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
-    <div className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">{title}</div>
-    <div className="text-2xl font-bold text-slate-900 mt-1">{data ? rupees(data.amount) : '-'}</div>
-    <div className="text-[11px] text-slate-500">
-      {data ? `${data.billed_minutes} billed minutes, ${data.calls} calls (${data.connected} connected)` : ''}
-    </div>
-  </div>
-);
-
-// One simple page: is each part connected, and how much has been used. Reads /api/system/checks and /api/usage.
+// Is each part connected? Backend, database, wake-up timer, weather, Sarvam and the phone line, and what needs the team.
+// Money lives on the Cost Analytics tab. Reads /api/system/checks and /api/alerts.
 export const SystemStatusView = ({ isBackendOnline = true }) => {
   const [report, setReport] = useState(null);
-  const [usage, setUsage] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [rateInput, setRateInput] = useState('');
-  const [rateMessage, setRateMessage] = useState(null);
-  const [checksOpen, setChecksOpen] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
     try {
-      const [checks, use, al] = await Promise.all([getSystemChecks(refresh), getUsage(refresh), getAlerts().catch(() => [])]);
+      const [checks, al] = await Promise.all([getSystemChecks(refresh), getAlerts().catch(() => [])]);
       setReport(checks);
-      setUsage(use);
       setAlerts(al);
-      setRateInput((prev) => (prev === '' ? String(use.rate) : prev));
       setError('');
     } catch (err) {
       setError(err.message || 'Could not reach the backend');
@@ -53,27 +36,18 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
     return () => clearInterval(timer);
   }, [load]);
 
-  const handleSaveRate = async () => {
-    setRateMessage(null);
-    try {
-      const updated = await saveUsageRate(Number(rateInput));
-      setUsage(updated);
-      setRateInput(String(updated.rate));
-      setRateMessage({ ok: true, text: 'Rate saved.' });
-    } catch (err) {
-      setRateMessage({ ok: false, text: err.message });
-    }
-  };
-
   const overallOk = report && report.overall === 'ok';
   const okCount = report ? report.checks.filter((c) => c.status === 'ok').length : 0;
+  const failCount = report ? report.checks.filter((c) => c.status === 'fail').length : 0;
+  const offCount = report ? report.checks.filter((c) => c.status === 'off').length : 0;
 
   return (
     <div className="space-y-6">
-      {/* Overall status */}
-      <div className={`rounded-2xl border p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-        error || (report && !overallOk) ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50/60 border-emerald-200'
-      }`}>
+      <div
+        className={`rounded-2xl border p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          error || (report && !overallOk) ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50/60 border-emerald-200'
+        }`}
+      >
         <div>
           <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">System Status</span>
           <h2 className="text-xl font-bold text-slate-900">
@@ -93,7 +67,6 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
         </button>
       </div>
 
-      {/* Alerts for the team */}
       {alerts.length > 0 && (
         <div className="bg-white rounded-2xl border border-amber-200 divide-y divide-amber-100">
           <div className="p-4 text-[11px] font-bold tracking-wider text-amber-700 uppercase">Needs the team ({alerts.length})</div>
@@ -107,128 +80,37 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
         </div>
       )}
 
-      {/* The connections: one dropdown for the whole group */}
       {report && (
         <div className="bg-white rounded-2xl border border-slate-200/80">
-          <button
-            type="button"
-            onClick={() => setChecksOpen(!checksOpen)}
-            aria-expanded={checksOpen}
-            className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50 rounded-2xl cursor-pointer"
-          >
+          <div className="flex flex-wrap items-center gap-3 p-4 border-b border-slate-100">
             <span className="text-sm font-bold text-slate-900">Connections</span>
-            <span className={`text-xs font-semibold ${okCount === report.checks.length ? 'text-emerald-600' : 'text-rose-600'}`}>
+            <span className={`text-xs font-semibold ${failCount > 0 ? 'text-rose-600' : offCount > 0 ? 'text-slate-500' : 'text-emerald-600'}`}>
               {okCount} of {report.checks.length} OK
+              {failCount > 0 && `, ${failCount} with a problem`}
+              {offCount > 0 && `, ${offCount} not set up`}
             </span>
-            <ChevronDown className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${checksOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {checksOpen && (
-            <div className="divide-y divide-slate-100 border-t border-slate-100">
-              {report.checks.map((c) => {
-                const style = STATUS_STYLE[c.status] || STATUS_STYLE.off;
-                const Icon = style.icon;
-                return (
-                  <div key={c.id} className="flex items-start gap-3 p-4">
-                    <Icon className={`w-5 h-5 mt-0.5 shrink-0 ${style.color}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-slate-900">{c.name}</span>
-                        <span className={`text-[10px] font-bold uppercase ${style.color}`}>{style.label}</span>
-                        {c.ms != null && <span className="text-[10px] text-slate-400">{c.ms} ms</span>}
-                      </div>
-                      <p className="text-xs text-slate-600 mt-0.5 break-words">{c.detail}</p>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {report.checks.map((c) => {
+              const style = STATUS_STYLE[c.status] || STATUS_STYLE.off;
+              const Icon = style.icon;
+              return (
+                <div key={c.id} className="flex items-start gap-3 p-4">
+                  <Icon className={`w-5 h-5 mt-0.5 shrink-0 ${style.color}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-slate-900">{c.name}</span>
+                      <span className={`text-[10px] font-bold uppercase ${style.color}`}>{style.label}</span>
+                      {c.ms != null && <span className="text-[10px] text-slate-400">{c.ms} ms</span>}
                     </div>
+                    <p className="text-xs text-slate-600 mt-0.5 break-words">{c.detail}</p>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
-
-      {/* Usage from Sarvam's own call records */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-5 space-y-4">
-        <div>
-          <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Sarvam Usage</span>
-          <h3 className="text-base font-bold text-slate-900">Estimated amount, calls and billed minutes</h3>
-        </div>
-
-        {usage && usage.exhausted && (
-          <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>Sarvam has reported that credits are used up in the last 7 days. Add credits on Sarvam (Settings, Billing); calls resume at once.</span>
-          </div>
-        )}
-
-        {usage && !usage.configured && (
-          <p className="text-xs text-slate-500">Usage is read from Sarvam, so it is not available while the backend is in simulated mode.</p>
-        )}
-        {usage && usage.configured && usage.error && (
-          <p className="text-xs text-rose-700">Could not read usage from Sarvam: {usage.error}</p>
-        )}
-
-        {usage && usage.window && (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <UsageCell title="Today" data={usage.today} />
-              <UsageCell title="Last 7 days" data={usage.week} />
-              <UsageCell title={`Last ${usage.window_days} days`} data={usage.window} />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-              <label htmlFor="rate" className="font-semibold">Rate per billed minute (₹)</label>
-              <input
-                id="rate"
-                type="number"
-                min="0"
-                step="0.05"
-                value={rateInput}
-                onChange={(e) => setRateInput(e.target.value)}
-                className="w-24 px-2 py-1 border border-slate-200 rounded-lg text-xs"
-              />
-              <button
-                onClick={handleSaveRate}
-                className="px-3 py-1 rounded-lg bg-trust-navy text-white font-semibold hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                Save rate
-              </button>
-              {rateMessage && (
-                <span className={rateMessage.ok ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold'}>{rateMessage.text}</span>
-              )}
-              <span className="text-slate-400">Sarvam pay-as-you-go is ₹3.50 (Pro 3.25, Growth 3.15), before GST.</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-[10px] uppercase tracking-wider text-slate-400">
-                    <th className="py-2 pr-4">Day</th>
-                    <th className="py-2 pr-4">Calls</th>
-                    <th className="py-2 pr-4">Connected</th>
-                    <th className="py-2 pr-4">Billed minutes</th>
-                    <th className="py-2">Amount (estimate)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {usage.days.map((d) => (
-                    <tr key={d.date}>
-                      <td className="py-2 pr-4 font-mono text-slate-700">{d.date}</td>
-                      <td className="py-2 pr-4">{d.calls}</td>
-                      <td className="py-2 pr-4">{d.connected}</td>
-                      <td className="py-2 pr-4">{d.billed_minutes}</td>
-                      <td className="py-2 font-semibold text-slate-900">{rupees(d.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-
-        <p className="text-[11px] text-slate-500 leading-relaxed">
-          {usage ? usage.note : 'Remaining credits are shown only on Sarvam, under Settings, Billing ("Credits Left").'}
-        </p>
-      </div>
     </div>
   );
 };
