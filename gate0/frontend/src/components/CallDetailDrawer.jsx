@@ -110,6 +110,11 @@ export const CallDetailDrawer = ({ call, onClose }) => {
 
         {/* Drawer Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-5 md:p-6 space-y-6">
+          {(call.status === 'In Call' || call.status === 'In Queue') && (
+            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-xs font-semibold" role="status">
+              {call.status === 'In Call' ? 'This call is in progress.' : 'This call is waiting in the queue.'} The result, transcript and weather appear here when it ends.
+            </div>
+          )}
           {/* Farmer Profile Card */}
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
             <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">

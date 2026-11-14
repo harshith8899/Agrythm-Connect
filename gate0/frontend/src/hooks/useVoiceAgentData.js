@@ -131,7 +131,9 @@ export const useVoiceAgentData = () => {
   }, [fetchAllData]);
 
   // Periodic polling (faster while a send is running, so results appear as calls finish)
-  const sending = Boolean(autoDispatcher.running);
+  // a call that is waiting or on the phone right now (the call log shows it as In Queue or In Call)
+  const callLive = callLogs.some((c) => c.status === 'In Call' || c.status === 'In Queue');
+  const sending = Boolean(autoDispatcher.running) || callLive;
   useEffect(() => {
     if (!autoPollInterval || autoPollInterval <= 0) return;
 
@@ -177,6 +179,7 @@ export const useVoiceAgentData = () => {
         'not confirmed': 'Not Confirmed', 'declined': 'Declined', 'unanswered': 'Unanswered', 'busy': 'Unanswered', 'no_answer': 'Unanswered',
         'retrying': 'Retrying', 'failed': 'Failed', 'skipped': 'Skipped', 'escalated': 'Escalated',
         'requires escalation': 'Escalated', 'calling': 'Calling', 'scheduled': 'Scheduled',
+        'in call': 'In Call', 'in queue': 'In Queue',
       };
       const normalizedStatus = statusWords[String(rawStatus).toLowerCase()] || String(rawStatus);
 
@@ -323,7 +326,8 @@ export const useVoiceAgentData = () => {
       return Boolean(raw) && isCallOnDate(raw, customDate);
     };
     const scoped = enrichedCallLogs.filter(c => !c.is_test && inScope(c));
-    const called = scoped.filter(c => c.status !== 'Skipped');
+    const waiting = (c) => c.status === 'In Call' || c.status === 'In Queue';
+    const called = scoped.filter(c => c.status !== 'Skipped' && !waiting(c));       // calls that have a result
     const scopeLabel = dateFilter === 'today' ? 'Today' : dateFilter === 'yesterday' ? 'Yesterday'
       : customDate ? customDate : 'All dates';
 
@@ -335,7 +339,8 @@ export const useVoiceAgentData = () => {
       needsAttentionCount: called.filter(c => ['Failed', 'Not Confirmed', 'Callback Missed'].includes(c.status)).length,
       declinedCount: called.filter(c => c.status === 'Declined').length,
       callbacksScheduled: scoped.filter(c => c.callback_status === 'pending').length,
-      skippedCount: scoped.length - called.length,
+      skippedCount: scoped.filter(c => c.status === 'Skipped').length,
+      inProgressCount: scoped.filter(waiting).length,
     };
   }, [enrichedCallLogs, dateFilter, customDate]);
 

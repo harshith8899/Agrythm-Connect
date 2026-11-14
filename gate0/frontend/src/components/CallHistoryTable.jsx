@@ -106,6 +106,23 @@ export const CallHistoryTable = ({
             <span>Failed</span>
           </span>
         );
+      case 'in call':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" style={{ transformBox: 'fill-box', transformOrigin: 'center' }} />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600" />
+            </span>
+            <span>In Call</span>
+          </span>
+        );
+      case 'in queue':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+            <Clock className="w-3 h-3 text-slate-500" />
+            <span>In Queue</span>
+          </span>
+        );
       case 'calling':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">

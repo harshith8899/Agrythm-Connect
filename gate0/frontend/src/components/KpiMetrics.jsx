@@ -15,6 +15,7 @@ export const KpiMetrics = ({ metrics, loading = false }) => {
   const unanswered = metrics.retryingCount || 0;
   const needsAttention = metrics.needsAttentionCount || 0;
   const skipped = metrics.skippedCount || 0;
+  const inProgress = metrics.inProgressCount || 0;
   const scope = metrics.scopeLabel || 'All dates';
   const completionPct = called > 0 ? `${Math.round((completed / called) * 100)}%` : '0%';
 
@@ -22,6 +23,7 @@ export const KpiMetrics = ({ metrics, loading = false }) => {
     <section className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1 text-[11px] text-slate-500">
         <span>Summary for <strong className="text-slate-800">{scope}</strong>, counted per farmer</span>
+        {inProgress > 0 && <span className="font-semibold text-blue-700">{inProgress} in progress, counted when they end</span>}
         {skipped > 0 && <span>{skipped} skipped (no consent, inactive or no weather), not counted</span>}
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3.5">

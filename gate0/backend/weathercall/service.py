@@ -38,6 +38,7 @@ CALL_FROM, CALL_TO = dtime(5, 0), dtime(22, 0)   # callbacks only inside these h
 GRACE_MINUTES = 30        # a callback not placed within this long after its time is marked missed, not called late
 MAX_RELATIVE_MINUTES = 12 * 60
 NETWORK_DROP = "network_drop"   # set by the Sarvam adapter when a connected call was cut by the network
+LIVE_STALE_MINUTES = 20      # an In Queue or In Call row older than this belongs to a process that stopped: it is dropped
 INTERRUPTED_MINUTES = 10     # a retry or callback still 'calling' after this long means the process stopped mid-call
 MAX_FREE_RETRIES = 2        # a dropped call (network) is retried twice a day without counting as an attempt
 NETWORK_RETRY_MIN = 5
@@ -69,6 +70,9 @@ CREATE TABLE IF NOT EXISTS dash_alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, at 
 CREATE TABLE IF NOT EXISTS dash_retries(
   farmer_id TEXT, call_date TEXT, attempt_no INT, due_at TEXT, status TEXT, note TEXT,
   PRIMARY KEY(farmer_id, call_date, attempt_no));
+-- a call that is waiting or on the phone right now (one row per farmer); the result replaces it when the call ends
+CREATE TABLE IF NOT EXISTS dash_live(
+  farmer_id TEXT PRIMARY KEY, call_date TEXT, kind TEXT, attempt_no INT, state TEXT, since TEXT);
 CREATE TABLE IF NOT EXISTS dash_settings(key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -148,6 +152,8 @@ class DashboardService:
         self.db.executescript(_SCHEMA)
         if "reschedules" not in table_columns(self.db, "dash_callbacks"):      # databases made before the reschedule limit
             self.db.execute("ALTER TABLE dash_callbacks ADD COLUMN reschedules INT DEFAULT 0")
+        self.db.execute("DELETE FROM dash_live")           # nothing is in progress in a process that has just started
+        self.db.commit()
         self.settings = Settings.from_env()
         self.dialler, self.note = (dialler, note) if dialler else make_dialler(env)
         e = env if env is not None else os.environ
@@ -378,6 +384,74 @@ class DashboardService:
             self.db.commit()
         return next(f for f in self.farmers() if f["farmer_id"] == fid)
 
+    # -- calls in progress: shown on the call log from the moment they are triggered --------------------------------
+    def _live_set(self, fid: str, day: date, kind: str, attempt: int, state: str) -> None:
+        """Marks the farmer In Queue ('queued') or In Call ('calling') on the call log. Never raises: showing a call must
+        never stop one."""
+        try:
+            with self.lock:
+                self.db.execute("INSERT OR REPLACE INTO dash_live VALUES(?,?,?,?,?,?)",
+                                (fid, day.isoformat(), kind, attempt, state, self._now().isoformat(timespec="seconds")))
+                self.db.commit()
+        except Exception:
+            pass
+
+    def _live_clear(self, fid: str) -> None:
+        try:
+            with self.lock:
+                self.db.execute("DELETE FROM dash_live WHERE farmer_id=?", (fid,))
+                self.db.commit()
+        except Exception:
+            pass
+
+    def _live_rows(self) -> list[tuple]:
+        """(farmer, day, kind, attempt, state, since) of calls waiting or on the phone, without the stale ones."""
+        with self.lock:
+            try:
+                rows = self.db.execute("SELECT farmer_id, call_date, kind, attempt_no, state, since FROM dash_live").fetchall()
+            except OperationalError:
+                return []
+        keep, now = [], self._now()
+        for r in rows:
+            try:
+                fresh = now - datetime.fromisoformat(r[5]) <= timedelta(minutes=LIVE_STALE_MINUTES)
+            except (TypeError, ValueError):
+                fresh = False
+            if fresh:
+                keep.append(r)
+            else:
+                self._live_clear(r[0])
+        return keep
+
+    def _live_label(self, lv: tuple) -> tuple[str, str]:
+        """The dashboard's status and disposition for a call that is waiting or on the phone."""
+        _, _, kind, attempt, state, _ = lv
+        what = {"retry": f"attempt {attempt} of {self.settings.max_attempts}", "callback": "callback", "test": "test call",
+                "manual": "call placed by hand"}.get(kind, "today's call")
+        if state == "calling":
+            return "In Call", f"Calling now ({what})"
+        return "In Queue", f"Waiting in the queue ({what})"
+
+    def _live_row(self, lv: tuple) -> dict:
+        """A call log row for a call that has no result yet (its first call of the day, a test, or a callback)."""
+        fid, day, kind, attempt, state, since = lv
+        with self.lock:
+            f = self.db.execute("SELECT name, phone, language, village, district FROM dash_farmers WHERE farmer_id=?", (fid,)).fetchone()
+        name, phone, lang, village, district = f or (None, "", "", "", "")
+        status, disposition = self._live_label(lv)
+        test = kind == "test"
+        return {
+            "call_id": f"TEST-LIVE-{fid}" if test else f"{fid}-{day}", "is_test": test, "live": True, "farmer_id": fid,
+            "farmer_name": name or f"Farmer {fid}", "phone_number": mask_phone(phone or ""),
+            "location": ", ".join(x for x in (village, district) if x), "village": village or "", "district": district or "",
+            "call_date": day, "created_at": since, "language": _LANG_LABELS[Language(lang)] if lang else "",
+            "weather_temp": None, "weather_windspeed": None, "weather_rainfall": None, "weather_humidity": None,
+            "weather_source": "", "status": status, "disposition": f"Test call: {disposition}" if test else disposition,
+            "note": "", "retry_count": 0, "duration_seconds": 0, "attempts_used": 0, "max_attempts": self.settings.max_attempts,
+            "next_attempt_at": None, "scheduled_callback_time": None, "callback_status": None, "callback_requested_text": "",
+            "summary": "", "understood_weather": "", "stop_calls_requested": "", "transcript": [], "attempts_log": [],
+            "call_mode": self.dialler.mode, "attempt_id": ""}
+
     # -- sending the day's calls ---------------------------------------------------------------------------------
     def _save(self, fid: str, day: date, **kw) -> None:
         cols = ["status", "note", "weather", "attempt_id", "mode", "language", "duration_s", *OUTPUT_VARS, "transcript"]
@@ -391,7 +465,7 @@ class DashboardService:
         # only variables the agent declares (Sarvam returns 422 otherwise); now_text lets it confirm callback days
         return weather_variables(farmer, w, format_now(self._now()))
 
-    def fire_one(self, fid: str, day: date) -> str:
+    def fire_one(self, fid: str, day: date, kind: str = "daily") -> str:
         prepared = prepare_call(CallRequest(fid, day), self.ports, self.settings)
         if isinstance(prepared, FarmerDayResult):
             reason = prepared.skip_reason.value if prepared.skip_reason else prepared.result.value
@@ -412,6 +486,7 @@ class DashboardService:
                     self._alert("weather_unavailable", fid, "No weather for this farmer today, so no call was made.")
             return reason
         farmer, w = prepared.farmer, prepared.weather
+        self._live_set(fid, day, kind, 1, "calling")
         res, out = self._place(farmer, w)
         self.ports.ledger.record_attempt(CallAttempt(
             farmer_id=fid, call_date=day, attempt_no=1, status=res.status, language=farmer.language,
@@ -529,6 +604,9 @@ class DashboardService:
                 return 0
             ports = self._make_ports()
             for fid, day, attempt_no, due_at in due:
+                if datetime.fromisoformat(due_at) >= now - timedelta(minutes=GRACE_MINUTES):
+                    self._live_set(fid, date.fromisoformat(day), "retry", attempt_no, "queued")
+            for fid, day, attempt_no, due_at in due:
                 if datetime.fromisoformat(due_at) < now - timedelta(minutes=GRACE_MINUTES):
                     self._retry_update(fid, day, attempt_no, "missed", f"not placed within {GRACE_MINUTES} min")
                     continue
@@ -537,6 +615,8 @@ class DashboardService:
                     outcome = self._retry_one(ports, fid, date.fromisoformat(day), attempt_no)
                 except Exception as exc:
                     outcome = f"error: {type(exc).__name__}"
+                finally:
+                    self._live_clear(fid)
                 self._retry_update(fid, day, attempt_no, "done" if outcome == "placed" else "dropped", "" if outcome == "placed" else outcome)
                 placed += outcome == "placed"
         return placed
@@ -548,6 +628,7 @@ class DashboardService:
         w = ports.weather.get_weather(farmer.place_name, farmer.latitude, farmer.longitude, day)
         if w is None:
             return "weather_unavailable"
+        self._live_set(fid, day, "retry", attempt_no, "calling")
         res, out = self._place(farmer, w)
         try:
             ports.ledger.record_attempt(CallAttempt(
@@ -567,12 +648,17 @@ class DashboardService:
         try:
             self.ports = self._make_ports()
             counts: dict[str, int] = {}
-            for fid in self.ports.farmers.list_callable_ids(day):
+            ids = self.ports.farmers.list_callable_ids(day)
+            for fid in ids:                                 # everyone waiting shows as In Queue from the start
+                self._live_set(fid, day, "daily", 1, "queued")
+            for fid in ids:
                 try:
                     outcome = self.fire_one(fid, day)
                 except Exception as exc:                    # one farmer never stops the others
                     self._save(fid, day, status="error", note=type(exc).__name__, mode=self.dialler.mode)
                     outcome = "error"
+                finally:
+                    self._live_clear(fid)
                 counts[outcome] = counts.get(outcome, 0) + 1
             self.last_run = {"date": day.isoformat(), "counts": counts, "at": self._now().strftime("%H:%M:%S")}
         finally:
@@ -645,6 +731,7 @@ class DashboardService:
             kind, seq, attempt = "retry", len(errors) + 1, counted + 1
         with self.lock:
             self._manual.add(fid)
+        self._live_set(fid, day, "test" if mode == "test" else "manual", attempt, "queued")
 
         def work():
             try:
@@ -655,7 +742,7 @@ class DashboardService:
                     ports = self._make_ports()
                     if kind == "first":
                         self.ports = ports
-                        self.fire_one(fid, day)
+                        self.fire_one(fid, day, "manual")
                     else:
                         with self.lock:
                             self.db.execute("UPDATE dash_retries SET status='superseded', note='called by hand' "
@@ -665,6 +752,7 @@ class DashboardService:
             except Exception:
                 pass
             finally:
+                self._live_clear(fid)
                 with self.lock:
                     self._manual.discard(fid)
         threading.Thread(target=work, daemon=True).start()
@@ -681,11 +769,15 @@ class DashboardService:
         if w is None:
             self._save_test(fid, stamp, "skipped", "weather_unavailable", {}, "", farmer.language.value, 0, {})
             return
-        res, out = self._place(farmer, w)
-        weather = {"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
-                   "humidity": w.humidity_pct, "source": w.source}
-        self._save_test(fid, stamp, res.status.value, res.error, weather, res.provider_call_id, farmer.language.value,
-                        res.duration_s or 0, out)
+        self._live_set(fid, self._now().date(), "test", 1, "calling")
+        try:
+            res, out = self._place(farmer, w)
+            weather = {"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
+                       "humidity": w.humidity_pct, "source": w.source}
+            self._save_test(fid, stamp, res.status.value, res.error, weather, res.provider_call_id, farmer.language.value,
+                            res.duration_s or 0, out)
+        finally:
+            self._live_clear(fid)                           # the saved Test row replaces the In Call row
 
     def _save_test(self, fid, stamp, status, note, weather, attempt_id, language, duration, out) -> None:
         transcript = [{"speaker": m["speaker"], "text": scrub(m["text"])} for m in out.pop("transcript", None) or []]
@@ -767,6 +859,9 @@ class DashboardService:
                 return 0
             ports = self._make_ports()
             for fid, due_at, source_date in due:
+                if datetime.fromisoformat(due_at) >= now - timedelta(minutes=GRACE_MINUTES):
+                    self._live_set(fid, datetime.fromisoformat(due_at).date(), "callback", 1, "queued")
+            for fid, due_at, source_date in due:
                 if datetime.fromisoformat(due_at) < now - timedelta(minutes=GRACE_MINUTES):
                     self._cb_update(fid, due_at, status="missed",
                                     note=f"not placed within {GRACE_MINUTES} min of the requested time")
@@ -776,6 +871,8 @@ class DashboardService:
                     placed += self._callback_one(ports, fid, due_at, date.fromisoformat(source_date))
                 except Exception as exc:                    # never retried, never stops the others
                     self._cb_update(fid, due_at, status="error", note=type(exc).__name__)
+                finally:
+                    self._live_clear(fid)
         return placed
 
     def _callback_one(self, ports: Ports, fid: str, due_at: str, source_day: date) -> int:
@@ -788,6 +885,7 @@ class DashboardService:
         if w is None:
             self._cb_update(fid, due_at, status="skipped", note="weather_unavailable")
             return 0
+        self._live_set(fid, due_day, "callback", 1, "calling")
         try:
             res = self.dialler.place(farmer.phone, _LANG_NAMES[farmer.language], self._variables(farmer, w))
         except Exception as exc:
@@ -1063,6 +1161,15 @@ class DashboardService:
                 "transcript": json.loads(transcript) if transcript else [], "attempts_log": attempts,
                 "call_mode": mode or "", "attempt_id": attempt_id or ""})
         out += self._test_rows()
+        live = {lv[0]: lv for lv in self._live_rows()}
+        shown = set()
+        for c in out:                                       # a farmer being called now: the row says so
+            lv = live.get(c["farmer_id"])
+            if lv and not c.get("is_test") and lv[2] != "test" and lv[1] == c["call_date"]:
+                c["status"], c["disposition"] = self._live_label(lv)
+                c.update(created_at=lv[5], next_attempt_at=None, live=True)
+                shown.add(c["farmer_id"])
+        out += [self._live_row(lv) for fid, lv in live.items() if fid not in shown]
         out.sort(key=lambda c: c["created_at"] or "", reverse=True)
         return out
 
