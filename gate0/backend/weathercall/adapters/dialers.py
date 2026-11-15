@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.parse
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..contracts import ProviderCallResult
 from .mock import MockTelephony
-from .sarvam_agent import BASE, SarvamAgentTelephony, to_e164
+from .sarvam_agent import BASE, SarvamAgentTelephony, _result_from, to_e164
 from .sarvam_campaign import scrub
 
 OUTPUT_VARS = ("call_summary", "callback_time", "understood_weather", "stop_calls_requested")
@@ -33,6 +34,14 @@ class MockDialler:
     def find_call(self, phone, start, end):
         return None                                  # simulated calls leave no record anywhere else
 
+    inbound_ready = False                            # no inbound line in simulation
+
+    def push_inbound(self, phone, farmer_id, language_name, variables, cohort_name) -> str:
+        return ""
+
+    def find_inbound(self, phone, start, end, known_ids):
+        return None
+
     def outputs(self, attempt_id: str) -> dict:
         return {"call_summary": "(simulated) the farmer heard the weather update and said they understood.",
                 "callback_time": "", "understood_weather": "yes", "stop_calls_requested": "no",
@@ -42,6 +51,42 @@ class MockDialler:
 class SarvamDialler(SarvamAgentTelephony):
     mode = "Sarvam"
     live = True
+
+    def __init__(self, env: dict | None = None, **kw):
+        super().__init__(env=env, **kw)
+        e = env if env is not None else os.environ
+        self.inbound_deployment = (e.get("SARVAM_INBOUND_DEPLOYMENT_ID") or "").strip()   # the inbound deployment farmers call back on
+
+    @property
+    def inbound_ready(self) -> bool:
+        return bool(self.inbound_deployment)
+
+    def push_inbound(self, phone, farmer_id, language_name, variables, cohort_name) -> str:
+        """Tells the inbound deployment who this number is: when it calls in, the agent starts with these variables.
+        Sarvam matches the caller by number (a cohort of known callers). Returns the cohort id."""
+        if not self.inbound_ready:
+            raise RuntimeError("SARVAM_INBOUND_DEPLOYMENT_ID is not set")
+        body = {"name": cohort_name, "users": [{"user_phone_number": to_e164(phone), "user_identifier": farmer_id,
+                                                  "app_variables": variables,
+                                                  "app_overrides": {"initial_language_name": language_name}}]}
+        url = f"{BASE}/scheduling/v1/orgs/{self.org}/workspaces/{self.ws}/deployments/{self.inbound_deployment}/cohorts/stream"
+        return str(self._request(url, body).get("cohort_id", ""))
+
+    def find_inbound(self, phone, start, end, known_ids):
+        """A connected call from this number (last 4 digits) between start and end that is not one of ours: the
+        farmer calling back. Returns (result, when it ended in UTC) or None."""
+        last4 = re.sub(r"\D", "", phone or "")[-4:]
+        q = urllib.parse.urlencode({"start_datetime": start.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                                    "end_datetime": end.astimezone(timezone.utc).isoformat(timespec="seconds"), "limit": 100})
+        items = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}").get("items", [])
+        mine = sorted((i for i in items if last4 and str(i.get("user_contact_masked") or "")[-4:] == last4
+                       and i.get("attempt_id") not in known_ids), key=lambda i: i.get("attempted_at") or "")
+        for item in mine:
+            result = _result_from(item, item.get("attempt_id") or "")
+            if result is not None and result.status.value == "answered":
+                began = datetime.fromisoformat(str(item["attempted_at"]).replace("Z", "")).replace(tzinfo=timezone.utc)
+                return result, began + timedelta(seconds=result.duration_s or 0)
+        return None
 
     def place(self, phone, language_name, variables) -> ProviderCallResult:
         started = self._now()
