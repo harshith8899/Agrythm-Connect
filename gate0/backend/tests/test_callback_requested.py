@@ -40,9 +40,18 @@ def test_a_test_call_with_a_callback_request_says_callback_requested_not_unanswe
     s._test_call("F1")
     row = s.calls()[0]
     assert row["status"] == "Callback Requested"
-    assert "Test call" in row["disposition"] and "14:15" in row["disposition"]
+    assert "Test call" in row["disposition"] and "14:15" in row["disposition"] and "booked for 15 Nov, 02:15 PM" in row["disposition"]
     assert row["callback_requested_text"] == "14:15"
-    assert s.db.execute("SELECT COUNT(*) FROM dash_callbacks").fetchone()[0] == 0      # a test never books a real call
+    assert s.db.execute("SELECT COUNT(*) FROM dash_callbacks WHERE status='pending'").fetchone()[0] == 1   # booked like a real one
+
+
+def test_the_callback_asked_for_on_a_test_call_is_placed_at_its_time(tmp_path):
+    d = Asked()
+    s = make(tmp_path, d)
+    s._test_call("F1")
+    assert s.run_due_callbacks(T0) == 0                                              # not yet 14:15
+    from datetime import timedelta
+    assert s.run_due_callbacks(T0 + timedelta(minutes=6)) == 1                        # 14:16: the call goes out
 
 
 def test_a_real_call_whose_callback_time_cannot_be_read_is_never_shown_as_unanswered(tmp_path):

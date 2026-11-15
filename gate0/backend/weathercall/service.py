@@ -841,9 +841,12 @@ class DashboardService:
             res, out = self._place(farmer, w)
             weather = {"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
                        "humidity": w.humidity_pct, "source": w.source}
+            asked = out.get("callback_time") if out.get("stop_calls_requested") != "yes" else ""
             self._save_test(fid, stamp, res.status.value, res.error, weather, res.provider_call_id, farmer.language.value,
                             res.duration_s or 0, out)
             self._email_after_test(fid, res, out, weather)
+            if asked:                                       # a test call books the callback the farmer asked for, like a real one
+                self._schedule_callback(fid, self._now().date(), asked)
         finally:
             self._live_clear(fid)                           # the saved Test row replaces the In Call row
 
@@ -882,13 +885,17 @@ class DashboardService:
                 "t.call_summary, t.callback_time, t.understood_weather, t.stop_calls_requested, t.transcript, "
                 "f.name, f.phone, f.village, f.district FROM dash_tests t LEFT JOIN dash_farmers f ON f.farmer_id=t.farmer_id "
                 "ORDER BY t.id DESC LIMIT 200").fetchall()
-        label = {"answered": "Answered", "no_answer": "No Answer or Rejected", "busy": "Busy", "failed": "Failed"}
+            booked_cbs = {(f, s): d for f, s, d in self.db.execute(
+                "SELECT farmer_id, source_date, due_at FROM dash_callbacks WHERE status<>'skipped'").fetchall()}
+        label ={"answered": "Answered", "no_answer": "No Answer or Rejected", "busy": "Busy", "failed": "Failed"}
         out = []
         for (tid, fid, at, status, note, weather, attempt_id, lang, dur, summary, cb, understood, stop, transcript,
              name, phone, village, district) in rows:
             dash_status, disposition = self._status_for(status, understood or "", False, False, None, bool((cb or "").strip()))
             if dash_status == "Callback Requested":
-                disposition = f"Callback requested for {cb} (a test call does not book it)"
+                booked = booked_cbs.get((fid, at[:10]))
+                disposition = (f"Callback requested for {cb} (booked for {datetime.fromisoformat(booked).strftime('%d %b, %I:%M %p')})"
+                               if booked else f"Callback requested for {cb} (not booked: time not understood or outside hours)")
             if status == "skipped":
                 disposition = (note or "skipped").replace("_", " ").title()
             w = json.loads(weather) if weather else {}
