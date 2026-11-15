@@ -118,6 +118,34 @@ def parse_callback(text: str, now: datetime) -> datetime | None:
     return due
 
 
+_SPOKEN_CLOCK = re.compile(r"\b(\d{1,2})[:.]([0-5]\d)\b")
+
+
+def callback_time_problem(callback_text: str, transcript: list[dict], at: datetime) -> str:
+    """A sentence for the team when the callback the agent recorded does not fit the call, or "" when it does.
+    1. The agent promised a different time than the farmer asked for (the farmer said 5:45, the agent said 5:30): the call is
+       still scheduled at the time the farmer asked for, and the team is told what the farmer heard.
+    2. A clock time that had already passed when the call ended was moved to tomorrow (parse_callback's rule): said once so it is
+       not a surprise. Needs the English of the conversation (Sarvam's translation) to read what the agent said."""
+    due = parse_callback(callback_text, at)
+    if due is None:
+        return ""
+    problems = []
+    said = None
+    for turn in transcript or []:
+        if str(turn.get("speaker", "")).lower().startswith("agent"):
+            found = _SPOKEN_CLOCK.findall(str(turn.get("en") or turn.get("text") or ""))
+            if found:
+                said = found[-1]                       # the last time the agent spoke
+    if said is not None and (int(said[0]) % 12, int(said[1])) != (due.hour % 12, due.minute):
+        problems.append(f"The farmer asked for {due:%H:%M}, but the agent confirmed {int(said[0])}:{said[1]}. "
+                        f"The callback is set for {due:%H:%M}; the farmer may expect {int(said[0])}:{said[1]}.")
+    if due.date() > at.date() and not re.search(r"tomorrow|कल|ನಾಳೆ", callback_text or "", re.I) and ":" in (callback_text or ""):
+        problems.append(f"{callback_text.strip()} had already passed when the call ended, so the callback is set for tomorrow "
+                        f"({due:%d %b %H:%M}). Check it with the farmer.")
+    return " ".join(problems)
+
+
 def mask_phone(phone: str) -> str:
     return "******" + (phone or "")[-4:]
 
@@ -461,6 +489,14 @@ class DashboardService:
                             (fid, day.isoformat(), *vals, self._now().isoformat(timespec="seconds")))
             self.db.commit()
 
+    @staticmethod
+    def _turn(m: dict) -> dict:
+        """One saved message: who, what was said, and its English translation when there is one. Phone-like numbers are masked."""
+        turn = {"speaker": m["speaker"], "text": scrub(m["text"])}
+        if m.get("en"):
+            turn["en"] = scrub(m["en"])
+        return turn
+
     def _variables(self, farmer: FarmerContext, w) -> dict:
         # only variables the agent declares (Sarvam returns 422 otherwise); now_text lets it confirm callback days
         return weather_variables(farmer, w, format_now(self._now()))
@@ -518,7 +554,7 @@ class DashboardService:
         if weather is None:
             weather = ({"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
                         "humidity": w.humidity_pct, "source": w.source} if w is not None else {})
-        transcript = [{"speaker": m["speaker"], "text": scrub(m["text"])} for m in out.pop("transcript", None) or []]
+        transcript = [self._turn(m) for m in out.pop("transcript", None) or []]
         if out.get("call_summary"):
             out["call_summary"] = scrub(out["call_summary"])            # free text: phone-like numbers masked
         self._save(fid, day, status=res.status.value, note=res.error, weather=json.dumps(weather),
@@ -530,6 +566,9 @@ class DashboardService:
             self._note_decline(fid, day)
         if out.get("callback_time") and out.get("stop_calls_requested") != "yes":
             self._schedule_callback(fid, day, out["callback_time"], now=at)
+            problem = callback_time_problem(out["callback_time"], transcript, at or self._now())
+            if problem:
+                self._alert("callback_time", fid, problem)
         if not self._plan_retry(fid, day, attempt_no, res.status, out, res.error, at) and res.status is AttemptStatus.FAILED:
             self._alert("provider_failure", fid,
                         f"The call failed and will not be retried ({scrub(res.error or 'provider error')[:80]}).")
@@ -784,7 +823,7 @@ class DashboardService:
             self._live_clear(fid)                           # the saved Test row replaces the In Call row
 
     def _save_test(self, fid, stamp, status, note, weather, attempt_id, language, duration, out) -> None:
-        transcript = [{"speaker": m["speaker"], "text": scrub(m["text"])} for m in out.pop("transcript", None) or []]
+        transcript = [self._turn(m) for m in out.pop("transcript", None) or []]
         with self.lock:
             self.db.execute(
                 "INSERT INTO dash_tests(farmer_id, at, status, note, weather, attempt_id, language, duration_s, call_summary, "
