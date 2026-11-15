@@ -3,7 +3,8 @@ from datetime import date, datetime
 
 from weathercall.adapters.mailer import NullMailer, RecordingMailer, SmtpMailer, make_mailer
 from weathercall.contracts import AttemptStatus, Language, ProviderCallResult
-from weathercall.messages import KIND_MISSED, KIND_WEATHER, build_email
+from weathercall.messages import (KIND_CALLBACK_MISSED, KIND_CALLBACK_WEATHER, KIND_MISSED, KIND_WEATHER, KINDS,
+                                  build_email)
 from weathercall.service import DashboardService, IST, mask_email
 
 A = AttemptStatus
@@ -66,7 +67,7 @@ def test_a_successful_call_sends_the_weather_email_once(tmp_path):
     saved = s._saved_weather("F1", D.isoformat())
     assert to == "ramesh@example.com" and "Mandya" in subject and "Ramesh" in body
     assert all(str(int(saved[k])) in body for k in ("temp_min", "temp_max", "wind", "rain", "humidity"))
-    assert "हमने" not in body                                   # the 'we tried to reach you' line is only for a missed call
+    assert "could not reach you" not in body                    # that line is only for a missed call
     assert s._send_message("F1", D, KIND_WEATHER) == "not sent: already sent"      # never twice for the same day
     assert [m["status"] for m in s.messages()] == ["sent"]
 
@@ -74,7 +75,7 @@ def test_a_successful_call_sends_the_weather_email_once(tmp_path):
 def test_the_last_failed_attempt_sends_a_we_tried_to_reach_you_email(tmp_path):
     s, mail = make(tmp_path, Dial(A.NO_ANSWER, ""), now=datetime(2026, 11, 15, 21, 50, tzinfo=IST))
     s.fire_one("F1", D)                                         # a retry would fall after 22:00: this was the last chance
-    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("हमने")
+    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("We could not reach you today")
     assert s.messages()[0]["kind"] == KIND_MISSED
 
 
@@ -99,14 +100,25 @@ def test_a_callback_that_is_not_picked_up_sends_the_missed_email(tmp_path):
     assert mail.sent == []                                      # a callback is booked: nothing yet
     s.dialler = Dial(A.NO_ANSWER, "")
     assert s.run_due_callbacks(datetime(2026, 11, 15, 14, 16, tzinfo=IST)) == 1
-    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("हमने")
+    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("We called you back at 14:15 but could not reach you")
+    assert "You asked us to call you back at 14:15" in mail.sent[0][2] and "will not call again today" in mail.sent[0][2]
+    assert s.messages()[0]["kind"] == KIND_CALLBACK_MISSED
+
+
+def test_a_callback_that_went_through_sends_the_callback_weather_email(tmp_path):
+    s, mail = make(tmp_path, Dial(A.ANSWERED, "no_response", callback="14:15"))
+    s.fire_one("F1", D)
+    s.dialler = Dial(A.ANSWERED, "yes")
+    assert s.run_due_callbacks(datetime(2026, 11, 15, 14, 16, tzinfo=IST)) == 1
+    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("Your requested call back")
+    assert s.messages()[0]["kind"] == KIND_CALLBACK_WEATHER
 
 
 def test_a_missed_callback_time_sends_the_missed_email(tmp_path):
     s, mail = make(tmp_path, Dial(A.ANSWERED, "no_response", callback="14:15"))
     s.fire_one("F1", D)
     s.run_due_callbacks(datetime(2026, 11, 15, 15, 0, tzinfo=IST))      # 45 minutes late: marked missed, not called
-    assert len(mail.sent) == 1
+    assert len(mail.sent) == 1 and "14:15" in mail.sent[0][1]
 
 
 def test_no_email_address_or_no_smtp_settings_is_recorded_not_fatal(tmp_path):
@@ -141,12 +153,16 @@ def test_in_test_mode_every_farmers_message_goes_to_the_one_test_address(tmp_pat
     assert [m["status"] for m in s.messages()] == ["sent", "sent"]
 
 
-def test_the_email_text_is_in_the_farmers_language_with_only_the_weather_facts():
-    for lang in Language:
-        subject, body = build_email("Ramesh", lang, "Mandya", WEATHER, KIND_WEATHER)
-        assert "Mandya" in subject and "27.5" in body and "14" in body and "Ramesh" in body
-    en = build_email("Ramesh", Language.EN, "Mandya", WEATHER, KIND_MISSED)[1]
-    assert "tried to call you" in en
+def test_the_email_text_is_english_with_only_the_weather_facts_and_the_subject_follows_the_situation():
+    subjects = set()
+    for kind in KINDS:
+        subject, body = build_email("Ramesh", "Mandya", WEATHER, kind, "14:15")
+        subjects.add(subject)
+        assert "Mandya" in subject and body.startswith("Hello Ramesh,") and "27.5" in body and "40 percent" in body
+        assert body.isascii()
+    assert len(subjects) == len(KINDS)                          # each situation has its own subject
+    assert "tried to call you" in build_email("Ramesh", "Mandya", WEATHER, KIND_MISSED)[1]
+    assert "tried to call you" not in build_email("Ramesh", "Mandya", WEATHER, KIND_WEATHER)[1]
 
 
 def test_mailer_choice_and_secrets(monkeypatch):

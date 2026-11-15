@@ -33,7 +33,8 @@ from .db import IntegrityError, OperationalError, connect, table_columns
 from .contracts import (AttemptStatus, CallAttempt, CallRequest, FarmerContext, FarmerDayResult, Language,
                         ProviderCallResult)
 from .engine import Ports, final_result, prepare_call
-from .messages import KIND_MISSED, KIND_WEATHER, build_email, has_full_weather
+from .messages import (KIND_CALLBACK_MISSED, KIND_CALLBACK_WEATHER, KIND_MISSED, KIND_WEATHER, build_email,
+                       has_full_weather)
 from .script import format_now, weather_variables
 
 CALL_FROM, CALL_TO = dtime(5, 0), dtime(22, 0)   # callbacks only inside these hours (IST), set by the team on 5 Nov
@@ -912,8 +913,9 @@ class DashboardService:
                 if datetime.fromisoformat(due_at) < now - timedelta(minutes=GRACE_MINUTES):
                     self._cb_update(fid, due_at, status="missed",
                                     note=f"not placed within {GRACE_MINUTES} min of the requested time")
-                    self._send_message(fid, datetime.fromisoformat(due_at).date(), KIND_MISSED,
-                                       self._saved_weather(fid, source_date))
+                    self._send_message(fid, datetime.fromisoformat(due_at).date(), KIND_CALLBACK_MISSED,
+                                       self._saved_weather(fid, source_date),
+                                       callback_time=datetime.fromisoformat(due_at).strftime("%H:%M"))
                     continue
                 self._cb_update(fid, due_at, status="calling", note=now.isoformat(timespec="seconds"))   # claimed at
                 try:
@@ -981,7 +983,8 @@ class DashboardService:
                             f"Asked to move the callback again after {MAX_RESCHEDULES} reschedules; no more callbacks.")
         # a callback is never retried: the message follows it (the weather if understood, 'we tried to reach you' if not)
         self._message_after_call(fid, due_day, res, out, weather or self._saved_weather(fid, source_day.isoformat()),
-                                 more_to_come=bool(out.get("callback_time")) and out.get("stop_calls_requested") != "yes")
+                                 more_to_come=bool(out.get("callback_time")) and out.get("stop_calls_requested") != "yes",
+                                 callback_time=datetime.fromisoformat(due_at).strftime("%H:%M"))
 
     def callbacks(self) -> list[dict]:
         with self.lock:
@@ -1083,25 +1086,28 @@ class DashboardService:
 
     # -- the written message (email) after a call ---------------------------------------------------------------------
     def _message_after_call(self, fid: str, day: date, res: ProviderCallResult, out: dict, weather: dict,
-                            more_to_come: bool) -> None:
+                            more_to_come: bool, callback_time: str = "") -> None:
         """Decides whether the call just stored is followed by a message (docs/DECISIONS.md, 5 Nov and 15 Nov):
         the weather after a call where the farmer understood it, and 'we tried to reach you' plus the weather after the
         last failed attempt, an unanswered call, or a callback that was not picked up. Nothing for a declined farmer, a stop
-        request, a provider failure (the team is alerted instead), a call with a retry or callback still to come."""
+        request, a provider failure (the team is alerted instead), a call with a retry or callback still to come.
+        callback_time ('14:15', 24-hour) is set when this was the call the farmer asked for: the message then says so."""
         try:
             understood = out.get("understood_weather", "")
             if res.status is AttemptStatus.ANSWERED and understood == "yes":
-                self._send_message(fid, day, KIND_WEATHER, weather)
+                self._send_message(fid, day, KIND_CALLBACK_WEATHER if callback_time else KIND_WEATHER, weather,
+                                   callback_time=callback_time)
             elif more_to_come or out.get("stop_calls_requested") == "yes" or understood == "declined":
                 return
             elif res.status in (AttemptStatus.NO_ANSWER, AttemptStatus.BUSY) or (
                     res.status is AttemptStatus.ANSWERED and understood in ("no", "unclear", "no_response")) or (
                     res.status is AttemptStatus.FAILED and res.error == NETWORK_DROP):
-                self._send_message(fid, day, KIND_MISSED, weather)
+                self._send_message(fid, day, KIND_CALLBACK_MISSED if callback_time else KIND_MISSED, weather,
+                                   callback_time=callback_time)
         except Exception:                                   # a message problem never disturbs the call results
             pass
 
-    def _send_message(self, fid: str, day: date, kind: str, weather: dict | None = None) -> str:
+    def _send_message(self, fid: str, day: date, kind: str, weather: dict | None = None, callback_time: str = "") -> str:
         """Emails the farmer, once per farmer, day and kind. Never raises. Returns what happened, for the tests and the log."""
         try:
             with self.lock:
@@ -1109,7 +1115,7 @@ class DashboardService:
                                     "WHERE farmer_id=?", (fid,)).fetchone()
             if not r or not r[5] or not r[6] or self._is_paused(fid):
                 return "not sent: farmer not callable"
-            name, language, village, district, email = r[0], Language(r[1]), r[2], r[3], r[4] or ""
+            name, village, district, email = r[0], r[2], r[3], r[4] or ""
             weather = weather or self._saved_weather(fid, day.isoformat())
             now = self._now().isoformat(timespec="seconds")
             with self.lock:                                 # claim first: the primary key stops a second message
@@ -1125,7 +1131,7 @@ class DashboardService:
             elif not has_full_weather(weather):
                 status, note = "skipped", "weather facts missing"
             else:
-                subject, body = build_email(name, language, village or district, weather, kind)
+                subject, body = build_email(name, village or district, weather, kind, callback_time)
                 if test_to:
                     subject = f"[Test: {name}, {fid}] {subject}"
                 try:
