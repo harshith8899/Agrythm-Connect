@@ -20,7 +20,8 @@ const localToday = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-export const useVoiceAgentData = () => {
+// enabled=false: no request is made (the dashboard is already on screen while the sign-in is still finishing in the background).
+export const useVoiceAgentData = ({ enabled = true } = {}) => {
   const [farmers, setFarmers] = useState([]);
   const [callLogs, setCallLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +33,7 @@ export const useVoiceAgentData = () => {
   const [hasConnected, setHasConnected] = useState(false);   // the backend has answered at least once
   const [offlineSince, setOfflineSince] = useState(null);     // when it stopped answering (ms)
   const [mountedAt] = useState(() => Date.now());          // when the page started waiting
+  const [enabledAt, setEnabledAt] = useState(() => (enabled ? Date.now() : null));   // when the first request was allowed
   const inFlight = useRef(false);
   const [sarvamLive, setSarvamLive] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -117,8 +119,10 @@ export const useVoiceAgentData = () => {
     }
   }, [mountedAt]);
 
-  // Initial load via microtask
+  // Initial load via microtask (once requests are allowed)
   useEffect(() => {
+    if (!enabled) return undefined;
+    setEnabledAt((prev) => prev ?? Date.now());
     let mounted = true;
     Promise.resolve().then(() => {
       if (mounted) {
@@ -128,14 +132,14 @@ export const useVoiceAgentData = () => {
     return () => {
       mounted = false;
     };
-  }, [fetchAllData]);
+  }, [fetchAllData, enabled]);
 
   // Periodic polling (faster while a send is running, so results appear as calls finish)
   // a call that is waiting or on the phone right now (the call log shows it as In Queue or In Call)
   const callLive = callLogs.some((c) => c.status === 'In Call' || c.status === 'In Queue');
   const sending = Boolean(autoDispatcher.running) || callLive;
   useEffect(() => {
-    if (!autoPollInterval || autoPollInterval <= 0) return;
+    if (!enabled || !autoPollInterval || autoPollInterval <= 0) return undefined;
 
     // 3 s while a send runs, 5 s while the server is not answering (so the page fills in soon after it wakes), else 15 s
     const every = sending ? 3 : !isBackendOnline ? 5 : autoPollInterval;
@@ -144,7 +148,7 @@ export const useVoiceAgentData = () => {
     }, every * 1000);
 
     return () => clearInterval(timer);
-  }, [autoPollInterval, sending, isBackendOnline, fetchAllData]);
+  }, [enabled, autoPollInterval, sending, isBackendOnline, fetchAllData]);
 
   // Combined Farmer Map for fast lookup
   const farmersMap = useMemo(() => {
@@ -418,7 +422,7 @@ export const useVoiceAgentData = () => {
     syncStatus,
     isBackendOnline,
     hasConnected,
-    waitingSince: !isBackendOnline ? offlineSince : (!hasConnected ? mountedAt : null),
+    waitingSince: !isBackendOnline ? offlineSince : (!hasConnected ? (enabledAt ?? mountedAt) : null),
     sarvamLive,
     errorMessage,
     summaryMetrics,
