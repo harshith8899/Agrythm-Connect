@@ -128,6 +128,19 @@ def test_a_mail_server_error_is_recorded_by_type_and_the_call_result_is_kept(tmp
     assert s.calls()[0]["status"]
 
 
+def test_in_test_mode_every_farmers_message_goes_to_the_one_test_address(tmp_path):
+    mail = RecordingMailer()
+    s = DashboardService(str(tmp_path / "t.db"), dialler=Dial(), env={"GATE0_WEATHER": "mock", "GATE0_MAIL_TEST_TO": "Tester@Example.com"},
+                         now=lambda: T0, mailer=mail)
+    s.import_csv(CSV)
+    s.ports = s._make_ports()
+    s.fire_one("F1", D)
+    s.fire_one("F2", D)                                         # Lakshmi has no email of her own: still sent, to the test address
+    assert [m[0] for m in mail.sent] == ["tester@example.com"] * 2
+    assert mail.sent[0][1].startswith("[Test: Ramesh, F1] ") and mail.sent[1][1].startswith("[Test: Lakshmi, F2] ")
+    assert [m["status"] for m in s.messages()] == ["sent", "sent"]
+
+
 def test_the_email_text_is_in_the_farmers_language_with_only_the_weather_facts():
     for lang in Language:
         subject, body = build_email("Ramesh", lang, "Mandya", WEATHER, KIND_WEATHER)

@@ -187,6 +187,8 @@ class DashboardService:
         self.settings = Settings.from_env()
         self.dialler, self.note = (dialler, note) if dialler else make_dialler(env)
         self.mailer = mailer or make_mailer(env)
+        # testing: every farmer's message goes to this one address (as if it were that farmer's), with the farmer named in the subject
+        self.mail_test_to = _clean_email((env if env is not None else os.environ).get("GATE0_MAIL_TEST_TO", ""))
         e = env if env is not None else os.environ
         self.real_weather = e.get("GATE0_WEATHER", "open_meteo") != "mock"
         self._weather = weather or (make_weather(e) if self.real_weather else MockWeather())
@@ -1117,14 +1119,17 @@ class DashboardService:
             if claimed != 1:
                 return "not sent: already sent"
             status, note = "sent", ""
-            if not email:
+            test_to = self.mail_test_to
+            if not (email or test_to):
                 status, note = "skipped", "no email address for this farmer"
             elif not has_full_weather(weather):
                 status, note = "skipped", "weather facts missing"
             else:
                 subject, body = build_email(name, language, village or district, weather, kind)
+                if test_to:
+                    subject = f"[Test: {name}, {fid}] {subject}"
                 try:
-                    self.mailer.send(email, subject, body)
+                    self.mailer.send(test_to or email, subject, body)
                 except MailNotConfigured:
                     status, note = "skipped", "email is not set up (no SMTP settings)"
                 except Exception as exc:                    # type only: an error text could quote the address
