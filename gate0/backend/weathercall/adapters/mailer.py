@@ -17,6 +17,10 @@ import os
 import smtplib
 import ssl
 from email.message import EmailMessage
+from pathlib import Path
+
+LOGO_FILE = Path(__file__).resolve().parent.parent / "assets" / "agrythm-logo.png"
+LOGO_CID = "agrythm-logo"             # the HTML refers to it as <img src="cid:agrythm-logo">
 
 
 class MailNotConfigured(Exception):
@@ -28,7 +32,7 @@ class NullMailer:
     label = "not configured"
     live = False
 
-    def send(self, to: str, subject: str, body: str) -> None:
+    def send(self, to: str, subject: str, body: str, html: str = "") -> None:
         raise MailNotConfigured()
 
 
@@ -39,12 +43,14 @@ class RecordingMailer:
 
     def __init__(self, fail: bool = False):
         self.sent: list[tuple[str, str, str]] = []
+        self.html: list[str] = []
         self.fail = fail
 
-    def send(self, to: str, subject: str, body: str) -> None:
+    def send(self, to: str, subject: str, body: str, html: str = "") -> None:
         if self.fail:
             raise ConnectionError("simulated")
         self.sent.append((to, subject, body))
+        self.html.append(html)
 
 
 class SmtpMailer:
@@ -55,12 +61,21 @@ class SmtpMailer:
         self.host, self.port, self.user, self._password = host, port, user, password
         self.sender, self.team, self.timeout = sender or user, team, timeout
 
-    def send(self, to: str, subject: str, body: str) -> None:
+    def build(self, to: str, subject: str, body: str, html: str = "") -> EmailMessage:
         msg = EmailMessage()
         msg["From"], msg["To"], msg["Subject"] = self.sender, to, subject
         if self.team:
             msg["Bcc"] = self.team
-        msg.set_content(body)
+        msg.set_content(body)                      # plain text, for mail apps that do not show HTML
+        if html:
+            msg.add_alternative(html, subtype="html")
+            if LOGO_FILE.is_file():                # the logo travels inside the mail, so it shows without 'load images'
+                msg.get_payload()[1].add_related(LOGO_FILE.read_bytes(), "image", "png", cid=f"<{LOGO_CID}>",
+                                                 filename="agrythm-logo.png", disposition="inline")
+        return msg
+
+    def send(self, to: str, subject: str, body: str, html: str = "") -> None:
+        msg = self.build(to, subject, body, html)
         ctx = ssl.create_default_context()
         if self.port == 465:
             with smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout, context=ctx) as s:

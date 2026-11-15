@@ -1131,11 +1131,11 @@ class DashboardService:
             elif not has_full_weather(weather):
                 status, note = "skipped", "weather facts missing"
             else:
-                subject, body = build_email(name, village or district, weather, kind, callback_time)
+                subject, body, html = build_email(name, village or district, weather, kind, callback_time)
                 if test_to:
                     subject = f"[Test: {name}, {fid}] {subject}"
                 try:
-                    self.mailer.send(test_to or email, subject, body)
+                    self.mailer.send(test_to or email, subject, body, html)
                 except MailNotConfigured:
                     status, note = "skipped", "email is not set up (no SMTP settings)"
                 except Exception as exc:                    # type only: an error text could quote the address
