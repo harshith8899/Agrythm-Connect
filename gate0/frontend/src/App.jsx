@@ -13,12 +13,15 @@ import {
   ConfirmHost,
   MobileNav,
   ServerBanner,
-  LoginScreen
+  LoginScreen,
+  SignInStatus
 } from './components';
 import { useVoiceAgentData } from './hooks';
-import { getSessionToken, logoutAdmin } from './utils';
+import { getSessionToken, logoutAdmin, loginAdmin, pingServer } from './utils';
 
-function Dashboard({ onLogout }) {
+// signingIn: the dashboard is on screen but the sign-in is still finishing in the background (the server may be asleep): nothing is
+// requested and the buttons that need the server do nothing until it is done.
+function Dashboard({ onLogout, signingIn = false, signIn = null }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showCostChart, setShowCostChart] = useState(false);
 
@@ -59,7 +62,7 @@ function Dashboard({ onLogout }) {
     setStatusFilter,
     fetchAllData,
     resetFilters,
-  } = useVoiceAgentData();
+  } = useVoiceAgentData({ enabled: !signingIn });
 
   // Check if any filter is active
   const isFiltered = Boolean(searchQuery || dateFilter !== 'today' || districtFilter !== 'all' || languageFilter !== 'all' || statusFilter !== 'all');
@@ -85,28 +88,32 @@ function Dashboard({ onLogout }) {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Sticky Header with Triggers */}
         <Header
-          onRefresh={() => fetchAllData(false)}
+          onRefresh={signingIn ? () => {} : () => fetchAllData(false)}
           refreshing={refreshing}
           syncStatus={syncStatus}
           isBackendOnline={isBackendOnline && hasConnected}
           activeTab={activeTab}
-          onTriggerDemo={triggerDemo}
+          onTriggerDemo={signingIn ? () => {} : triggerDemo}
           triggeringDemo={triggeringDemo}
           autoDispatcher={autoDispatcher}
-          onToggleAutoDispatcher={toggleAutoDispatcher}
+          onToggleAutoDispatcher={signingIn ? () => {} : toggleAutoDispatcher}
           onLogout={onLogout}
         />
 
         {/* Tab Content */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 md:py-8 pb-24 lg:pb-8 space-y-4 sm:space-y-6">
           {/* Waking up / offline banner */}
-          <ServerBanner
-            isOnline={isBackendOnline}
-            loading={loading}
-            hasConnected={hasConnected}
-            waitingSince={waitingSince}
-            onRetry={() => fetchAllData(false)}
-          />
+          {signingIn ? (
+            <SignInStatus username={signIn?.username} info={signIn?.info} onCancel={onLogout} />
+          ) : (
+            <ServerBanner
+              isOnline={isBackendOnline}
+              loading={loading}
+              hasConnected={hasConnected}
+              waitingSince={waitingSince}
+              onRetry={() => fetchAllData(false)}
+            />
+          )}
           {activeTab === 'overview' && (
             <>
               {/* KPI Metrics */}
@@ -211,8 +218,13 @@ function Dashboard({ onLogout }) {
   );
 }
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function App() {
   const [sessionToken, setSessionToken] = useState(() => getSessionToken());
+  const [pending, setPending] = useState(null);          // { username, password } while the sign-in finishes in the background
+  const [info, setInfo] = useState({ phase: 'waking', seconds: 0, last: null });
+  const [loginError, setLoginError] = useState('');
 
   useEffect(() => {
     const handleAuth = () => {
@@ -226,11 +238,63 @@ function App() {
     };
   }, []);
 
-  if (!sessionToken) {
-    return <LoginScreen onLoginSuccess={() => setSessionToken(getSessionToken())} />;
+  // The sign-in itself: wait for the server to answer (this wakes it), then check the details; a start-up error right after is tried
+  // again, a wrong password is not. The person is already looking at the dashboard meanwhile.
+  useEffect(() => {
+    if (!pending) return undefined;
+    let stopped = false;
+    const startedAt = Date.now();
+    const tick = setInterval(() => setInfo((prev) => ({ ...prev, seconds: Math.round((Date.now() - startedAt) / 1000) })), 1000);
+    (async () => {
+      for (;;) {
+        const answer = await pingServer();
+        if (stopped) return;
+        if (answer.ok) break;
+        const unconfigured = answer.status === 503 && /not configured/i.test(answer.message);
+        setInfo((prev) => ({ ...prev, phase: unconfigured ? 'unconfigured' : 'waking', last: { status: answer.status, message: answer.message } }));
+        await wait(unconfigured ? 10000 : 3000);
+        if (stopped) return;
+      }
+      setInfo((prev) => ({ ...prev, phase: 'signing' }));
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await loginAdmin(pending.username, pending.password);       // stores the session: the dashboard then starts loading
+          if (!stopped) setPending(null);
+          return;
+        } catch (err) {
+          if (stopped) return;
+          if (err.transient && attempt < 10) {
+            setInfo((prev) => ({ ...prev, phase: 'waking' }));
+            await wait(3000);
+            continue;
+          }
+          setPending(null);
+          setLoginError(err.transient ? 'The server did not answer. Check that the Render service shows Live, then try again.' : (err.message || 'Invalid username or password.'));
+          return;
+        }
+      }
+    })();
+    return () => { stopped = true; clearInterval(tick); };
+  }, [pending]);
+
+  const signIn = (username, password) => {
+    setLoginError('');
+    setInfo({ phase: 'waking', seconds: 0, last: null });
+    setPending({ username, password });
+  };
+
+  if (!sessionToken && !pending) {
+    return <LoginScreen onSignIn={signIn} initialError={loginError} />;
   }
 
-  return <Dashboard onLogout={logoutAdmin} />;
+  const signingIn = !sessionToken;
+  return (
+    <Dashboard
+      onLogout={signingIn ? () => setPending(null) : logoutAdmin}
+      signingIn={signingIn}
+      signIn={signingIn ? { username: pending?.username, info } : null}
+    />
+  );
 }
 
 export default App;
