@@ -67,7 +67,7 @@ def test_a_successful_call_sends_the_weather_email_once(tmp_path):
     saved = s._saved_weather("F1", D.isoformat())
     assert to == "ramesh@example.com" and "Mandya" in subject and "Ramesh" in body
     assert all(str(int(saved[k])) in body for k in ("temp_min", "temp_max", "wind", "rain", "humidity"))
-    assert "not able to reach you" not in body                  # that line is only for a missed call
+    assert "could not reach you" not in body                  # that line is only for a missed call
     assert s._send_message("F1", D, KIND_WEATHER) == "not sent: already sent"      # never twice for the same day
     assert [m["status"] for m in s.messages()] == ["sent"]
 
@@ -75,7 +75,7 @@ def test_a_successful_call_sends_the_weather_email_once(tmp_path):
 def test_the_last_failed_attempt_sends_a_we_tried_to_reach_you_email(tmp_path):
     s, mail = make(tmp_path, Dial(A.NO_ANSWER, ""), now=datetime(2026, 11, 15, 21, 50, tzinfo=IST))
     s.fire_one("F1", D)                                         # a retry would fall after 22:00: this was the last chance
-    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("Sorry we missed you today")
+    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("Weather update for Mandya (we tried to call you)")
     assert s.messages()[0]["kind"] == KIND_MISSED
 
 
@@ -100,8 +100,8 @@ def test_a_callback_that_is_not_picked_up_sends_the_missed_email(tmp_path):
     assert mail.sent == []                                      # a callback is booked: nothing yet
     s.dialler = Dial(A.NO_ANSWER, "")
     assert s.run_due_callbacks(datetime(2026, 11, 15, 14, 16, tzinfo=IST)) == 1
-    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("Sorry we missed you at 14:15")
-    assert "You had asked us to call you back at 14:15" in mail.sent[0][2] and "will not call again today" in mail.sent[0][2]
+    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("Weather update for Mandya (missed call at 14:15)")
+    assert "We tried to call you back at 14:15, as you requested" in mail.sent[0][2] and "unfortunately could not reach you" in mail.sent[0][2]
     assert s.messages()[0]["kind"] == KIND_CALLBACK_MISSED
 
 
@@ -110,7 +110,7 @@ def test_a_callback_that_went_through_sends_the_callback_weather_email(tmp_path)
     s.fire_one("F1", D)
     s.dialler = Dial(A.ANSWERED, "yes")
     assert s.run_due_callbacks(datetime(2026, 11, 15, 14, 16, tzinfo=IST)) == 1
-    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("Thank you for speaking with us") and "14:15" in mail.sent[0][2]
+    assert len(mail.sent) == 1 and mail.sent[0][1].startswith("Weather update for Mandya") and "Thank you for speaking with us at 14:15" in mail.sent[0][2]
     assert s.messages()[0]["kind"] == KIND_CALLBACK_WEATHER
 
 
@@ -158,13 +158,14 @@ def test_the_email_text_is_english_with_only_the_weather_facts_and_the_subject_f
     for kind in KINDS:
         subject, body, html = build_email("Ramesh", "Mandya", WEATHER, kind, "14:15")
         subjects.add(subject)
-        assert "Mandya" in subject and body.startswith("Dear Ramesh ji,") and "27.5" in body and "40 percent" in body
-        assert body.isascii() and "Warm regards,\nTeam Agrythm" in body
+        assert "Mandya" in subject and body.startswith("Dear Ramesh,") and "27.5" in body and "40 percent" in body
+        assert body.isascii() and "Regards,\nTeam Agrythm" in body
         assert 'src="cid:agrythm-logo"' in html and "14 to 27.5 degrees Celsius" in html
-    assert len(subjects) == len(KINDS)                          # each situation has its own subject
-    assert "sorry if we called at an inconvenient time" in build_email("Ramesh", "Mandya", WEATHER, KIND_MISSED)[1]
-    assert "not able to reach you" in build_email("Ramesh", "Mandya", WEATHER, KIND_MISSED)[1]
-    assert "not able to reach you" not in build_email("Ramesh", "Mandya", WEATHER, KIND_WEATHER)[1]
+    assert len(subjects) == 3          # the two missed situations have their own subject; the two 'went through' ones share one
+    assert "unfortunately could not reach you" in build_email("Ramesh", "Mandya", WEATHER, KIND_MISSED)[1]
+    for kind in KINDS:
+        assert "prefer not to receive" not in build_email("Ramesh", "Mandya", WEATHER, kind)[1]      # no opt-out line (team, 15 Nov)
+    assert "could not reach you" not in build_email("Ramesh", "Mandya", WEATHER, KIND_WEATHER)[1]
 
 
 def test_names_are_escaped_in_the_html_version():
