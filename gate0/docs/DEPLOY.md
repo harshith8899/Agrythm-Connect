@@ -39,6 +39,9 @@ who finds the address could read farmer data and press "Send now" (real calls co
    Weather: add `WEATHERAPI_KEY` (the free key from weatherapi.com, as a secret) under Environment and redeploy; when it is set,
    WeatherAPI.com is the weather source (Open-Meteo's free service throttles shared hosting addresses with HTTP 429). Weather is
    fetched only when a call is made, once per place and day, and the System Status tab never asks the weather service.
+   Email (the message after a call): add `GATE0_SMTP_HOST`, `GATE0_SMTP_PORT` (587), `GATE0_SMTP_USER` and `GATE0_SMTP_PASSWORD` (secret),
+   optionally `GATE0_MAIL_FROM` and `GATE0_MAIL_TEAM` (a team address that gets a copy). Without `GATE0_SMTP_HOST` nothing is sent and each
+   message is recorded as 'email is not set up'. Farmers need an `Email` column in the sheet (or the email field when added by hand).
 5. Render, Settings, Build and Deploy: Auto-Deploy should show "After CI checks pass".
 
 ## 2. Cloudflare (the dashboard)
