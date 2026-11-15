@@ -177,6 +177,8 @@ def make_handler(
                     return self._send(200, service.callbacks())
                 if path == "/api/alerts":
                     return self._send(200, service.alerts())
+                if path == "/api/messages":
+                    return self._send(200, service.messages())
                 if path == "/api/orchestrator/status":
                     return self._send(200, service.status())
                 if path == "/api/system/checks":

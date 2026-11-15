@@ -32,6 +32,20 @@ services:
         sync: false
       - key: OPEN_METEO_API_KEY        # optional: the paid Open-Meteo key (leave empty to use the free service)
         sync: false
+      - key: GATE0_SMTP_HOST
+        sync: false
+      - key: GATE0_SMTP_PORT
+        sync: false
+      - key: GATE0_SMTP_USER
+        sync: false
+      - key: GATE0_SMTP_PASSWORD
+        sync: false
+      - key: GATE0_MAIL_FROM
+        sync: false
+      - key: GATE0_MAIL_TEAM
+        sync: false
+      - key: GATE0_MAIL_TEST_TO          # testing: one address that receives every farmer's message
+        sync: false
       - key: GATE0_API_TOKEN
         sync: false
       - key: GATE0_ADMIN_USER
