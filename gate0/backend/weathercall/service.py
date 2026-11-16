@@ -730,11 +730,11 @@ class DashboardService:
         mode "retry" follows the retry rules: with no result yet today it is the day's first call; with a result that is
         still retryable it is the next attempt (the attempt count goes up by one and the waiting retry is replaced). It is
         refused, with the reason, when the farmer is completed, declined, has a callback booked, has used all attempts,
-        is inactive, has no consent, asked to stop, or when it is outside the calling hours.
+        is inactive, has no consent or asked to stop. It can be placed at any hour.
 
         mode "test" ignores the retry rules: the call is kept as its own Test row and never changes the farmer's real
         result, attempt count, retries, callbacks or alerts, and it can be repeated. Consent, active, phone, a stop
-        request and the calling hours still apply."""
+        request still apply; the calling hours do not."""
         if mode not in ("retry", "test"):
             raise ValueError('mode must be "retry" or "test"')
         if self.draining:
@@ -753,8 +753,8 @@ class DashboardService:
             raise ValueError("this farmer has no phone number")
         if self._is_paused(fid):
             raise ValueError("calls are stopped for this farmer: they asked us to stop")
-        if not (CALL_FROM <= now.timetz().replace(tzinfo=None) <= CALL_TO):
-            raise ValueError("calls can only be placed between 05:00 and 22:00 India time")
+        # no calling-hours check here: a call placed by hand can be made at any time (team, 15 Nov). The 05:00 to 22:00
+        # window applies only to what the system places on its own (the daily send, retries and callbacks).
         if mode == "retry" and self.running:
             raise ValueError("today's send is running; try again when it finishes")
         kind, seq, attempt = "first", 1, 1
