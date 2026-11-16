@@ -104,7 +104,7 @@ class SarvamDialler(SarvamAgentTelephony):
     def outputs(self, attempt_id: str) -> dict:
         """The agent's output variables (Sarvam fills them a little after the call ends) and the transcript."""
         filters = json.dumps([{"field": "attempt_id", "operator": "equals", "value": attempt_id}])
-        for _ in range(6):
+        for _ in range(12):                                 # up to a minute, looking every 5 s so the notes show as soon as they are in
             q = urllib.parse.urlencode({
                 "start_datetime": (self._now() - timedelta(hours=1)).isoformat(timespec="seconds"),
                 "end_datetime": (self._now() + timedelta(minutes=5)).isoformat(timespec="seconds"),
@@ -115,7 +115,7 @@ class SarvamDialler(SarvamAgentTelephony):
             if got.get("call_summary"):
                 got["transcript"] = self._transcript(item.get("interaction_id"))
                 return got
-            self._sleep(10)
+            self._sleep(5)
         return {}
 
     def _transcript(self, interaction_id: str | None) -> list[dict]:
