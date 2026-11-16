@@ -245,6 +245,14 @@ def make_handler(
                     fields = json.loads(body or "{}")
                     mode = fields.get("mode", "retry") if isinstance(fields, dict) else "retry"
                     return self._send(202, service.manual_call(fid, mode))
+                if path == "/api/alerts/dismiss":       # {"id": 5}, {"ids": [5, 6]} or {"all": true}
+                    fields = json.loads(body or "{}")
+                    if not isinstance(fields, dict):
+                        raise ValueError("expected a JSON object")
+                    if fields.get("all") is True:
+                        return self._send(200, {"removed": service.dismiss_alerts(None)})
+                    ids = fields.get("ids") if isinstance(fields.get("ids"), list) else [fields.get("id")]
+                    return self._send(200, {"removed": service.dismiss_alerts([i for i in ids if i is not None])})
                 if path == "/api/farmers":
                     fields = json.loads(body or "{}")
                     if not isinstance(fields, dict):

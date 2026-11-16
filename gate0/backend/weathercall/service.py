@@ -157,6 +157,19 @@ def mask_email(email: str) -> str:
     return f"{local[:1]}***@{domain}"
 
 
+def _error_detail(exc: BaseException) -> str:
+    """What to record about an error: its type and a code, never its message (it could quote an address or a number)."""
+    safe = getattr(exc, "safe_text", "")
+    if safe:
+        return str(safe)[:80]
+    name = type(exc).__name__
+    code = getattr(exc, "smtp_code", None)
+    if isinstance(code, int):
+        return f"{name} (SMTP {code})"
+    errno = getattr(exc, "errno", None) if isinstance(exc, OSError) else None
+    return f"{name} (errno {errno})" if isinstance(errno, int) else name
+
+
 class DBFarmers:
     """FarmerSource over the imported farmers: the shape a real backend adapter would have."""
 
@@ -240,17 +253,38 @@ class DashboardService:
 
     # -- alerts for the team, and farmers who asked us to stop -------------------------------------------------------
     def _alert(self, kind: str, fid: str, text: str) -> None:
+        """A note for the team. The same note for the same farmer is not repeated within 30 minutes (a failing push or
+        mail would otherwise fill the list)."""
+        since = (self._now() - timedelta(minutes=30)).isoformat(timespec="seconds")
         with self.lock:
+            if self.db.execute("SELECT 1 FROM dash_alerts WHERE kind=? AND farmer_id=? AND text=? AND at>=?",
+                               (kind, fid, text, since)).fetchone():
+                return
             self.db.execute("INSERT INTO dash_alerts(at, kind, farmer_id, text) VALUES(?,?,?,?)",
                             (self._now().isoformat(timespec="seconds"), kind, fid, text))
             self.db.commit()
 
     def alerts(self, limit: int = 50) -> list[dict]:
         with self.lock:
-            rows = self.db.execute("SELECT a.at, a.kind, a.farmer_id, f.name, a.text FROM dash_alerts a "
+            rows = self.db.execute("SELECT a.at, a.kind, a.farmer_id, f.name, a.text, a.id FROM dash_alerts a "
                                    "LEFT JOIN dash_farmers f ON f.farmer_id=a.farmer_id ORDER BY a.id DESC LIMIT ?",
                                    (limit,)).fetchall()
-        return [{"at": r[0], "kind": r[1], "farmer_id": r[2], "farmer_name": r[3] or "", "text": r[4]} for r in rows]
+        return [{"id": r[5], "at": r[0], "kind": r[1], "farmer_id": r[2], "farmer_name": r[3] or "", "text": r[4]} for r in rows]
+
+    def dismiss_alerts(self, ids: list | None = None) -> int:
+        """Deletes the notes with these ids, or every note when ids is None. Returns how many were removed."""
+        with self.lock:
+            if ids is None:
+                n = self.db.execute("SELECT COUNT(*) FROM dash_alerts").fetchone()[0]
+                self.db.execute("DELETE FROM dash_alerts")
+            else:
+                clean = [int(i) for i in ids if str(i).lstrip("-").isdigit()]
+                n = 0
+                for i in clean:
+                    n += self.db.execute("SELECT COUNT(*) FROM dash_alerts WHERE id=?", (i,)).fetchone()[0]
+                    self.db.execute("DELETE FROM dash_alerts WHERE id=?", (i,))
+            self.db.commit()
+        return n
 
     def _is_paused(self, fid: str) -> bool:
         with self.lock:
@@ -1236,8 +1270,8 @@ class DashboardService:
             try:
                 self.dialler.push_inbound_many(entries, f"roster-{self._now():%Y%m%d-%H%M%S}")
             except Exception as exc:                        # type only: an error text could quote a number
-                status, note = "failed", type(exc).__name__
-                self._alert("inbound_push_failed", "", f"The call-back line could not be updated ({type(exc).__name__}).")
+                status, note = "failed", _error_detail(exc)
+                self._alert("inbound_push_failed", "", f"The call-back line could not be updated ({note}).")
             now = self._now().isoformat(timespec="seconds")
             with self.lock:
                 for e in entries:
@@ -1412,8 +1446,8 @@ class DashboardService:
                 except MailNotConfigured:
                     status, note = "skipped", "email is not set up (no SMTP settings)"
                 except Exception as exc:                    # type only: an error text could quote the address
-                    status, note = "failed", type(exc).__name__
-                    self._alert("message_failed", fid, f"The {kind} email could not be sent ({type(exc).__name__}).")
+                    status, note = "failed", _error_detail(exc)
+                    self._alert("message_failed", fid, f"The {kind} email could not be sent ({note}).")
             with self.lock:
                 self.db.execute("UPDATE dash_messages SET status=?, note=?, at=? WHERE farmer_id=? AND call_date=? AND kind=?",
                                 (status, note, self._now().isoformat(timespec="seconds"), fid, day.isoformat(), rk))

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
@@ -20,6 +21,15 @@ from ..contracts import ProviderCallResult
 from .mock import MockTelephony
 from .sarvam_agent import BASE, SarvamAgentTelephony, _result_from, to_e164
 from .sarvam_campaign import scrub
+
+class SarvamHTTPError(RuntimeError):
+    """Sarvam answered a cohort push with an error. safe_text is the HTTP code and Sarvam's error code, never its message
+    (a message can quote a phone number)."""
+
+    def __init__(self, safe_text: str):
+        super().__init__(safe_text)
+        self.safe_text = safe_text
+
 
 OUTPUT_VARS = ("call_summary", "callback_time", "understood_weather", "stop_calls_requested")
 
@@ -73,7 +83,14 @@ class SarvamDialler(SarvamAgentTelephony):
             users = [{"user_phone_number": to_e164(e["phone"]), "user_identifier": e["fid"], "app_variables": e["variables"],
                       "app_overrides": {"initial_language_name": e["language_name"]}} for e in entries[i:i + 1000]]
             name = cohort_name if i == 0 else f"{cohort_name}-{i // 1000 + 1}"
-            ids.append(str(self._request(url, {"name": name[:50], "users": users}).get("cohort_id", "")))
+            try:
+                ids.append(str(self._request(url, {"name": name[:50], "users": users}).get("cohort_id", "")))
+            except urllib.error.HTTPError as exc:
+                try:
+                    code = str((json.load(exc).get("error") or {}).get("code", ""))
+                except Exception:
+                    code = ""
+                raise SarvamHTTPError(f"HTTP {exc.code} {code}".strip()[:80]) from None
         return ids
 
     def find_inbound_calls(self, start, end, known_ids):
