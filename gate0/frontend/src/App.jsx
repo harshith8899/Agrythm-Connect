@@ -8,6 +8,7 @@ import {
   CallDetailDrawer, 
   FarmerDirectory, 
   SystemStatusView,
+  CostAnalyticsView,
   ConfirmHost,
   MobileNav,
   ServerBanner,
@@ -15,7 +16,7 @@ import {
   SignInStatus
 } from './components';
 import { useVoiceAgentData } from './hooks';
-import { getSessionToken, logoutAdmin, loginAdmin, pingServer } from './utils';
+import { getSessionToken, logoutAdmin, loginAdmin, pingServer, callFarmer } from './utils';
 
 // signingIn: the dashboard is on screen but the sign-in is still finishing in the background (the server may be asleep): nothing is
 // requested and the buttons that need the server do nothing until it is done.
@@ -68,6 +69,13 @@ function Dashboard({ onLogout, signingIn = false, signIn = null }) {
   const handleSelectFarmerFromDirectory = (farmerName) => {
     setSearchQuery(farmerName);
     setActiveTab('overview');
+  };
+
+  const handleCallBackFarmer = async (call) => {
+    const fid = call.farmer_id;
+    if (!fid) return;
+    await callFarmer(fid, 'retry');
+    [1500, 3500].forEach((ms) => setTimeout(() => fetchAllData(false), ms));
   };
 
   return (
@@ -153,6 +161,7 @@ function Dashboard({ onLogout, signingIn = false, signIn = null }) {
                 loading={!hasConnected}
                 refreshing={refreshing}
                 onRefresh={() => fetchAllData(false)}
+                onCallBack={handleCallBackFarmer}
               />
             </>
           )}
@@ -167,8 +176,12 @@ function Dashboard({ onLogout, signingIn = false, signIn = null }) {
             />
           )}
 
-          {(activeTab === 'system' || activeTab === 'cost') && (
-            <SystemStatusView isBackendOnline={isBackendOnline} callLogs={callLogs} />
+          {activeTab === 'cost' && (
+            <CostAnalyticsView isBackendOnline={isBackendOnline} callLogs={callLogs} />
+          )}
+
+          {activeTab === 'system' && (
+            <SystemStatusView isBackendOnline={isBackendOnline} />
           )}
         </main>
       </div>
@@ -181,6 +194,7 @@ function Dashboard({ onLogout, signingIn = false, signIn = null }) {
         <CallDetailDrawer
           call={selectedCall}
           onClose={() => setSelectedCall(null)}
+          onCallBack={handleCallBackFarmer}
         />
       )}
     </div>

@@ -3,6 +3,7 @@ import {
   PhoneCall,
   Users,
   ShieldCheck,
+  IndianRupee,
   X,
   LogOut
 } from 'lucide-react';
@@ -27,8 +28,13 @@ export const Sidebar = ({
       icon: Users,
     },
     {
+      id: 'cost',
+      label: 'Cost Analytics',
+      icon: IndianRupee,
+    },
+    {
       id: 'system',
-      label: 'System & Telephony',
+      label: 'System Status',
       icon: ShieldCheck,
     },
   ];
@@ -87,7 +93,7 @@ export const Sidebar = ({
 
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = activeTab === item.id || (item.id === 'system' && activeTab === 'cost');
+            const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}

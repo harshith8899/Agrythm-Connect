@@ -141,9 +141,21 @@ class SystemChecks:
     def _totals(rows: list[dict], rate: float) -> dict:
         minutes = sum(billed_minutes(a["connectivity_status"], a["duration_in_seconds"]) for a in rows)
         pulses = sum(telephony_pulses(a["connectivity_status"], a["duration_in_seconds"]) for a in rows)
+        voice_amount = round(minutes * rate, 2)
         return {"calls": len(rows), "connected": sum(1 for a in rows if a["connectivity_status"] == "connected"),
-                "billed_minutes": minutes, "amount": round(minutes * rate, 2),
+                "billed_minutes": minutes, "voice_amount": voice_amount, "amount": voice_amount,
+                "messages_sent": 0, "message_amount": 0.0,
                 "telephony_pulses": pulses, "telephony_amount": round(pulses * TELEPHONY_PULSE_RATE, 2)}
+
+    def _messages_count(self) -> dict[str, int]:
+        try:
+            with self.service.lock:
+                rows = self.service.db.execute(
+                    "SELECT call_date, COUNT(*) FROM dash_messages WHERE status = 'sent' GROUP BY call_date"
+                ).fetchall()
+            return {r[0]: r[1] for r in rows}
+        except Exception:
+            return {}
 
     def usage(self, refresh: bool = False) -> dict:
         rate = self.rate()
@@ -164,10 +176,30 @@ class SystemChecks:
         by_day: dict[str, list[dict]] = {}
         for a in rows:
             by_day.setdefault(_when(a).astimezone(IST).date().isoformat(), []).append(a)
-        out["today"] = self._totals(by_day.get(today.isoformat(), []), rate)
-        out["week"] = self._totals([a for a in rows if _when(a) >= now - timedelta(days=7)], rate)
-        out["window"] = self._totals(rows, rate)
-        out["days"] = [{"date": d, **self._totals(by_day[d], rate)} for d in sorted(by_day, reverse=True)[:14]]
+        
+        msgs_by_day = self._messages_count()
+        def enrich_totals(t_dict, day_str=None, day_list=None):
+            if not t_dict:
+                return t_dict
+            if day_str:
+                m_count = msgs_by_day.get(day_str, 0)
+            elif day_list:
+                m_count = sum(msgs_by_day.get(d, 0) for d in day_list)
+            else:
+                m_count = sum(msgs_by_day.values())
+            m_amount = round(m_count * 0.20, 2)
+            v_amount = t_dict.get("voice_amount", t_dict.get("amount", 0))
+            t_dict["messages_sent"] = m_count
+            t_dict["message_amount"] = m_amount
+            t_dict["voice_amount"] = v_amount
+            t_dict["amount"] = round(v_amount + m_amount, 2)
+            return t_dict
+
+        week_days = [(_now().astimezone(IST).date() - timedelta(days=i)).isoformat() for i in range(7)]
+        out["today"] = enrich_totals(self._totals(by_day.get(today.isoformat(), []), rate), day_str=today.isoformat())
+        out["week"] = enrich_totals(self._totals([a for a in rows if _when(a) >= now - timedelta(days=7)], rate), day_list=week_days)
+        out["window"] = enrich_totals(self._totals(rows, rate))
+        out["days"] = [{"date": d, **enrich_totals(self._totals(by_day[d], rate), day_str=d)} for d in sorted(by_day, reverse=True)[:14]]
         out["exhausted"] = any(a.get("failure_reason") and _EXHAUSTED.search(a["failure_reason"])
                                and _when(a) >= now - timedelta(days=7) for a in rows)
         return out

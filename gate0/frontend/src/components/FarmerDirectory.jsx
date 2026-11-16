@@ -58,12 +58,21 @@ const callAction = (farmer, todayCall) => {
   if (!todayCall) return { label: 'Call', hint: 'No call yet today', first: true };
   const used = Number(todayCall.attempts_used || 0);
   const max = Number(todayCall.max_attempts || 3);
+  if (todayCall.status === 'Callback Scheduled' || todayCall.callback_status === 'pending') {
+    return {
+      label: 'Call Back',
+      hint: 'Pending callback booked',
+      next: 1,
+      max,
+      isCallback: true,
+    };
+  }
   if (RETRYABLE.includes(todayCall.status)) {
     return used < max
       ? { label: 'Call', hint: `Next attempt: ${used + 1} of ${max}`, next: used + 1, max }
       : { label: 'Call', hint: `All ${max} attempts used`, retryWhy: `All ${max} attempts are used today.` };
   }
-  const reasons = { Completed: 'Already completed today.', Declined: 'The farmer said they do not need it today.', 'Callback Scheduled': 'A callback is booked.', Skipped: 'Skipped today.' };
+  const reasons = { Completed: 'Already completed today.', Declined: 'The farmer said they do not need it today.', Skipped: 'Skipped today.' };
   const why = reasons[todayCall.status] || 'Not available now.';
   return { label: 'Call', hint: why.replace(/\.$/, ''), retryWhy: why };
 };
@@ -718,10 +727,16 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
       choices: [
         {
           value: 'retry',
-          label: action.first ? 'Follow the retry rules: the first call of the day' : `Follow the retry rules: attempt ${action.next || '?'} of ${max}`,
-          description: action.first
-            ? 'Counts as today\'s first attempt. If it is not picked up, the usual retries follow (30 minutes, then 1 hour).'
-            : 'Counts as the next attempt and replaces the waiting retry. Later retries follow the usual gaps.',
+          label: action.isCallback
+            ? 'Place booked callback now'
+            : action.first
+              ? 'Follow the retry rules: the first call of the day'
+              : `Follow the retry rules: attempt ${action.next || '?'} of ${max}`,
+          description: action.isCallback
+            ? 'Calls the farmer now to fulfill their scheduled callback request and update their status.'
+            : action.first
+              ? 'Counts as today\'s first attempt. If it is not picked up, the usual retries follow (30 minutes, then 1 hour).'
+              : 'Counts as the next attempt and replaces the waiting retry. Later retries follow the usual gaps.',
           disabledReason: action.retryWhy,
         },
         {

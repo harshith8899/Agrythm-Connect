@@ -353,8 +353,8 @@ export const DonutAnalyticsGrid = ({
     let totalMessages = 0;
 
     filteredCalls.forEach((c) => {
-      // 1 message sent per farmer outreach (advisory SMS / WhatsApp summary)
-      const msgs = Number(c.messages_sent ?? c.sms_count ?? 1);
+      // 1 message sent per farmer outreach IF explicitly recorded in telemetry
+      const msgs = Number(c.messages_sent ?? c.sms_count ?? 0);
       totalMessages += msgs;
 
       const isConn =
@@ -397,13 +397,17 @@ export const DonutAnalyticsGrid = ({
             color: '#1E6F43', // Trust Green
             secondaryText: `${totalBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
           },
-          {
-            id: 'messages',
-            label: 'Advisory Messages',
-            value: messageCost,
-            color: '#0284C7', // Sky Blue
-            secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
-          },
+          ...(totalMessages > 0
+            ? [
+                {
+                  id: 'messages',
+                  label: 'Advisory Messages',
+                  value: messageCost,
+                  color: '#0284C7', // Sky Blue
+                  secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
+                },
+              ]
+            : []),
           {
             id: 'carriage',
             label: 'Number Rental',
@@ -420,13 +424,17 @@ export const DonutAnalyticsGrid = ({
             color: '#1E6F43', // Trust Green
             secondaryText: `${totalBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
           },
-          {
-            id: 'messages',
-            label: 'Advisory Messages',
-            value: messageCost,
-            color: '#0284C7', // Sky Blue
-            secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
-          },
+          ...(totalMessages > 0
+            ? [
+                {
+                  id: 'messages',
+                  label: 'Advisory Messages',
+                  value: messageCost,
+                  color: '#0284C7', // Sky Blue
+                  secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
+                },
+              ]
+            : []),
         ];
 
     // 2. Call Outcomes Data
@@ -670,9 +678,13 @@ export const DonutAnalyticsGrid = ({
         <SvgDonutCard
           title="Spend Split"
           subtitle={
-            analytics.isMultiDayBillingCycle
-              ? 'Voice AI vs. messages vs. number rental'
-              : 'Voice AI calls vs. advisory messages'
+            analytics.totalMessages > 0
+              ? analytics.isMultiDayBillingCycle
+                ? 'Voice AI vs. messages vs. number rental'
+                : 'Voice AI calls vs. advisory messages'
+              : analytics.isMultiDayBillingCycle
+              ? 'Voice AI usage vs. number rental'
+              : 'Sarvam Voice AI call usage'
           }
           slices={analytics.costSplitSlices}
           centerTitle={analytics.isMultiDayBillingCycle ? 'Total Spend' : 'Daily Spend'}
@@ -680,12 +692,14 @@ export const DonutAnalyticsGrid = ({
           isCurrency={true}
           footer={
             <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-sky-50/70 border border-sky-200/60 text-[11px]">
-                <span className="text-sky-800 font-medium">Messages Dispatched:</span>
-                <span className="font-bold font-mono text-sky-950 shrink-0 whitespace-nowrap">
-                  {analytics.totalMessages} sent ({rupees(analytics.messageCost)})
-                </span>
-              </div>
+              {analytics.totalMessages > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-sky-50/70 border border-sky-200/60 text-[11px]">
+                  <span className="text-sky-800 font-medium">Messages Dispatched:</span>
+                  <span className="font-bold font-mono text-sky-950 shrink-0 whitespace-nowrap">
+                    {analytics.totalMessages} sent ({rupees(analytics.messageCost)})
+                  </span>
+                </div>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-slate-100/60 border border-slate-200/50 text-[11px]">
                 <span className="text-slate-500 font-medium">Connected Calls:</span>
                 <span className="font-bold font-mono text-slate-800 shrink-0 whitespace-nowrap">

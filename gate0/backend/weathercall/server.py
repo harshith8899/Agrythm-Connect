@@ -245,6 +245,17 @@ def make_handler(
                     fields = json.loads(body or "{}")
                     mode = fields.get("mode", "retry") if isinstance(fields, dict) else "retry"
                     return self._send(202, service.manual_call(fid, mode))
+                if path.startswith("/api/farmers/") and path.endswith("/callback"):
+                    fid = urllib.parse.unquote(path[len("/api/farmers/"):-len("/callback")])
+                    fields = json.loads(body or "{}")
+                    time_text = fields.get("time", "in 2 hours") if isinstance(fields, dict) else "in 2 hours"
+                    return self._send(200, service.schedule_manual_callback(fid, time_text))
+                if path.startswith("/api/farmers/") and path.endswith("/message"):
+                    fid = urllib.parse.unquote(path[len("/api/farmers/"):-len("/message")])
+                    fields = json.loads(body or "{}")
+                    kind = fields.get("kind", "weather") if isinstance(fields, dict) else "weather"
+                    res = service.manual_send_message(fid, kind)
+                    return self._send(200, {"ok": True, "status": res})
                 if path == "/api/farmers":
                     fields = json.loads(body or "{}")
                     if not isinstance(fields, dict):

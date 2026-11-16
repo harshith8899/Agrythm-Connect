@@ -125,7 +125,7 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5, messageRate = 0.2) {
       return sum + Math.max(1, Math.ceil(sec / 60));
     }, 0);
 
-    const messages = hourCalls.reduce((sum, c) => sum + Number(c.messages_sent ?? c.sms_count ?? 1), 0);
+    const messages = hourCalls.reduce((sum, c) => sum + Number(c.messages_sent ?? c.sms_count ?? 0), 0);
     const voiceSpend = Math.round(billedMinutes * rate * 100) / 100;
     const messageSpend = Math.round(messages * messageRate * 100) / 100;
     const spend = Math.round((voiceSpend + messageSpend) * 100) / 100;
@@ -417,6 +417,14 @@ export const RealTimeCostChart = ({
                   <span>Billed Minutes:</span>
                   <span className="font-semibold text-amber-300">{hoveredHour.billedMinutes} mins</span>
                 </div>
+                {hoveredHour.messages > 0 && (
+                  <div className="flex items-center justify-between text-slate-300">
+                    <span>Advisory SMS:</span>
+                    <span className="font-semibold text-sky-300">
+                      {hoveredHour.messages} sent ({rupees(hoveredHour.messageSpend)})
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -627,8 +635,12 @@ export const RealTimeCostChart = ({
 
         <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-2">
           <span>Voice AI: <strong className="text-slate-700">{rupees(voiceCost)}</strong> (₹{Number(rate).toFixed(2)}/min)</span>
-          <span>·</span>
-          <span>Advisory SMS: <strong className="text-slate-700">{rupees(messageCost)}</strong> ({telemetry.totalMessages} sent @ ₹{Number(messageRate).toFixed(2)}/msg)</span>
+          {telemetry.totalMessages > 0 && (
+            <>
+              <span>·</span>
+              <span>Advisory SMS: <strong className="text-slate-700">{rupees(messageCost)}</strong> ({telemetry.totalMessages} sent @ ₹{Number(messageRate).toFixed(2)}/msg)</span>
+            </>
+          )}
           <span>·</span>
           <span>Fixed Carrier DID: <strong className="text-slate-700">₹59.00/mo</strong> (billed monthly · separate from daily call usage)</span>
         </div>
