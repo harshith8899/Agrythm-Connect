@@ -18,9 +18,8 @@ export const Header = ({
       case 'farmers':
         return 'Farmer Profiles Directory';
       case 'cost':
-        return 'Cost Analytics';
       case 'system':
-        return 'System Status';
+        return 'System & Telephony';
       case 'overview':
       default:
         return 'Call Overview';

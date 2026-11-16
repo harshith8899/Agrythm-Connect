@@ -302,8 +302,30 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
       // Status Filter
       if (statusFilter !== 'all') {
         const s = String(statusFilter).toLowerCase();
-        if (s === 'callback requested') {
-          if (!call.scheduled_callback_time && call.disposition !== 'Callback Requested') return false;
+        if (s === 'callback requested' || s === 'callback scheduled' || s === 'callbacks pending') {
+          const isCb =
+            call.status === 'Callback Scheduled' ||
+            call.disposition === 'Callback Requested' ||
+            call.callback_status === 'pending' ||
+            Boolean(call.scheduled_callback_time && !['Completed', 'Callback Done', 'Failed'].includes(call.status));
+          if (!isCb) return false;
+        } else if (s === 'needs attention' || s === 'needs-attention') {
+          const isAttn =
+            ['Failed', 'Not Confirmed', 'Callback Missed', 'Declined', 'Escalated'].includes(call.status) ||
+            ['failed', 'error', 'declined'].includes(String(call.call_status || '').toLowerCase()) ||
+            call.understood_weather === 'declined';
+          if (!isAttn) return false;
+        } else if (s === 'unanswered' || s === 'retrying') {
+          const isUnans =
+            ['Unanswered', 'Retrying', 'Busy', 'no_answer', 'busy'].includes(call.status) ||
+            ['no_answer', 'busy'].includes(String(call.call_status || '').toLowerCase());
+          if (!isUnans) return false;
+        } else if (s === 'completed') {
+          const isComp =
+            ['Completed', 'Callback Done'].includes(call.status) ||
+            call.disposition === 'Weather Delivered' ||
+            call.understood_weather === 'yes';
+          if (!isComp) return false;
         } else if (String(call.status).toLowerCase() !== s && String(call.call_status).toLowerCase() !== s) {
           return false;
         }
@@ -321,32 +343,98 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
     });
   }, [enrichedCallLogs, searchQuery, districtFilter, languageFilter, statusFilter, dateFilter, customDate]);
 
-  // Summary cards: one row per farmer per day, for the date picked in the filter bar (all dates when none is picked).
-  // Skipped farmers (no consent, inactive, no weather) are not calls, and test calls never count.
+  // Summary cards: breakdown of call metrics for the date picked in the filter bar (all dates when none is picked),
+  // respecting active search, district, and language filters.
   const summaryMetrics = useMemo(() => {
     const inScope = (c) => {
-      if (dateFilter === 'all' || !customDate) return true;
-      const raw = getCallDate(c);
-      return Boolean(raw) && isCallOnDate(raw, customDate);
+      // Date filter
+      if (dateFilter !== 'all' && customDate) {
+        const raw = getCallDate(c);
+        if (!raw || !isCallOnDate(raw, customDate)) return false;
+      }
+      // District filter
+      if (districtFilter !== 'all' && c.district !== districtFilter) {
+        return false;
+      }
+      // Language filter
+      if (languageFilter !== 'all' && c.primary_language !== languageFilter) {
+        return false;
+      }
+      // Search query
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        const matchesName = String(c.farmer_name || '').toLowerCase().includes(query);
+        const phoneStr = String(c.phone_number || '');
+        const matchesPhone = phoneStr.toLowerCase().includes(query) ||
+          maskPhoneNumber(phoneStr).toLowerCase().includes(query);
+        const matchesCallId = String(c.call_id || '').toLowerCase().includes(query);
+        const matchesVillage = String(c.village || '').toLowerCase().includes(query);
+        const matchesDistrict = String(c.district || '').toLowerCase().includes(query);
+        if (!matchesName && !matchesPhone && !matchesCallId && !matchesVillage && !matchesDistrict) {
+          return false;
+        }
+      }
+      return true;
     };
-    const scoped = enrichedCallLogs.filter(c => !c.is_test && inScope(c));
-    const waiting = (c) => c.status === 'In Call' || c.status === 'In Queue';
-    const called = scoped.filter(c => c.status !== 'Skipped' && !waiting(c));       // calls that have a result
-    const scopeLabel = dateFilter === 'today' ? 'Today' : dateFilter === 'yesterday' ? 'Yesterday'
-      : customDate ? customDate : 'All dates';
+
+    const scoped = enrichedCallLogs.filter((c) => !c.is_test && inScope(c));
+    const waiting = (c) => c.status === 'In Call' || c.status === 'In Queue' || c.status === 'Calling';
+    const called = scoped.filter((c) => c.status !== 'Skipped' && !waiting(c));
+
+    const isCompleted = (c) =>
+      ['Completed', 'Callback Done'].includes(c.status) ||
+      c.disposition === 'Weather Delivered' ||
+      c.understood_weather === 'yes';
+
+    const isCallback = (c) =>
+      !isCompleted(c) && (
+        c.status === 'Callback Scheduled' ||
+        c.status === 'Callback Requested' ||
+        c.callback_status === 'pending' ||
+        Boolean(c.scheduled_callback_time && !['Failed', 'Not Confirmed'].includes(c.status))
+      );
+
+    const isUnanswered = (c) =>
+      !isCompleted(c) && !isCallback(c) && (
+        ['Retrying', 'Unanswered', 'Busy'].includes(c.status) ||
+        ['no_answer', 'busy'].includes(String(c.call_status || '').toLowerCase())
+      );
+
+    const isNeedsAttention = (c) =>
+      !isCompleted(c) && !isCallback(c) && !isUnanswered(c) && (
+        ['Failed', 'Not Confirmed', 'Callback Missed', 'Declined', 'Escalated'].includes(c.status) ||
+        ['failed', 'error', 'declined'].includes(String(c.call_status || '').toLowerCase()) ||
+        c.understood_weather === 'declined'
+      );
+
+    const targetedFarmers = new Set();
+    called.forEach((c) => {
+      const fid = String(c.farmer_id || c.phone_number || c.phone || '').trim();
+      if (fid) targetedFarmers.add(fid);
+    });
+
+    const scopeLabel =
+      dateFilter === 'today'
+        ? 'Today'
+        : dateFilter === 'yesterday'
+          ? 'Yesterday'
+          : customDate
+            ? customDate
+            : 'All dates';
 
     return {
       scopeLabel,
       totalCalls: called.length,
-      completedCount: called.filter(c => c.status === 'Completed').length,
-      retryingCount: called.filter(c => ['Retrying', 'Unanswered'].includes(c.status)).length,
-      needsAttentionCount: called.filter(c => ['Failed', 'Not Confirmed', 'Callback Missed'].includes(c.status)).length,
-      declinedCount: called.filter(c => c.status === 'Declined').length,
-      callbacksScheduled: scoped.filter(c => c.callback_status === 'pending').length,
-      skippedCount: scoped.filter(c => c.status === 'Skipped').length,
+      uniqueFarmersCount: targetedFarmers.size,
+      completedCount: called.filter(isCompleted).length,
+      callbacksScheduled: scoped.filter(isCallback).length,
+      retryingCount: called.filter(isUnanswered).length,
+      needsAttentionCount: called.filter(isNeedsAttention).length,
+      declinedCount: called.filter((c) => c.status === 'Declined').length,
+      skippedCount: scoped.filter((c) => c.status === 'Skipped').length,
       inProgressCount: scoped.filter(waiting).length,
     };
-  }, [enrichedCallLogs, dateFilter, customDate]);
+  }, [enrichedCallLogs, dateFilter, customDate, districtFilter, languageFilter, searchQuery]);
 
   // Send today's calls now to every eligible farmer
   const triggerDemo = async () => {

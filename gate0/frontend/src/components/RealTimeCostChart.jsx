@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Activity, TrendingUp, Zap, Clock, RefreshCw, PieChart } from 'lucide-react';
-import { didFarmerPickUpAndTalk, pulsesFor, telephonyAmount } from '../utils';
-import { DonutAnalyticsGrid } from './DonutAnalyticsGrid';
+import { RefreshCw } from 'lucide-react';
+import { didFarmerPickUpAndTalk, pulsesFor } from '../utils';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
@@ -76,7 +75,7 @@ function getCallHour(call) {
   return null;
 }
 
-function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
+function computeHourlyTelemetry(callLogs = [], rate = 3.5, messageRate = 0.2) {
   const validCalls = (callLogs || []).filter((c) => !c.is_test);
 
   const todayStr = localDateKey(new Date());
@@ -126,8 +125,12 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
       return sum + Math.max(1, Math.ceil(sec / 60));
     }, 0);
 
-    const pulses = connected.reduce((sum, c) => sum + pulsesFor(c.duration_sec ?? c.duration), 0);   // Sarvam telephony: started 30-second pulses
-    const spend = Math.round(billedMinutes * rate * 100) / 100;
+    const messages = hourCalls.reduce((sum, c) => sum + Number(c.messages_sent ?? c.sms_count ?? 1), 0);
+    const voiceSpend = Math.round(billedMinutes * rate * 100) / 100;
+    const messageSpend = Math.round(messages * messageRate * 100) / 100;
+    const spend = Math.round((voiceSpend + messageSpend) * 100) / 100;
+
+    const pulses = connected.reduce((sum, c) => sum + pulsesFor(c.duration_sec ?? c.duration), 0);
     runningCumulative = Math.round((runningCumulative + spend) * 100) / 100;
 
     if (spend > peakSpend) {
@@ -145,8 +148,11 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
       timeRange: `${displayH}:00 ${ampm} – ${displayH}:59 ${ampm}`,
       calls: hourCalls.length,
       connected: connected.length,
+      messages,
       billedMinutes,
       pulses,
+      voiceSpend,
+      messageSpend,
       spend,
       cumulativeSpend: runningCumulative,
     });
@@ -154,8 +160,11 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
 
   const totalCalls = hours.reduce((s, h) => s + h.calls, 0);
   const totalConnected = hours.reduce((s, h) => s + h.connected, 0);
+  const totalMessages = hours.reduce((s, h) => s + h.messages, 0);
   const totalBilledMins = hours.reduce((s, h) => s + h.billedMinutes, 0);
   const totalPulses = hours.reduce((s, h) => s + h.pulses, 0);
+  const totalVoiceSpend = Math.round(hours.reduce((s, h) => s + h.voiceSpend, 0) * 100) / 100;
+  const totalMessageSpend = Math.round(hours.reduce((s, h) => s + h.messageSpend, 0) * 100) / 100;
   const activeHoursCount = hours.filter((h) => h.calls > 0).length || 1;
   const avgBurnRate = Math.round((runningCumulative / activeHoursCount) * 100) / 100;
 
@@ -166,8 +175,11 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
     totalSpend: runningCumulative,
     totalCalls,
     totalConnected,
+    totalMessages,
     totalBilledMins,
     totalPulses,
+    totalVoiceSpend,
+    totalMessageSpend,
     peakHour,
     peakSpend,
     avgBurnRate,
@@ -177,19 +189,19 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5) {
 export const RealTimeCostChart = ({
   callLogs = [],
   rate = 3.5,
+  messageRate = 0.2,
   isLive = false,
   onRefresh = null,
   embedded = false,
 }) => {
   const [hoveredIdx, setHoveredIdx] = useState(null);
   const [displayMode, setDisplayMode] = useState('cumulative'); // 'cumulative' | 'hourly'
-  const [chartType, setChartType] = useState('timeline'); // 'timeline' | 'donuts'
 
   const telemetry = useMemo(() => {
-    return computeHourlyTelemetry(callLogs, Number(rate || 3.5));
-  }, [callLogs, rate]);
+    return computeHourlyTelemetry(callLogs, Number(rate || 3.5), Number(messageRate || 0.2));
+  }, [callLogs, rate, messageRate]);
 
-  const { hours, totalSpend, totalCalls, totalConnected, totalBilledMins, totalPulses, avgBurnRate } = telemetry;
+  const { hours } = telemetry;
   const n = hours.length;
 
   // Coordinate setup for clean responsive vector rendering
@@ -242,10 +254,9 @@ export const RealTimeCostChart = ({
   const lastActivePoint = points[lastActiveIdx];
   const hoveredHour = hoveredIdx !== null ? hours[hoveredIdx] : null;
 
-  // Telephony pulse estimation:
-  const voiceCost = totalSpend;
-  const carriageCost = telephonyAmount(totalPulses);                    // Sarvam telephony: Rs 0.20 per started 30 seconds
-  const totalCombined = voiceCost + carriageCost;
+  // Operational breakdown:
+  const voiceCost = telemetry.totalVoiceSpend;
+  const messageCost = telemetry.totalMessageSpend;
 
   const containerClass = embedded
     ? 'space-y-4'
@@ -281,65 +292,36 @@ export const RealTimeCostChart = ({
 
           {/* Display mode buttons & Refresh */}
           <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-            {/* View Selector: Timeline vs Pie & Donut */}
             <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60">
               <button
                 type="button"
-                onClick={() => setChartType('timeline')}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  chartType === 'timeline'
+                onClick={() => {
+                  setDisplayMode('cumulative');
+                  setHoveredIdx(null);
+                }}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  displayMode === 'cumulative'
                     ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Timeline
+                Cumulative (₹)
               </button>
               <button
                 type="button"
-                onClick={() => setChartType('donuts')}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  chartType === 'donuts'
+                onClick={() => {
+                  setDisplayMode('hourly');
+                  setHoveredIdx(null);
+                }}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  displayMode === 'hourly'
                     ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                <PieChart className="w-3 h-3 text-trust-green" />
-                Donut & Pie
+                Hourly Burn (₹)
               </button>
             </div>
-
-            {chartType === 'timeline' && (
-              <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDisplayMode('cumulative');
-                    setHoveredIdx(null);
-                  }}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                    displayMode === 'cumulative'
-                      ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Cumulative (₹)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDisplayMode('hourly');
-                    setHoveredIdx(null);
-                  }}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                    displayMode === 'hourly'
-                      ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Hourly Burn (₹)
-                </button>
-              </div>
-            )}
 
             {onRefresh && (
               <button
@@ -362,120 +344,38 @@ export const RealTimeCostChart = ({
             <span>{telemetry.targetDateLabel} (06:00 – 21:00)</span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-            {/* View Selector: Timeline vs Pie & Donut */}
-            <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60">
-              <button
-                type="button"
-                onClick={() => setChartType('timeline')}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  chartType === 'timeline'
-                    ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Timeline
-              </button>
-              <button
-                type="button"
-                onClick={() => setChartType('donuts')}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  chartType === 'donuts'
-                    ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <PieChart className="w-3 h-3 text-trust-green" />
-                Donut & Pie
-              </button>
-            </div>
-
-            {chartType === 'timeline' && (
-              <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDisplayMode('cumulative');
-                    setHoveredIdx(null);
-                  }}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                    displayMode === 'cumulative'
-                      ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Cumulative (₹)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDisplayMode('hourly');
-                    setHoveredIdx(null);
-                  }}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                    displayMode === 'hourly'
-                      ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Hourly Burn (₹)
-                </button>
-              </div>
-            )}
+          <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/60 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setDisplayMode('cumulative');
+                setHoveredIdx(null);
+              }}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                displayMode === 'cumulative'
+                  ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Cumulative (₹)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDisplayMode('hourly');
+                setHoveredIdx(null);
+              }}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                displayMode === 'hourly'
+                  ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Hourly Burn (₹)
+            </button>
           </div>
         </div>
       )}
-
-      {chartType === 'donuts' ? (
-        <DonutAnalyticsGrid callLogs={callLogs} rate={rate} embedded={true} />
-      ) : (
-        <>
-          {/* 4 Quick Telemetry Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
-        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Spend</span>
-            <Zap className="w-3.5 h-3.5 text-emerald-600" />
-          </div>
-          <div className="text-xl font-bold text-slate-900 mt-1">{rupees(totalSpend)}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">
-            {totalBilledMins} billed mins ({totalConnected} of {totalCalls} answered)
-          </div>
-        </div>
-
-        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Avg Burn Rate</span>
-            <Activity className="w-3.5 h-3.5 text-trust-green" />
-          </div>
-          <div className="text-xl font-bold text-trust-green mt-1">{rupees(avgBurnRate)}/hr</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">
-            Peak: {rupees(telemetry.peakSpend)}/hr
-          </div>
-        </div>
-
-        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Effective Rate</span>
-            <Clock className="w-3.5 h-3.5 text-trust-navy" />
-          </div>
-          <div className="text-xl font-bold text-trust-navy mt-1">{rupees(rate)}/min</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">
-            Sarvam, per started minute
-          </div>
-        </div>
-
-        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Per Answered Call</span>
-            <TrendingUp className="w-3.5 h-3.5 text-slate-600" />
-          </div>
-          <div className="text-xl font-bold text-slate-900 mt-1">{rupees(totalConnected > 0 ? totalSpend / totalConnected : 0)}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">
-            Spend divided by answered calls
-          </div>
-        </div>
-      </div>
 
       {/* Responsive SVG Intraday Real-Time Chart Area */}
       <div className="relative w-full">
@@ -725,16 +625,14 @@ export const RealTimeCostChart = ({
           </div>
         </div>
 
-        <div className="text-[11px] text-slate-500 flex items-center gap-2">
-          <span>Telephony ({totalPulses} pulses × ₹0.20): <strong className="text-slate-700">{rupees(carriageCost)}</strong></span>
+        <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-2">
+          <span>Voice AI: <strong className="text-slate-700">{rupees(voiceCost)}</strong> (₹{Number(rate).toFixed(2)}/min)</span>
           <span>·</span>
-          <span>Voice AI: <strong className="text-slate-700">{rupees(voiceCost)}</strong></span>
+          <span>Advisory SMS: <strong className="text-slate-700">{rupees(messageCost)}</strong> ({telemetry.totalMessages} sent @ ₹{Number(messageRate).toFixed(2)}/msg)</span>
           <span>·</span>
-          <span>Total: <strong className="text-slate-900">{rupees(totalCombined)}</strong></span>
+          <span>Fixed Carrier DID: <strong className="text-slate-700">₹59.00/mo</strong> (billed monthly · separate from daily call usage)</span>
         </div>
       </div>
-        </>
-      )}
     </div>
   );
 };
