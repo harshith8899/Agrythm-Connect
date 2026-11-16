@@ -3,6 +3,7 @@ import { Lock, User, Eye, EyeOff, ShieldCheck, Server, CheckCircle2 } from 'luci
 import { pingServer } from '../utils';
 
 const NOT_CONNECTED = 'This dashboard is not connected to the server. In Cloudflare, open the Worker, Settings, Variables and Secrets, and check that BACKEND_URL and API_TOKEN are both there (type Secret), then deploy.';
+const DIAGNOSE_AFTER_S = 40;      // a cold start answers within about 25 s: past this, show what the connection is really saying
 const SLOW_AFTER_S = 180;         // a start normally takes under a minute; after this the note changes, but waking never stops
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -15,6 +16,7 @@ export const LoginScreen = ({ onSignIn, initialError = '' }) => {
   const [error, setError] = useState('');
   const [server, setServer] = useState('waking');      // waking | ready | unconfigured
   const [seconds, setSeconds] = useState(0);
+  const [lastAnswer, setLastAnswer] = useState(null);   // what the last health check got back: { status, message }
 
   // Wake the server the moment this page opens, so it is already up when the details are typed.
   useEffect(() => {
@@ -25,6 +27,7 @@ export const LoginScreen = ({ onSignIn, initialError = '' }) => {
       while (!stopped) {
         const answer = await pingServer();
         if (stopped) return;
+        setLastAnswer({ status: answer.status, message: answer.message });
         if (answer.ok) {
           setServer('ready');
           return;
@@ -97,6 +100,15 @@ export const LoginScreen = ({ onSignIn, initialError = '' }) => {
                   ? 'It sleeps when idle and can take up to a minute. Type your details and press Sign in: you are signed in as soon as it is ready.'
                   : 'This is taking longer than usual. Still trying; you can keep this page open and press Sign in.'}{' '}
                 {seconds} s
+                {seconds >= DIAGNOSE_AFTER_S && lastAnswer && (
+                  <span className="block mt-1.5 font-mono text-[11px] text-amber-900/80">
+                    Last answer from the connection to the server: {lastAnswer.status ? `HTTP ${lastAnswer.status}` : 'no answer'}
+                    {lastAnswer.message ? ` (${lastAnswer.message})` : ''}.{' '}
+                    {lastAnswer.status === 0
+                      ? 'The request is not being answered at all: check that the Cloudflare Worker is deployed.'
+                      : 'The Worker answers but cannot reach the server: check that BACKEND_URL on the Cloudflare Worker is exactly the Render address (https, no path).'}
+                  </span>
+                )}
               </span>
             </div>
           )}

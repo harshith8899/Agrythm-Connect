@@ -62,6 +62,7 @@ class FarmerContext:                    # contract 2
     consent: bool
     active: bool = True
     phone: str = field(default="", repr=False)   # sensitive: never print or log
+    email: str = field(default="", repr=False)   # sensitive: for the written message after a call
 
 
 @dataclass(frozen=True)

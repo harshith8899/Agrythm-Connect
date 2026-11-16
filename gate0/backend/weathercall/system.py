@@ -3,8 +3,10 @@
 Checks: backend, database, weather API (Open-Meteo), Sarvam API and the phone line, each ok, fail or off (not set up).
 Usage: calls and billed minutes counted from Sarvam's own call records, the way Sarvam bills them: each connected call
 in started 60-second minutes (45 s = 1, 61 s = 2); calls that were not picked up, were busy or failed cost nothing.
-Sarvam has no endpoint for the credit balance (it is only on Settings -> Billing, "Credits Left"), so no balance or
-remaining credits are shown or guessed here. The amount is an estimate: billed minutes times a per-minute rate (Sarvam's
+Sarvam has no endpoint for the credit balance (it is only on Settings -> Billing, "Credits Left"), so the balance is
+kept by us: a person types the "Credits Left" figure once (the checkpoint, with its time), and from then on the balance is
+that figure minus the estimated spend on the call records since that moment (15 Nov 2026). It is an estimate until the
+checkpoint is refreshed from Sarvam's Billing page. The amount is an estimate: billed minutes times a per-minute rate (Sarvam's
 pay-as-you-go ₹3.50 by default, before GST; editable for another plan). An "insufficient quota" answer is flagged.
 """
 from __future__ import annotations
@@ -25,6 +27,8 @@ UTC = timezone.utc
 CACHE_SECONDS = 30
 DEFAULT_RATE = 3.5                          # INR a minute: Sarvam pay-as-you-go, before GST (Pro 3.25, Growth 3.15)
 MAX_RATE = 1000.0
+MAX_BALANCE = 10_000_000.0
+LOW_BALANCE = 100.0                         # INR: below this the dashboard warns (about 28 voice minutes)
 USAGE_DAYS = 60
 _AUTO = object()
 _EXHAUSTED = re.compile(r"insufficient[_ ]quota|\b402\b", re.I)
@@ -101,6 +105,38 @@ class SystemChecks:
         self.service._set_setting("usage_sarvam_rate", repr(n))
         return self.usage()
 
+    # -- credit balance: a checkpoint typed from Sarvam's Billing page, minus the spend recorded since -------------------------
+    def set_balance(self, amount, at: datetime | None = None) -> dict:
+        """Saves what Sarvam's Billing page shows under Credits Left (rupees) as of now (or `at`)."""
+        if isinstance(amount, bool) or amount is None:
+            raise ValueError("sarvam_balance must be a number")
+        try:
+            n = float(amount)
+        except (TypeError, ValueError):
+            raise ValueError("sarvam_balance must be a number") from None
+        if not math.isfinite(n) or not 0 <= n <= MAX_BALANCE:
+            raise ValueError(f"sarvam_balance must be between 0 and {MAX_BALANCE:g}")
+        self.service._set_setting("usage_balance_amount", repr(n))
+        self.service._set_setting("usage_balance_at", (at or self._now()).astimezone(UTC).isoformat(timespec="seconds"))
+        return self.usage(refresh=True)
+
+    def _balance(self, rows: list[dict] | None, rate: float) -> dict | None:
+        raw, at_raw = self.service._get_setting("usage_balance_amount"), self.service._get_setting("usage_balance_at")
+        if not raw or not at_raw:
+            return None
+        start, amount = datetime.fromisoformat(at_raw).astimezone(UTC), float(raw)
+        out = {"checkpoint": amount, "checkpoint_at": at_raw, "spent": None, "remaining": None, "estimated": True,
+               "partial": False, "low": False}
+        if rows is None:                                    # no call records right now: show the checkpoint, not a guess
+            return out
+        since = [a for a in rows if _when(a) >= start]
+        t = self._totals(since, rate)
+        spent = round(t["amount"] + t["telephony_amount"], 2)
+        out["spent"], out["remaining"] = spent, round(amount - spent, 2)
+        out["partial"] = start < self._now().astimezone(UTC) - timedelta(days=USAGE_DAYS)     # the records do not reach back to it
+        out["low"] = out["remaining"] <= LOW_BALANCE
+        return out
+
     @staticmethod
     def _totals(rows: list[dict], rate: float) -> dict:
         minutes = sum(billed_minutes(a["connectivity_status"], a["duration_in_seconds"]) for a in rows)
@@ -112,13 +148,14 @@ class SystemChecks:
     def usage(self, refresh: bool = False) -> dict:
         rate = self.rate()
         out = {"configured": self.usage_reader is not None, "error": "", "exhausted": False, "today": None, "week": None,
-               "window": None, "window_days": USAGE_DAYS, "days": [], "rate": rate, "currency": "INR",
+               "window": None, "window_days": USAGE_DAYS, "days": [], "rate": rate, "currency": "INR", "balance": None,
                "note": "Minutes are counted the way Sarvam bills: started 60-second minutes of connected calls. "
                        "Calls not picked up, busy or failed cost nothing. The amount is an estimate (billed minutes "
                        "times the rate, before GST). Telephony on Sarvam's own number is Rs 0.20 per started 30-second "
-                       "pulse of connected calls, also before GST. The exact figures and the credit balance are on "
-                       "Sarvam's Settings, Usage and Billing pages."}
+                       "pulse of connected calls, also before GST. The credit balance is the Credits Left figure you last saved "
+                       "minus the estimated spend since then; refresh it from Sarvam's Settings, Billing page now and then."}
         rows, error = self._attempts(refresh)
+        out["balance"] = self._balance(rows, rate)
         if rows is None:
             out["error"] = "" if error == "not configured" else error
             return out

@@ -14,7 +14,8 @@
     GET  /api/callbacks                      GET  /api/weather?lat=..&lon=..
     GET  /api/system/checks                  connection checks: backend, database, weather API, Sarvam, phone line
     GET  /api/usage   POST /api/usage        calls, billed minutes and an estimated amount from Sarvam's records; POST sets the
-                                             per-minute rate {"sarvam_rate": 3.5} (no balance: Sarvam has no API for it)
+                                             per-minute rate {"sarvam_rate": 3.5}, or the Credits Left from Sarvam's Billing page {"sarvam_balance": 500}
+                                             (Sarvam has no API for the balance, so it is that figure minus the spend since)
 
 Phone numbers are masked in every response and never logged. CORS allows only the origins in GATE0_CORS_ORIGINS
 (default: the local dashboard); set it to the hosted dashboard's address in production. There is no login yet.
@@ -177,6 +178,10 @@ def make_handler(
                     return self._send(200, service.callbacks())
                 if path == "/api/alerts":
                     return self._send(200, service.alerts())
+                if path == "/api/messages":
+                    return self._send(200, service.messages())
+                if path == "/api/inbound":
+                    return self._send(200, service.inbound())
                 if path == "/api/orchestrator/status":
                     return self._send(200, service.status())
                 if path == "/api/system/checks":
@@ -259,8 +264,10 @@ def make_handler(
                     return self._send(202, {"started": service.start_tick(), "at": service._now().isoformat(timespec="seconds")})
                 if path == "/api/usage":
                     fields = json.loads(body or "{}")
+                    if isinstance(fields, dict) and "sarvam_balance" in fields:
+                        return self._send(200, system.set_balance(fields["sarvam_balance"]))
                     if not isinstance(fields, dict) or "sarvam_rate" not in fields:
-                        return self._send(400, {"error": 'Field "sarvam_rate" (rupees a minute) is required'})
+                        return self._send(400, {"error": 'Field "sarvam_rate" (rupees a minute) or "sarvam_balance" (Credits Left, rupees) is required'})
                     return self._send(200, system.set_rate(fields["sarvam_rate"]))
                 if path == "/api/orchestrator/auto-dispatch":
                     enabled = json.loads(body or "{}").get("enabled")
