@@ -222,6 +222,10 @@ export const getSystemChecks = (refresh = false) => getJson(`${API_BASE}/api/sys
 export const getUsage = (refresh = false) => getJson(`${API_BASE}/api/usage${refresh ? '?refresh=1' : ''}`);
 
 /** Saves the per-minute rate of the Sarvam plan (rupees a minute); amounts are billed minutes times this rate. */
+/** Saves the 'Credits Left' figure from Sarvam's Billing page (rupees); the balance then falls with each call's cost. */
+export const saveSarvamBalance = (amount) =>
+  postJson('/api/usage', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sarvam_balance: amount }) });
+
 export const saveUsageRate = (sarvamRate) =>
   postJson('/api/usage', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sarvam_rate: sarvamRate }) });
 

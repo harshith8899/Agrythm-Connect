@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, AlertTriangle, Info, PieChart, Table, BarChart3 } from 'lucide-react';
-import { getUsage, saveUsageRate, didFarmerPickUpAndTalk } from '../utils';
+import { getUsage, saveUsageRate, saveSarvamBalance, didFarmerPickUpAndTalk } from '../utils';
 import { RealTimeCostChart } from './RealTimeCostChart';
 import { DonutAnalyticsGrid } from './DonutAnalyticsGrid';
 
@@ -822,6 +822,8 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
     }
   });
   const [rateMessage, setRateMessage] = useState(null);
+  const [balanceInput, setBalanceInput] = useState('');
+  const [balanceMessage, setBalanceMessage] = useState(null);
   const [selectedTimeframe, setSelectedTimeframe] = useState('14d'); // 'today' | 'yesterday' | '7d' | '14d' | 'custom'
   const [customDate, setCustomDate] = useState('');
 
@@ -859,6 +861,18 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
       setRateMessage({ ok: true, text: 'Rates saved.' });
     } catch (err) {
       setRateMessage({ ok: false, text: err.message });
+    }
+  };
+
+  const handleSaveBalance = async () => {
+    setBalanceMessage(null);
+    try {
+      const updated = await saveSarvamBalance(Number(balanceInput));
+      setUsage(updated);
+      setBalanceInput('');
+      setBalanceMessage({ ok: true, text: 'Balance saved.' });
+    } catch (err) {
+      setBalanceMessage({ ok: false, text: err.message });
     }
   };
 
@@ -995,6 +1009,56 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
           <span>
             Sarvam reported that credits are exhausted in the last 7 days. Add credits on Sarvam Settings &gt; Billing to resume live calling.
           </span>
+        </div>
+      )}
+
+      {usage && usage.configured && (
+        <div className="flex flex-wrap items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 text-xs text-slate-600 shadow-2xs">
+          <div>
+            <span className="block text-[10px] font-bold tracking-wider text-slate-400 uppercase">Sarvam credits left (estimate)</span>
+            {usage.balance && usage.balance.remaining !== null ? (
+              <span className={`text-lg font-bold ${usage.balance.low ? 'text-rose-700' : 'text-slate-900'}`}>
+                {rupees(usage.balance.remaining)}
+              </span>
+            ) : (
+              <span className="text-sm font-semibold text-slate-500">
+                {usage.balance ? `Saved ${rupees(usage.balance.checkpoint)}, spend not readable now` : 'Not set: type the Credits Left from Sarvam'}
+              </span>
+            )}
+            {usage.balance && usage.balance.remaining !== null && (
+              <span className="block text-[11px] text-slate-500">
+                {rupees(usage.balance.checkpoint)} saved on {new Date(usage.balance.checkpoint_at).toLocaleString('en-IN')}, minus{' '}
+                {rupees(usage.balance.spent)} spent since
+                {usage.balance.partial ? ' (older than the call records, so the spend is only partly counted)' : ''}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <label htmlFor="balance" className="font-semibold text-slate-700">Credits Left on Sarvam (₹)</label>
+            <input
+              id="balance"
+              type="number"
+              min="0"
+              step="1"
+              value={balanceInput}
+              onChange={(e) => setBalanceInput(e.target.value)}
+              className="w-28 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-1 focus:ring-trust-navy focus:outline-hidden"
+            />
+            <button
+              onClick={handleSaveBalance}
+              disabled={balanceInput === ''}
+              className="px-3 py-1 rounded-lg bg-trust-navy text-white font-semibold hover:bg-slate-800 transition-colors cursor-pointer text-xs disabled:opacity-50"
+            >
+              Save balance
+            </button>
+            {balanceMessage && (
+              <span className={balanceMessage.ok ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold'}>{balanceMessage.text}</span>
+            )}
+          </div>
+          <p className="w-full text-[11px] text-slate-400">
+            Sarvam has no way to read the balance automatically. Copy Credits Left from Sarvam, Settings, Billing; this page then
+            takes off the estimated cost of every call after that moment. Save it again now and then to correct it.
+          </p>
         </div>
       )}
 
