@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
-import { getSystemChecks, getAlerts, getMessages } from '../utils';
+import { RefreshCw, CheckCircle2, XCircle, MinusCircle, X } from 'lucide-react';
+import { getSystemChecks, getAlerts, getMessages, dismissAlerts } from '../utils';
 import { CostAnalyticsView } from './CostAnalyticsView';
 
 const MESSAGE_LABEL = {
@@ -54,6 +54,16 @@ export const SystemStatusView = ({ isBackendOnline = true, callLogs = [] }) => {
     }
   }, []);
 
+  // remove one note, or all of them; the list is updated at once and the server confirms in the background
+  const handleDismiss = async (id) => {
+    setAlerts((prev) => (id == null ? [] : prev.filter((a) => a.id !== id)));
+    try {
+      await dismissAlerts(id);
+    } catch {
+      loadSystem(false);        // it did not go through: show what is really there
+    }
+  };
+
   useEffect(() => {
     loadSystem(false);
     const timer = setInterval(() => loadSystem(false), 60000);
@@ -105,17 +115,37 @@ export const SystemStatusView = ({ isBackendOnline = true, callLogs = [] }) => {
 
         {/* Alerts if any */}
         {alerts.length > 0 && (
-          <div className="bg-amber-50/70 rounded-xl border border-amber-200 divide-y divide-amber-100">
-            <div className="p-3 text-[11px] font-bold tracking-wider text-amber-800 uppercase">
-              Needs Attention ({alerts.length})
+          <div className="bg-amber-50/70 rounded-xl border border-amber-200">
+            <div className="p-3 flex items-center justify-between gap-2 border-b border-amber-100">
+              <span className="text-[11px] font-bold tracking-wider text-amber-800 uppercase">Needs Attention ({alerts.length})</span>
+              <button
+                onClick={() => handleDismiss(null)}
+                className="px-2.5 py-1 rounded-lg bg-white border border-amber-200 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
+              >
+                Clear all
+              </button>
             </div>
-            {alerts.slice(0, 5).map((a, i) => (
-              <div key={`${a.at}-${i}`} className="p-3 text-xs text-slate-700">
-                <span className="font-semibold text-slate-900">{a.farmer_name || a.farmer_id || 'System'}</span>
-                <span className="text-slate-400"> · {String(a.at).replace('T', ' ').slice(0, 16)}</span>
-                <p className="mt-0.5">{a.text}</p>
-              </div>
-            ))}
+            <div className="max-h-72 overflow-y-auto divide-y divide-amber-100">
+              {alerts.map((a, i) => (
+                <div key={`${a.id ?? a.at}-${i}`} className="p-3 text-xs text-slate-700 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="font-semibold text-slate-900">{a.farmer_name || a.farmer_id || 'System'}</span>
+                    <span className="text-slate-400"> · {String(a.at).replace('T', ' ').slice(0, 16)}</span>
+                    <p className="mt-0.5 break-words">{a.text}</p>
+                  </div>
+                  {a.id != null && (
+                    <button
+                      onClick={() => handleDismiss(a.id)}
+                      title="Dismiss this note"
+                      aria-label="Dismiss this note"
+                      className="shrink-0 p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-white transition-colors cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

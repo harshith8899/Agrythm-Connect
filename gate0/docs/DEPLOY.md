@@ -40,6 +40,11 @@ who finds the address could read farmer data and press "Send now" (real calls co
    WeatherAPI.com is the weather source (Open-Meteo's free service throttles shared hosting addresses with HTTP 429). Weather is
    fetched only when a call is made, once per place and day, and the System Status tab never asks the weather service.
    Call-back line: set `SARVAM_INBOUND_DEPLOYMENT_ID` (Sarvam, Deploy, Inbound deployments) so a farmer we could not reach is told to it; the deployment and the calls use the same agent version.
+   Email on Render's free plan: SMTP (Gmail) does not work there, because the free plan blocks the SMTP ports (the 'Emails after calls'
+   table then shows failed with an OSError). Use an HTTPS mail API instead: make a free Resend account, create an API key and put it in
+   `GATE0_RESEND_API_KEY`; set `GATE0_MAIL_LOGO_URL` to the logo's public address (the dashboard's `/agrythm-logo.png`). With no `GATE0_MAIL_FROM`
+   the sender is `onboarding@resend.dev`, which Resend only delivers to the account owner's own address: set `GATE0_MAIL_TEST_TO` to that
+   address while testing. To send to farmers, verify a domain in Resend and set `GATE0_MAIL_FROM`.
    Email (the message after a call): add `GATE0_SMTP_HOST`, `GATE0_SMTP_PORT` (587), `GATE0_SMTP_USER` and `GATE0_SMTP_PASSWORD` (secret),
    optionally `GATE0_MAIL_FROM` and `GATE0_MAIL_TEAM` (a team address that gets a copy). While testing, set `GATE0_MAIL_TEST_TO` to one address: every
    farmer's message goes there, with "[Test: name, ID]" in the subject, and farmers need no email of their own. Clear it to use each farmer's own email. Without `GATE0_SMTP_HOST` nothing is sent and each
