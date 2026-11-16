@@ -153,6 +153,43 @@ def test_in_test_mode_every_farmers_message_goes_to_the_one_test_address(tmp_pat
     assert [m["status"] for m in s.messages()] == ["sent", "sent"]
 
 
+def _test_service(tmp_path, dial, test_to="Tester@Example.com"):
+    mail = RecordingMailer()
+    env = {"GATE0_WEATHER": "mock", **({"GATE0_MAIL_TEST_TO": test_to} if test_to else {})}
+    s = DashboardService(str(tmp_path / "t.db"), dialler=dial, env=env, now=lambda: T0, mailer=mail)
+    s.import_csv(CSV)
+    return s, mail
+
+
+def test_a_test_call_emails_the_test_address_every_time_without_using_up_the_real_message(tmp_path):
+    s, mail = _test_service(tmp_path, Dial())
+    s._test_call("F1")
+    s._test_call("F1")
+    assert [m[0] for m in mail.sent] == ["tester@example.com"] * 2
+    assert mail.sent[0][1].startswith("[Test: Ramesh, F1] Weather update for Mandya")
+    kinds = [m["kind"] for m in s.messages()]
+    assert len(kinds) == 2 and len(set(kinds)) == 2 and all(k.startswith("test:weather:") for k in kinds)
+    s.ports = s._make_ports()
+    s.fire_one("F1", D)                                         # the real message for the day is still free to go
+    assert any(m["kind"] == "weather" for m in s.messages()) and len(mail.sent) == 3
+
+
+def test_a_test_call_not_picked_up_sends_the_we_tried_email(tmp_path):
+    s, mail = _test_service(tmp_path, Dial(A.NO_ANSWER, ""))
+    s._test_call("F1")
+    assert len(mail.sent) == 1 and "(we tried to call you)" in mail.sent[0][1]
+
+
+def test_a_test_call_with_a_callback_request_or_no_test_address_sends_nothing(tmp_path):
+    s, mail = _test_service(tmp_path, Dial(A.ANSWERED, "no_response", callback="14:15"))
+    s._test_call("F1")
+    assert mail.sent == []
+    (tmp_path / "n").mkdir()
+    s2, mail2 = _test_service(tmp_path / "n", Dial(), test_to="")
+    s2._test_call("F1")                                         # no test address: never the farmer's own
+    assert mail2.sent == [] and s2.messages() == []
+
+
 def test_the_email_text_is_english_with_only_the_weather_facts_and_the_subject_follows_the_situation():
     subjects = set()
     for kind in KINDS:

@@ -1,7 +1,26 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
-import { getSystemChecks, getAlerts } from '../utils';
+import { getSystemChecks, getAlerts, getMessages } from '../utils';
 import { CostAnalyticsView } from './CostAnalyticsView';
+
+const MESSAGE_LABEL = {
+  weather: 'Weather update',
+  missed: 'We tried to call you',
+  callback_weather: 'Weather after the requested call',
+  callback_missed: 'Missed the requested call',
+};
+const MESSAGE_STATUS_STYLE = {
+  sent: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  skipped: 'bg-amber-50 text-amber-700 border-amber-200',
+  failed: 'bg-rose-50 text-rose-700 border-rose-200',
+  sending: 'bg-slate-50 text-slate-600 border-slate-200',
+};
+// a test call's key looks like "test:weather:ab12cd34": show the situation, tagged Test
+const describeMessage = (kind) => {
+  const isTest = String(kind).startsWith('test:');
+  const base = isTest ? String(kind).split(':')[1] : kind;
+  return { label: MESSAGE_LABEL[base] || base, isTest };
+};
 
 const STATUS_STYLE = {
   ok: { icon: CheckCircle2, color: 'text-emerald-600', label: 'OK' },
@@ -16,15 +35,17 @@ const STATUS_STYLE = {
 export const SystemStatusView = ({ isBackendOnline = true, callLogs = [] }) => {
   const [systemReport, setSystemReport] = useState(null);
   const [alerts, setAlerts] = useState([]);
+  const [messages, setMessages] = useState([]);
   const [systemError, setSystemError] = useState('');
   const [systemLoading, setSystemLoading] = useState(false);
 
   const loadSystem = useCallback(async (refresh = false) => {
     setSystemLoading(true);
     try {
-      const [checks, al] = await Promise.all([getSystemChecks(refresh), getAlerts().catch(() => [])]);
+      const [checks, al, msgs] = await Promise.all([getSystemChecks(refresh), getAlerts().catch(() => []), getMessages().catch(() => [])]);
       setSystemReport(checks);
       setAlerts(al);
+      setMessages(Array.isArray(msgs) ? msgs : []);
       setSystemError('');
     } catch (err) {
       setSystemError(err.message || 'Could not reach the backend');
@@ -97,6 +118,54 @@ export const SystemStatusView = ({ isBackendOnline = true, callLogs = [] }) => {
             ))}
           </div>
         )}
+
+        {/* Emails sent after calls */}
+        <div className="rounded-xl border border-slate-100">
+          <div className="p-3 text-[11px] font-bold tracking-wider text-slate-500 uppercase border-b border-slate-100">
+            Emails after calls ({messages.length})
+          </div>
+          {messages.length === 0 ? (
+            <p className="p-3 text-xs text-slate-500">
+              None yet. An email goes out after a call where the farmer understood the weather, after the last unanswered attempt, and after a
+              callback that was missed. A test call sends one only when a test address is set on the server.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-slate-400">
+                    <th className="px-3 py-2">When</th>
+                    <th className="px-3 py-2">Farmer</th>
+                    <th className="px-3 py-2">Email</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Why</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {messages.slice(0, 15).map((m, i) => {
+                    const d = describeMessage(m.kind);
+                    return (
+                      <tr key={`${m.at}-${m.kind}-${i}`}>
+                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{String(m.at).replace('T', ' ').slice(0, 16)}</td>
+                        <td className="px-3 py-2 font-medium text-slate-800">{m.farmer_name || m.farmer_id}</td>
+                        <td className="px-3 py-2 text-slate-700">
+                          {d.label}
+                          {d.isTest && <span className="ml-1.5 text-[10px] font-semibold text-slate-400 uppercase">Test</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-block px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase ${MESSAGE_STATUS_STYLE[m.status] || MESSAGE_STATUS_STYLE.sending}`}>
+                            {m.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-500">{m.note || ''}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         {/* Compact Connections Grid */}
         {systemReport && (
