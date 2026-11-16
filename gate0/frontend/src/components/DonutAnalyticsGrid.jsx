@@ -1,10 +1,40 @@
 import React, { useMemo, useState } from 'react';
-import { didFarmerPickUpAndTalk, normalizeLanguage, pulsesFor, telephonyAmount } from '../utils';
+import { Calendar } from 'lucide-react';
+import { didFarmerPickUpAndTalk, normalizeLanguage } from '../utils';
 
 const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
+const pad2 = (n) => String(n).padStart(2, '0');
+const toDateStr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+const getTodayDateStr = () => toDateStr(new Date());
+
+const getPastDateStr = (daysAgo) => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return toDateStr(d);
+};
+
+const getCallDateKey = (c) => {
+  if (!c) return '';
+  if (c.call_date) return String(c.call_date).trim().slice(0, 10);
+  if (c.date) return String(c.date).trim().slice(0, 10);
+  if (c.Call_Date) return String(c.Call_Date).trim().slice(0, 10);
+  const ts = c.call_timestamp ?? c.timestamp ?? c.created_at ?? '';
+  return String(ts).trim().slice(0, 10);
+};
+
+const DAY_PRESETS = [
+  { id: 'today', label: 'Today' },
+  { id: 'yesterday', label: 'Yesterday' },
+  { id: '7d', label: 'Last 7 Days' },
+  { id: '14d', label: 'Last 14 Days' },
+  { id: 'all', label: 'All Days' },
+];
+
 /**
  * Interactive pure SVG Donut / Pie Chart Card with hover expansion and dynamic center stats.
+ * Standardized header height and baseline for seamless horizontal alignment across all 4 cards.
  */
 export const SvgDonutCard = ({
   title,
@@ -13,7 +43,7 @@ export const SvgDonutCard = ({
   centerTitle = 'Total',
   centerValue = '0',
   isCurrency = false,
-  badge = null,
+  footer,
 }) => {
   const [hoveredId, setHoveredId] = useState(null);
 
@@ -66,22 +96,15 @@ export const SvgDonutCard = ({
   });
 
   return (
-    <div className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 flex flex-col justify-between space-y-3.5 shadow-2xs hover:shadow-xs transition-shadow">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-        <div>
-          <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">{title}</h4>
-          {subtitle && <p className="text-[10px] text-slate-500 mt-0.5">{subtitle}</p>}
-        </div>
-        {badge && (
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700">
-            {badge}
-          </span>
-        )}
+    <div className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 flex flex-col h-full shadow-2xs hover:shadow-xs transition-shadow">
+      {/* Standardized Header: baseline aligned across all cards */}
+      <div className="border-b border-slate-100 pb-2 min-h-[50px] flex flex-col justify-center shrink-0">
+        <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider break-words leading-tight">{title}</h4>
+        {subtitle && <p className="text-[11px] text-slate-500 break-words leading-snug mt-0.5">{subtitle}</p>}
       </div>
 
-      {/* Donut Graphic */}
-      <div className="flex items-center justify-center relative py-1">
+      {/* Donut Graphic: strictly fixed position & dimensions across all cards */}
+      <div className="flex items-center justify-center relative shrink-0 h-[196px] my-1">
         <svg
           width={size}
           height={size}
@@ -173,8 +196,8 @@ export const SvgDonutCard = ({
         </svg>
       </div>
 
-      {/* Legend Rows */}
-      <div className="space-y-1.5 pt-2 border-t border-slate-100 text-xs">
+      {/* Legend Rows: strictly aligned starting divider across all cards */}
+      <div className="space-y-1.5 pt-3 border-t border-slate-100 text-xs flex-1 flex flex-col justify-start">
         {slices.map((s) => {
           const isHov = hoveredId === s.id;
           const pct = total > 0 ? (Number(s.value || 0) / total) * 100 : 0;
@@ -183,25 +206,27 @@ export const SvgDonutCard = ({
               key={s.id}
               onMouseEnter={() => setHoveredId(s.id)}
               onMouseLeave={() => setHoveredId(null)}
-              className={`flex items-center justify-between p-1.5 rounded-lg transition-colors cursor-pointer ${
+              className={`flex items-start justify-between p-1.5 rounded-lg transition-colors cursor-pointer ${
                 isHov ? 'bg-white shadow-2xs' : 'hover:bg-slate-100/60'
               }`}
             >
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-start gap-2 min-w-0 flex-1">
                 <span
-                  className="w-2.5 h-2.5 rounded-xs shrink-0"
+                  className="w-2.5 h-2.5 rounded-xs shrink-0 mt-1"
                   style={{ backgroundColor: s.color }}
                 />
-                <div className="truncate">
-                  <span className={`font-semibold ${isHov ? 'text-slate-900' : 'text-slate-700'}`}>
+                <div className="min-w-0 flex-1 break-words leading-snug">
+                  <span className={`font-semibold block text-xs ${isHov ? 'text-slate-900' : 'text-slate-700'}`}>
                     {s.label}
                   </span>
                   {s.secondaryText && (
-                    <span className="text-[10px] text-slate-400 block truncate">{s.secondaryText}</span>
+                    <span className="text-[10px] text-slate-400 block break-words mt-0.5">
+                      {s.secondaryText}
+                    </span>
                   )}
                 </div>
               </div>
-              <div className="text-right shrink-0 ml-2">
+              <div className="shrink-0 whitespace-nowrap ml-2 text-right self-start pt-0.5">
                 <span className="font-bold text-slate-900 font-mono text-[11px]">
                   {isCurrency ? rupees(s.value) : s.value}
                 </span>
@@ -210,33 +235,128 @@ export const SvgDonutCard = ({
             </div>
           );
         })}
+        {footer && <div className="mt-auto pt-1">{footer}</div>}
       </div>
     </div>
   );
 };
 
 /**
- * Grid of Donut & Pie Charts visualizing:
- * 1. Sarvam Voice AI vs Telephony Carrier Pulses
- * 2. Call Outcomes & Delivery Ratios
- * 3. Regional / Language Cost Distribution
- * 4. Call Duration & Pulse Tiers
+ * Grid of 4 Donut & Pie Breakdown Cards:
+ * 1. Spend Split (Voice AI vs. Number Rental)
+ * 2. Call Outcomes (Completed, Callbacks, Unanswered/Busy, Needs Attention)
+ * 3. Language Mix (Kannada, Hindi, Telugu, English)
+ * 4. Duration Tiers (Under 1 min, 1–2 mins, 2–3 mins, Over 3 mins)
  */
 export const DonutAnalyticsGrid = ({
   callLogs = [],
   rate = 3.5,
+  messageRate = 0.2,
   embedded = false,
+  initialDayFilter = '14d',
+  dayFilter: controlledDayFilter,
+  onDayFilterChange,
+  customDate: controlledCustomDate,
+  onCustomDateChange,
 }) => {
-  const [activeFilter, setActiveFilter] = useState('all'); // 'all' | 'cost' | 'outcomes' | 'languages' | 'durations'
+  const [internalDayFilter, setInternalDayFilter] = useState(initialDayFilter);
+  const [internalCustomDate, setInternalCustomDate] = useState('');
+
+  const dayFilter = controlledDayFilter !== undefined ? controlledDayFilter : internalDayFilter;
+  const customDate = controlledCustomDate !== undefined ? controlledCustomDate : internalCustomDate;
+
+  const handlePresetChange = (presetId) => {
+    if (onDayFilterChange) {
+      onDayFilterChange(presetId);
+    } else {
+      setInternalDayFilter(presetId);
+    }
+    if (onCustomDateChange) {
+      onCustomDateChange('');
+    } else {
+      setInternalCustomDate('');
+    }
+  };
+
+  const handleCustomDateChange = (e) => {
+    const val = e.target.value;
+    if (onCustomDateChange) {
+      onCustomDateChange(val);
+    } else {
+      setInternalCustomDate(val);
+    }
+    if (!val) {
+      if (onDayFilterChange) onDayFilterChange('14d');
+      else setInternalDayFilter('14d');
+    } else {
+      if (onDayFilterChange) onDayFilterChange('custom');
+      else setInternalDayFilter('custom');
+    }
+  };
+
+  const filteredCalls = useMemo(() => {
+    const valid = (callLogs || []).filter((c) => !c.is_test);
+    if (dayFilter === 'all') return valid;
+
+    const todayStr = getTodayDateStr();
+    const yesterdayStr = getPastDateStr(1);
+    const d7Str = getPastDateStr(6);
+    const d14Str = getPastDateStr(13);
+
+    return valid.filter((c) => {
+      const callDate = getCallDateKey(c);
+      if (!callDate) return false;
+
+      if (dayFilter === 'today') {
+        return callDate === todayStr;
+      }
+      if (dayFilter === 'yesterday') {
+        return callDate === yesterdayStr;
+      }
+      if (dayFilter === '7d') {
+        return callDate >= d7Str && callDate <= todayStr;
+      }
+      if (dayFilter === '14d') {
+        return callDate >= d14Str && callDate <= todayStr;
+      }
+      if (dayFilter === 'custom' && customDate) {
+        return callDate === customDate;
+      }
+      return true;
+    });
+  }, [callLogs, dayFilter, customDate]);
+
+  const timeframeLabel = useMemo(() => {
+    const todayStr = getTodayDateStr();
+    const yesterdayStr = getPastDateStr(1);
+    const d7Str = getPastDateStr(6);
+    const d14Str = getPastDateStr(13);
+
+    if (dayFilter === 'today') return `Today (${todayStr})`;
+    if (dayFilter === 'yesterday') return `Yesterday (${yesterdayStr})`;
+    if (dayFilter === '7d') return `Last 7 Days (${d7Str} to ${todayStr})`;
+    if (dayFilter === '14d') return `Last 14 Days (${d14Str} to ${todayStr})`;
+    if (dayFilter === 'custom' && customDate) return `Date: ${customDate}`;
+    return 'All Recorded Days';
+  }, [dayFilter, customDate]);
+
+  const isDailyReport = dayFilter === 'today' || dayFilter === 'yesterday' || (dayFilter === 'custom' && Boolean(customDate));
+  const isMultiDayBillingCycle = dayFilter === '14d' || dayFilter === 'all';
 
   const analytics = useMemo(() => {
-    const validCalls = (callLogs || []).filter((c) => !c.is_test);
-    const totalCallsCount = validCalls.length;
+    const totalCallsCount = filteredCalls.length;
 
-    // 1. Cost Split Data
+    // 1. Cost Split Data (Voice AI usage vs. Advisory Messages vs. Monthly Number Rental base)
     let totalBilledMins = 0;
-    let totalPulses = 0;
-    validCalls.forEach((c) => {
+    let totalConnectedSec = 0;
+    let connectedCount = 0;
+    let totalMessages = 0;
+
+    filteredCalls.forEach((c) => {
+      // 1 message sent per farmer outreach (advisory SMS / WhatsApp summary)
+      const msgs = Number(c.messages_sent ?? c.sms_count ?? 1);
+      totalMessages += msgs;
+
       const isConn =
         didFarmerPickUpAndTalk(c) ||
         ['completed', 'delivered', 'connected', 'answered'].includes(
@@ -246,30 +366,68 @@ export const DonutAnalyticsGrid = ({
       if (isConn) {
         const sec = Number(c.duration_sec ?? c.duration ?? 0);
         totalBilledMins += Math.max(1, Math.ceil(sec / 60));
-        totalPulses += pulsesFor(sec);
+        totalConnectedSec += sec;
+        connectedCount += 1;
       }
     });
 
     const voiceAiCost = Math.round(totalBilledMins * rate * 100) / 100;
-    const carriageCost = telephonyAmount(totalPulses);
-    const totalCombinedSpend = voiceAiCost + carriageCost;
+    const messageCost = Math.round(totalMessages * messageRate * 100) / 100;
+    const telephonyNumberRental = 59.00; // Monthly DID Base
 
-    const costSplitSlices = [
-      {
-        id: 'voice',
-        label: 'Sarvam Voice AI',
-        value: voiceAiCost,
-        color: '#1E6F43', // Trust Green
-        secondaryText: `TTS, STT & Dialogue LLM (₹${Number(rate).toFixed(2)}/min)`,
-      },
-      {
-        id: 'carriage',
-        label: 'Sarvam Telephony',
-        value: carriageCost,
-        color: '#0F2444', // Trust Navy
-        secondaryText: `${totalPulses} pulses × ₹0.20 (per started 30 s)`,
-      },
-    ];
+    // In daily reports or 7d usage: totalSpend reflects pure call + message usage spend. NEVER add ₹59 to daily reports!
+    // Only in multi-day 14d/all billing windows does totalSpend reflect total combined invoice (Voice AI + Messages + Monthly DID).
+    const operationalSpend = Math.round((voiceAiCost + messageCost) * 100) / 100;
+    const totalSpend = isMultiDayBillingCycle && filteredCalls.length > 0
+      ? Math.round((operationalSpend + telephonyNumberRental) * 100) / 100
+      : operationalSpend;
+
+    // Format average duration across connected calls (e.g. "1m 24s")
+    const avgSec = connectedCount > 0 ? Math.round(totalConnectedSec / connectedCount) : 0;
+    const avgMins = Math.floor(avgSec / 60);
+    const avgRemSec = avgSec % 60;
+    const avgDurationFormatted = `${avgMins}m ${String(avgRemSec).padStart(2, '0')}s`;
+
+    const costSplitSlices = isMultiDayBillingCycle
+      ? [
+          {
+            id: 'voice',
+            label: 'Sarvam Voice AI',
+            value: voiceAiCost,
+            color: '#1E6F43', // Trust Green
+            secondaryText: `${totalBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
+          },
+          {
+            id: 'messages',
+            label: 'Advisory Messages',
+            value: messageCost,
+            color: '#0284C7', // Sky Blue
+            secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
+          },
+          {
+            id: 'carriage',
+            label: 'Number Rental',
+            value: filteredCalls.length > 0 ? telephonyNumberRental : 0,
+            color: '#0F2444', // Trust Navy
+            secondaryText: 'Monthly DID rental (₹59/mo fixed base)',
+          },
+        ]
+      : [
+          {
+            id: 'voice',
+            label: 'Sarvam Voice AI',
+            value: voiceAiCost,
+            color: '#1E6F43', // Trust Green
+            secondaryText: `${totalBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
+          },
+          {
+            id: 'messages',
+            label: 'Advisory Messages',
+            value: messageCost,
+            color: '#0284C7', // Sky Blue
+            secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
+          },
+        ];
 
     // 2. Call Outcomes Data
     let completed = 0;
@@ -277,7 +435,7 @@ export const DonutAnalyticsGrid = ({
     let unanswered = 0;
     let failed = 0;
 
-    validCalls.forEach((c) => {
+    filteredCalls.forEach((c) => {
       const raw = String(c.call_status || c.status || '').toLowerCase();
       if (raw.includes('callback') || c.callback_time) {
         callbacks += 1;
@@ -310,10 +468,10 @@ export const DonutAnalyticsGrid = ({
       },
       {
         id: 'callbacks',
-        label: 'Callbacks Scheduled',
+        label: 'Callback Scheduled',
         value: callbacks,
         color: '#3B82F6',
-        secondaryText: 'Requested call later',
+        secondaryText: 'Requested callback later',
       },
       {
         id: 'unanswered',
@@ -327,7 +485,7 @@ export const DonutAnalyticsGrid = ({
         label: 'Needs Attention',
         value: failed,
         color: '#EF4444',
-        secondaryText: 'Line drop or rejected',
+        secondaryText: 'Line dropped or rejected',
       },
     ];
 
@@ -335,7 +493,7 @@ export const DonutAnalyticsGrid = ({
     const langCounts = { Kannada: 0, Hindi: 0, Telugu: 0, English: 0 };
     const langSpend = { Kannada: 0, Hindi: 0, Telugu: 0, English: 0 };
 
-    validCalls.forEach((c) => {
+    filteredCalls.forEach((c) => {
       const rawLang = c.language || c.Farmer_Language || c.calling_language || c.Language || 'Kannada';
       const norm = normalizeLanguage(rawLang);
       langCounts[norm] = (langCounts[norm] || 0) + 1;
@@ -343,8 +501,8 @@ export const DonutAnalyticsGrid = ({
       const sec = Number(c.duration_sec ?? c.duration ?? 0);
       const answered = didFarmerPickUpAndTalk(c) || sec > 0
         || ['completed', 'delivered', 'connected', 'answered'].includes(String(c.call_status || c.status || '').toLowerCase());
-      const mins = answered ? Math.max(1, Math.ceil(sec / 60)) : 0;        // calls that were not answered cost nothing
-      const cost = answered ? Math.round((mins * rate + telephonyAmount(pulsesFor(sec))) * 100) / 100 : 0;
+      const mins = answered ? Math.max(1, Math.ceil(sec / 60)) : 0;
+      const cost = answered ? Math.round(mins * rate * 100) / 100 : 0;
       langSpend[norm] = Math.round(((langSpend[norm] || 0) + cost) * 100) / 100;
     });
 
@@ -385,7 +543,7 @@ export const DonutAnalyticsGrid = ({
     let tierExtended = 0;
     let tierDeep = 0;
 
-    validCalls.forEach((c) => {
+    filteredCalls.forEach((c) => {
       const sec = Number(c.duration_sec ?? c.duration ?? 0);
       if (sec <= 0) return;
       if (sec < 60) tierShort += 1;
@@ -427,13 +585,23 @@ export const DonutAnalyticsGrid = ({
 
     return {
       totalCallsCount,
-      totalSpend: totalCombinedSpend,
+      totalSpend,
+      voiceAiCost,
+      messageCost,
+      totalMessages,
+      operationalSpend,
+      telephonyNumberRental,
+      isDailyReport,
+      isMultiDayBillingCycle,
+      avgDurationFormatted,
       costSplitSlices,
       outcomeSlices,
       languageSlices,
       durationSlices,
+      connectedCount,
+      totalBilledMins,
     };
-  }, [callLogs, rate]);
+  }, [filteredCalls, rate, messageRate, isDailyReport, isMultiDayBillingCycle]);
 
   const containerClass = embedded
     ? 'space-y-4'
@@ -441,90 +609,130 @@ export const DonutAnalyticsGrid = ({
 
   return (
     <div className={containerClass}>
-      {/* Sub-header with filter pills */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
-        <div>
-          <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-            Categorical Donut & Pie Analytics
+      {/* Day / Timeframe Filter Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-200/70 rounded-xl">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <Calendar className="w-4 h-4 text-trust-green shrink-0" />
+          <span className="text-xs font-bold text-slate-800">Filter:</span>
+          <span className="text-xs text-slate-600 font-medium">{timeframeLabel}</span>
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-white text-slate-700 border border-slate-200/80 shadow-2xs">
+            {filteredCalls.length} {filteredCalls.length === 1 ? 'call' : 'calls'}
           </span>
-          <p className="text-[11px] text-slate-500 mt-0.5">
-            Interactive visual breakdowns across telephony costs, engagement outcomes, languages, and durations
-          </p>
         </div>
 
-        {/* Filter Pills */}
-        <div className="inline-flex flex-wrap p-0.5 rounded-xl bg-slate-100 border border-slate-200/60 self-start sm:self-auto text-xs">
-          {[
-            { id: 'all', label: 'All Donut Charts' },
-            { id: 'cost', label: 'Cost Allocation' },
-            { id: 'outcomes', label: 'Call Outcomes' },
-            { id: 'languages', label: 'Languages' },
-            { id: 'durations', label: 'Duration Tiers' },
-          ].map((f) => (
+        <div className="flex flex-wrap items-center gap-1 self-start sm:self-auto">
+          {DAY_PRESETS.map((preset) => (
             <button
-              key={f.id}
+              key={preset.id}
               type="button"
-              onClick={() => setActiveFilter(f.id)}
-              className={`px-2.5 py-1 font-semibold rounded-lg transition-all cursor-pointer ${
-                activeFilter === f.id
-                  ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                  : 'text-slate-500 hover:text-slate-800'
+              onClick={() => handlePresetChange(preset.id)}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                dayFilter === preset.id
+                  ? 'bg-trust-navy text-white shadow-2xs'
+                  : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200/80 hover:bg-slate-50'
               }`}
             >
-              {f.label}
+              {preset.label}
             </button>
           ))}
+
+          {/* Custom Date Input */}
+          <div className="flex items-center gap-1 pl-1">
+            <input
+              type="date"
+              value={customDate || ''}
+              onChange={handleCustomDateChange}
+              aria-label="Pick custom date"
+              className="px-2 py-0.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-hidden focus:border-trust-navy cursor-pointer"
+            />
+            {customDate && (
+              <button
+                type="button"
+                onClick={() => handlePresetChange('14d')}
+                className="text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer text-xs font-bold"
+                title="Reset to 14 days"
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Grid of Donut Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5">
-        {(activeFilter === 'all' || activeFilter === 'cost') && (
-          <SvgDonutCard
-            title="Telephony Cost Allocation"
-            subtitle="Sarvam voice agent vs Sarvam telephony"
-            slices={analytics.costSplitSlices}
-            centerTitle="Total Cost"
-            centerValue={rupees(analytics.totalSpend)}
-            isCurrency={true}
-            badge="Rupee Share"
-          />
-        )}
+      {filteredCalls.length === 0 && (
+        <div className="p-4 text-center text-xs text-slate-500 bg-amber-50/60 border border-amber-200/70 rounded-xl">
+          No calls recorded for {timeframeLabel}. Pick another timeframe above to inspect breakdowns.
+        </div>
+      )}
 
-        {(activeFilter === 'all' || activeFilter === 'outcomes') && (
-          <SvgDonutCard
-            title="Call Outcome Statuses"
-            subtitle="Farmer engagement & delivery ratios"
-            slices={analytics.outcomeSlices}
-            centerTitle="Total Calls"
-            centerValue={String(analytics.totalCallsCount)}
-            badge="Outcomes"
-          />
-        )}
+      {/* 4 Standardized Donut Cards: strictly aligned pie chart center positions and baselines */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
+        <SvgDonutCard
+          title="Spend Split"
+          subtitle={
+            analytics.isMultiDayBillingCycle
+              ? 'Voice AI vs. messages vs. number rental'
+              : 'Voice AI calls vs. advisory messages'
+          }
+          slices={analytics.costSplitSlices}
+          centerTitle={analytics.isMultiDayBillingCycle ? 'Total Spend' : 'Daily Spend'}
+          centerValue={rupees(analytics.totalSpend)}
+          isCurrency={true}
+          footer={
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-sky-50/70 border border-sky-200/60 text-[11px]">
+                <span className="text-sky-800 font-medium">Messages Dispatched:</span>
+                <span className="font-bold font-mono text-sky-950 shrink-0 whitespace-nowrap">
+                  {analytics.totalMessages} sent ({rupees(analytics.messageCost)})
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-slate-100/60 border border-slate-200/50 text-[11px]">
+                <span className="text-slate-500 font-medium">Connected Calls:</span>
+                <span className="font-bold font-mono text-slate-800 shrink-0 whitespace-nowrap">
+                  {analytics.connectedCount} calls ({analytics.totalBilledMins} mins)
+                </span>
+              </div>
+              {!analytics.isMultiDayBillingCycle ? (
+                <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-blue-50/70 border border-blue-200/60 text-[11px]">
+                  <span className="text-trust-navy font-semibold">Separate Monthly Base:</span>
+                  <span className="font-bold font-mono text-trust-navy shrink-0 whitespace-nowrap">₹59.00/mo (Fixed DID)</span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-slate-100/60 border border-slate-200/50 text-[11px]">
+                  <span className="text-slate-500 font-medium">Fixed Monthly DID:</span>
+                  <span className="font-bold font-mono text-slate-800 shrink-0 whitespace-nowrap">₹59.00/mo</span>
+                </div>
+              )}
+            </div>
+          }
+        />
 
-        {(activeFilter === 'all' || activeFilter === 'languages') && (
-          <SvgDonutCard
-            title="Language Distribution"
-            subtitle="Farmer language preference & spend"
-            slices={analytics.languageSlices}
-            centerTitle="Languages"
-            centerValue="4 Dialects"
-            badge="Regional Mix"
-          />
-        )}
+        <SvgDonutCard
+          title="Call Outcomes"
+          subtitle="Farmer engagement & delivery ratios"
+          slices={analytics.outcomeSlices}
+          centerTitle="Attempts"
+          centerValue={String(analytics.totalCallsCount)}
+        />
 
-        {(activeFilter === 'all' || activeFilter === 'durations') && (
-          <SvgDonutCard
-            title="Call Duration Tiers"
-            subtitle="How long the calls lasted"
-            slices={analytics.durationSlices}
-            centerTitle="Calls Billed"
-            centerValue={String(analytics.totalCallsCount)}
-            badge="By length"
-          />
-        )}
+        <SvgDonutCard
+          title="Language Mix"
+          subtitle="Regional dialect distribution"
+          slices={analytics.languageSlices}
+          centerTitle="Languages"
+          centerValue="4"
+        />
+
+        <SvgDonutCard
+          title="Duration Tiers"
+          subtitle="Talk time length distribution"
+          slices={analytics.durationSlices}
+          centerTitle="Avg Length"
+          centerValue={analytics.avgDurationFormatted}
+        />
       </div>
     </div>
   );
 };
 
+export default DonutAnalyticsGrid;

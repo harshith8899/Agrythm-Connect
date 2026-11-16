@@ -1,29 +1,24 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Lock, User, Eye, EyeOff, Loader2, ShieldCheck, Server, CheckCircle2 } from 'lucide-react';
-import { loginAdmin, pingServer } from '../utils';
+import React, { useEffect, useState } from 'react';
+import { Lock, User, Eye, EyeOff, ShieldCheck, Server, CheckCircle2 } from 'lucide-react';
+import { pingServer } from '../utils';
 
 const NOT_CONNECTED = 'This dashboard is not connected to the server. In Cloudflare, open the Worker, Settings, Variables and Secrets, and check that BACKEND_URL and API_TOKEN are both there (type Secret), then deploy.';
-const TOO_LONG = 'The server did not answer. Check that the Render service shows Live, then press Sign in again.';
-
 const DIAGNOSE_AFTER_S = 40;      // a cold start answers within about 25 s: past this, show what the connection is really saying
 const SLOW_AFTER_S = 180;         // a start normally takes under a minute; after this the note changes, but waking never stops
-const MAX_WAIT_S = 600;           // how long a pressed Sign in waits for the server before it says so
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const LoginScreen = ({ onLoginSuccess }) => {
+// Collects the username and password. Pressing Sign in goes straight into the dashboard (App finishes the sign-in in the background,
+// waiting for the server if it is asleep); a wrong password brings the person back here with initialError.
+export const LoginScreen = ({ onSignIn, initialError = '' }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [server, setServer] = useState('waking');      // waking | ready | unconfigured
   const [seconds, setSeconds] = useState(0);
   const [lastAnswer, setLastAnswer] = useState(null);   // what the last health check got back: { status, message }
-  const ready = useRef(false);
-  const unconfigured = useRef('');
 
-  // Wake the server the moment this page opens (the password can be typed and Sign in pressed meanwhile: it waits for the server).
-  // Keeps asking until the server answers; a dashboard that is not connected to a server at all is told apart at once.
+  // Wake the server the moment this page opens, so it is already up when the details are typed.
   useEffect(() => {
     let stopped = false;
     const startedAt = Date.now();
@@ -34,17 +29,13 @@ export const LoginScreen = ({ onLoginSuccess }) => {
         if (stopped) return;
         setLastAnswer({ status: answer.status, message: answer.message });
         if (answer.ok) {
-          ready.current = true;
-          unconfigured.current = '';
           setServer('ready');
           return;
         }
         if (answer.status === 503 && /not configured/i.test(answer.message)) {
-          unconfigured.current = answer.message;
           setServer('unconfigured');
-          await wait(10000);                 // maybe the settings are being fixed: keep looking
+          await wait(10000);
         } else {
-          unconfigured.current = '';
           setServer('waking');
           await wait(3000);
         }
@@ -53,48 +44,16 @@ export const LoginScreen = ({ onLoginSuccess }) => {
     return () => { stopped = true; clearInterval(tick); };
   }, []);
 
-  // Resolves when the server answers. Rejects when the dashboard is not connected to a server, or after MAX_WAIT_S.
-  const untilReady = async () => {
-    const startedAt = Date.now();
-    while (!ready.current) {
-      if (unconfigured.current) throw Object.assign(new Error(NOT_CONNECTED), { fatal: true });
-      if (Date.now() - startedAt > MAX_WAIT_S * 1000) throw Object.assign(new Error(TOO_LONG), { fatal: true });
-      await wait(400);
-    }
-  };
-
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     if (!username.trim() || !password) {
       setError('Please enter both username and password.');
       return;
     }
-
-    setLoading(true);
     setError('');
-
-    try {
-      await untilReady();                                // signs in the moment the server is up
-      for (let attempt = 0; ; attempt += 1) {            // a start-up error right after is retried; a wrong password never is
-        try {
-          await loginAdmin(username.trim(), password);
-          break;
-        } catch (err) {
-          if (!err.transient || attempt >= 10) throw err;
-          await wait(3000);
-        }
-      }
-      setError('');
-      if (onLoginSuccess) {
-        onLoginSuccess();
-      }
-    } catch (err) {
-      setError(err.message === NOT_CONNECTED ? 'Cannot sign in yet: the dashboard is not connected to the server (see above).'
-        : (err.fatal ? err.message : (err.transient ? TOO_LONG : (err.message || 'Invalid username or password.'))));
-    } finally {
-      setLoading(false);
-    }
+    onSignIn(username.trim(), password);
   };
+  const shownError = error || initialError;
 
   return (
     <div className="min-h-screen bg-trust-canvas flex flex-col justify-center items-center p-4 sm:p-6 lg:p-8 antialiased selection:bg-trust-green selection:text-white">
@@ -165,13 +124,13 @@ export const LoginScreen = ({ onLoginSuccess }) => {
             </div>
           )}
 
-          {error && (
+          {shownError && (
             <div
               className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200/80 text-rose-800 text-xs font-medium flex items-center gap-2"
               role="alert"
             >
               <div className="w-1.5 h-1.5 rounded-full bg-rose-600 shrink-0" />
-              <span>{error}</span>
+              <span>{shownError}</span>
             </div>
           )}
 
@@ -235,17 +194,9 @@ export const LoginScreen = ({ onLoginSuccess }) => {
 
             <button
               type="submit"
-              disabled={loading}
               className="w-full mt-2 inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-trust-navy hover:bg-slate-800 text-white text-xs font-bold tracking-wide transition-all duration-150 shadow-xs hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>{server === 'ready' ? 'Verifying credentials...' : 'Waiting for the server, then signing in...'}</span>
-                </>
-              ) : (
-                <span>Sign In to Dashboard</span>
-              )}
+              <span>Sign In to Dashboard</span>
             </button>
           </form>
         </div>

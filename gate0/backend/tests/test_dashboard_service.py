@@ -678,10 +678,9 @@ def test_call_button_on_a_retryable_result_is_the_next_attempt_and_replaces_the_
 
 @pytest.mark.parametrize("setup, message", [
     ("done", "already completed"), ("declined", "do not need"), ("exhausted", "attempts are used"),
-    ("callback", "callback"), ("inactive", "inactive"), ("noconsent", "consent"), ("paused", "stopped"),
-    ("night", "between 05:00 and 22:00")])
+    ("callback", "callback"), ("inactive", "inactive"), ("noconsent", "consent"), ("paused", "stopped")])
 def test_call_button_is_refused_with_a_reason(tmp_path, setup, message):
-    start = datetime(2026, 11, 5, 23, 0, tzinfo=IST) if setup == "night" else T0
+    start = T0
     d = Scripted((A.ANSWERED, A.NO_ANSWER, A.NO_ANSWER, A.NO_ANSWER), understood="declined" if setup == "declined" else "yes")
     s, clock = timed(tmp_path, d, start=start)
     s.import_csv(ONE)
@@ -776,11 +775,10 @@ def test_a_test_call_records_no_stop_decline_or_callback(tmp_path):
     assert s.callbacks() == [] and not s._is_paused("F1") and s.alerts() == []
 
 
-@pytest.mark.parametrize("setup, message", [("inactive", "inactive"), ("noconsent", "consent"), ("paused", "stopped"),
-                                            ("night", "between 05:00 and 22:00")])
+@pytest.mark.parametrize("setup, message", [("inactive", "inactive"), ("noconsent", "consent"), ("paused", "stopped")])
 def test_a_test_call_keeps_the_safety_checks(tmp_path, setup, message):
     d = Scripted((A.ANSWERED,))
-    s, _ = timed(tmp_path, d, start=datetime(2026, 11, 5, 23, 0, tzinfo=IST) if setup == "night" else T0)
+    s, _ = timed(tmp_path, d, start=T0)
     s.import_csv(ONE)
     if setup == "inactive":
         s.update_farmer("F1", {"active": False})
@@ -923,3 +921,23 @@ def test_a_callback_that_was_placed_shows_as_done(tmp_path):
     clock["now"] = T0 + timedelta(minutes=36)
     s.run_due_callbacks()
     assert s.calls()[0]["status"] == "Callback Done" and len(d.calls) == 2
+
+
+@pytest.mark.parametrize("mode", ["retry", "test"])
+@pytest.mark.parametrize("hour", [2, 23])
+def test_a_call_placed_by_hand_works_at_any_hour(tmp_path, mode, hour):
+    d = Scripted((A.ANSWERED,))
+    s, _ = timed(tmp_path, d, start=datetime(2026, 11, 5, hour, 0, tzinfo=IST))
+    s.import_csv(ONE)
+    s.manual_call("F1", mode)                                        # outside 05:00 to 22:00: not refused
+    wait_idle(s)
+    assert len(d.calls) == 1
+
+
+def test_the_system_still_places_no_retry_outside_the_calling_hours(tmp_path):
+    d = Scripted((A.NO_ANSWER,))
+    s, _ = timed(tmp_path, d, start=datetime(2026, 11, 5, 21, 50, tzinfo=IST))
+    s.import_csv(ONE)
+    s.manual_call("F1", "retry")                                     # placed by hand at 21:50, not picked up
+    wait_idle(s)
+    assert s.run_due_retries(datetime(2026, 11, 5, 22, 30, tzinfo=IST)) == 0     # the automatic retry would fall after 22:00

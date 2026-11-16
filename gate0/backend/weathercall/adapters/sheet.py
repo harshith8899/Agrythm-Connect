@@ -25,6 +25,7 @@ _ALIASES = {
     "active": ("active",),
     "latitude": ("latitude", "lat"),
     "longitude": ("longitude", "lon", "lng"),
+    "email": ("email", "emailaddress", "emailid"),
 }
 _REQUIRED = ("farmer_id", "name", "phone", "language", "consent")
 _LANG = {"hindi": Language.HI, "hi": Language.HI, "hiin": Language.HI, "हिंदी": Language.HI, "हिन्दी": Language.HI,
@@ -115,6 +116,7 @@ def load_farmers(path: str | Path, geocoder=None, matches: dict[str, str] | None
             consent=get("consent").lower() in _YES,                 # anything unclear counts as no consent
             active=get("active").lower() not in _NO,                # blank or missing column counts as active
             phone=re.sub(r"[\s\-()]", "", get("phone")),
+            email=get("email").lower(),
         )
     return list(farmers.values())
 
