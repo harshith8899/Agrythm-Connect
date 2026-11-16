@@ -15,6 +15,7 @@ import re
 import sqlite3
 import tempfile
 import threading
+import uuid
 from datetime import date, datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -830,8 +831,26 @@ class DashboardService:
                        "humidity": w.humidity_pct, "source": w.source}
             self._save_test(fid, stamp, res.status.value, res.error, weather, res.provider_call_id, farmer.language.value,
                             res.duration_s or 0, out)
+            self._email_after_test(fid, res, out, weather)
         finally:
             self._live_clear(fid)                           # the saved Test row replaces the In Call row
+
+    def _email_after_test(self, fid: str, res: ProviderCallResult, out: dict, weather: dict) -> None:
+        """A test call emails the test address (GATE0_MAIL_TEST_TO) as a real call would, so the email can be tried without
+        a real farmer's day: recorded under its own key, so every test call sends and none uses up the real message. With no
+        test address set a test call sends nothing, and never writes to a farmer's own address. Never raises."""
+        try:
+            if not self.mail_test_to or out.get("callback_time"):
+                return
+            if res.status is AttemptStatus.ANSWERED and out.get("understood_weather") == "yes":
+                kind = KIND_WEATHER
+            elif self._not_reached(res, out):
+                kind = KIND_MISSED
+            else:
+                return
+            self._send_message(fid, self._now().date(), kind, weather, record_kind=f"test:{kind}:{uuid.uuid4().hex[:8]}")
+        except Exception:
+            pass
 
     def _save_test(self, fid, stamp, status, note, weather, attempt_id, language, duration, out) -> None:
         transcript = [{"speaker": m["speaker"], "text": scrub(m["text"])} for m in out.pop("transcript", None) or []]
@@ -1253,7 +1272,8 @@ class DashboardService:
         except Exception:                                   # a message problem never disturbs the call results
             pass
 
-    def _send_message(self, fid: str, day: date, kind: str, weather: dict | None = None, callback_time: str = "") -> str:
+    def _send_message(self, fid: str, day: date, kind: str, weather: dict | None = None, callback_time: str = "",
+                      record_kind: str = "") -> str:
         """Emails the farmer, once per farmer, day and kind. Never raises. Returns what happened, for the tests and the log."""
         try:
             with self.lock:
@@ -1261,12 +1281,15 @@ class DashboardService:
                                     "WHERE farmer_id=?", (fid,)).fetchone()
             if not r or not r[5] or not r[6] or self._is_paused(fid):
                 return "not sent: farmer not callable"
+            rk = record_kind or kind                       # the key a message is recorded under (a test call has its own)
+            if rk.startswith("test:") and not self.mail_test_to:
+                return "not sent: a test call only emails the test address"
             name, village, district, email = r[0], r[2], r[3], r[4] or ""
             weather = weather or self._saved_weather(fid, day.isoformat())
             now = self._now().isoformat(timespec="seconds")
             with self.lock:                                 # claim first: the primary key stops a second message
                 claimed = self.db.execute("INSERT OR IGNORE INTO dash_messages VALUES(?,?,?,?,?,?,?)",
-                                          (fid, day.isoformat(), kind, "email", "sending", "", now)).rowcount
+                                          (fid, day.isoformat(), rk, "email", "sending", "", now)).rowcount
                 self.db.commit()
             if claimed != 1:
                 return "not sent: already sent"
@@ -1289,7 +1312,7 @@ class DashboardService:
                     self._alert("message_failed", fid, f"The {kind} email could not be sent ({type(exc).__name__}).")
             with self.lock:
                 self.db.execute("UPDATE dash_messages SET status=?, note=?, at=? WHERE farmer_id=? AND call_date=? AND kind=?",
-                                (status, note, self._now().isoformat(timespec="seconds"), fid, day.isoformat(), kind))
+                                (status, note, self._now().isoformat(timespec="seconds"), fid, day.isoformat(), rk))
                 self.db.commit()
             return status
         except Exception as exc:
