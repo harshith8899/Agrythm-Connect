@@ -36,11 +36,11 @@ class MockDialler:
 
     inbound_ready = False                            # no inbound line in simulation
 
-    def push_inbound(self, phone, farmer_id, language_name, variables, cohort_name) -> str:
-        return ""
+    def push_inbound_many(self, entries, cohort_name) -> list[str]:
+        return []
 
-    def find_inbound(self, phone, start, end, known_ids):
-        return None
+    def find_inbound_calls(self, start, end, known_ids):
+        return []
 
     def outputs(self, attempt_id: str) -> dict:
         return {"call_summary": "(simulated) the farmer heard the weather update and said they understood.",
@@ -61,32 +61,42 @@ class SarvamDialler(SarvamAgentTelephony):
     def inbound_ready(self) -> bool:
         return bool(self.inbound_deployment)
 
-    def push_inbound(self, phone, farmer_id, language_name, variables, cohort_name) -> str:
-        """Tells the inbound deployment who this number is: when it calls in, the agent starts with these variables.
-        Sarvam matches the caller by number (a cohort of known callers). Returns the cohort id."""
+    def push_inbound_many(self, entries, cohort_name) -> list[str]:
+        """Tells the inbound deployment which numbers may ring and what to say to each: Sarvam matches a caller by number
+        (a cohort of known callers) and starts the agent with that person's variables. entries: dicts with phone, fid,
+        language_name and variables; at most 1000 go in one request. Returns the cohort ids."""
         if not self.inbound_ready:
             raise RuntimeError("SARVAM_INBOUND_DEPLOYMENT_ID is not set")
-        body = {"name": cohort_name, "users": [{"user_phone_number": to_e164(phone), "user_identifier": farmer_id,
-                                                  "app_variables": variables,
-                                                  "app_overrides": {"initial_language_name": language_name}}]}
         url = f"{BASE}/scheduling/v1/orgs/{self.org}/workspaces/{self.ws}/deployments/{self.inbound_deployment}/cohorts/stream"
-        return str(self._request(url, body).get("cohort_id", ""))
+        ids = []
+        for i in range(0, len(entries), 1000):
+            users = [{"user_phone_number": to_e164(e["phone"]), "user_identifier": e["fid"], "app_variables": e["variables"],
+                      "app_overrides": {"initial_language_name": e["language_name"]}} for e in entries[i:i + 1000]]
+            name = cohort_name if i == 0 else f"{cohort_name}-{i // 1000 + 1}"
+            ids.append(str(self._request(url, {"name": name[:50], "users": users}).get("cohort_id", "")))
+        return ids
 
-    def find_inbound(self, phone, start, end, known_ids):
-        """A connected call from this number (last 4 digits) between start and end that is not one of ours: the
-        farmer calling back. Returns (result, when it ended in UTC) or None."""
-        last4 = re.sub(r"\D", "", phone or "")[-4:]
-        q = urllib.parse.urlencode({"start_datetime": start.astimezone(timezone.utc).isoformat(timespec="seconds"),
-                                    "end_datetime": end.astimezone(timezone.utc).isoformat(timespec="seconds"), "limit": 100})
-        items = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}").get("items", [])
-        mine = sorted((i for i in items if last4 and str(i.get("user_contact_masked") or "")[-4:] == last4
-                       and i.get("attempt_id") not in known_ids), key=lambda i: i.get("attempted_at") or "")
-        for item in mine:
-            result = _result_from(item, item.get("attempt_id") or "")
-            if result is not None and result.status.value == "answered":
+    def find_inbound_calls(self, start, end, known_ids):
+        """Connected calls between start and end that are not ours (not in known_ids): farmers ringing the line. Returns
+        (last 4 digits of the caller, result, when it ended in UTC), oldest first."""
+        found, offset = [], 0
+        while True:
+            q = urllib.parse.urlencode({"start_datetime": start.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                                        "end_datetime": end.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                                        "limit": 1000, "offset": offset, "sort_by": "attempted_at"})
+            page = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}")
+            for item in page.get("items", []):
+                if item.get("attempt_id") in known_ids:
+                    continue
+                result = _result_from(item, item.get("attempt_id") or "")
+                if result is None or result.status.value != "answered":
+                    continue
                 began = datetime.fromisoformat(str(item["attempted_at"]).replace("Z", "")).replace(tzinfo=timezone.utc)
-                return result, began + timedelta(seconds=result.duration_s or 0)
-        return None
+                last4 = re.sub(r"\D", "", str(item.get("user_contact_masked") or ""))[-4:]
+                found.append((last4, result, began + timedelta(seconds=result.duration_s or 0)))
+            if not page.get("next_page_uri"):
+                return found
+            offset += 1000
 
     def place(self, phone, language_name, variables) -> ProviderCallResult:
         started = self._now()
