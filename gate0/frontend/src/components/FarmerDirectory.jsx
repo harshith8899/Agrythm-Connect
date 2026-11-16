@@ -252,7 +252,7 @@ const SearchableCombobox = ({
                       isHighlighted ? 'bg-slate-100 text-slate-900' : 'text-slate-700'
                     } ${isSelected ? 'font-bold text-trust-navy bg-trust-navy/5' : ''}`}
                   >
-                    <span className="truncate">{opt}</span>
+                    <span className="truncate" title={opt}>{opt}</span>
                     {describe && describe(opt) && <span className="ml-2 shrink-0 text-[10px] text-slate-400">{describe(opt)}</span>}
                     {isSelected && <Check className="w-3.5 h-3.5 text-trust-green shrink-0 ml-2" />}
                   </li>
@@ -1174,7 +1174,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                   {String(farmer.farmer_name || 'F').charAt(0)}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="font-bold text-sm text-slate-900 truncate">
+                  <h3 className="font-bold text-sm text-slate-900 truncate" title={farmer.farmer_name || 'Unnamed Farmer'}>
                     {farmer.farmer_name || 'Unnamed Farmer'}
                   </h3>
                   <span className="text-[10px] font-mono text-slate-400">

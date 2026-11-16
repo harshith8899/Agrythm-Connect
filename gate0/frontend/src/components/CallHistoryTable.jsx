@@ -290,7 +290,7 @@ export const CallHistoryTable = ({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="font-bold text-sm text-slate-900 truncate">{call.farmer_name}</div>
+                  <div className="font-bold text-sm text-slate-900 truncate" title={call.farmer_name}>{call.farmer_name}</div>
                   <div className="text-[11px] text-slate-500 font-mono">{maskPhoneNumber(call.phone_number || call.phone)}</div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -421,7 +421,10 @@ export const CallHistoryTable = ({
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
+                        <p
+                          className="text-[11px] text-slate-500 line-clamp-1 mt-0.5"
+                          title={call.advisory_summary || `Temp ${call.temperature || 'N/A'} | Rain ${call.rainfall_chance || 'N/A'}`}
+                        >
                           {call.advisory_summary || `Temp ${call.temperature || 'N/A'} | Rain ${call.rainfall_chance || 'N/A'}`}
                         </p>
                       </div>
