@@ -447,6 +447,15 @@ class DashboardService:
         except Exception:
             pass
 
+    def _live_reading(self, fid: str) -> None:
+        """The call has ended: the row stays In Call but says the agent's notes are being read. Only an existing row changes."""
+        try:
+            with self.lock:
+                self.db.execute("UPDATE dash_live SET state='reading' WHERE farmer_id=?", (fid,))
+                self.db.commit()
+        except Exception:
+            pass
+
     def _live_clear(self, fid: str) -> None:
         try:
             with self.lock:
@@ -479,6 +488,8 @@ class DashboardService:
         _, _, kind, attempt, state, _ = lv
         what = {"retry": f"attempt {attempt} of {self.settings.max_attempts}", "callback": "callback", "test": "test call",
                 "manual": "call placed by hand"}.get(kind, "today's call")
+        if state == "reading":
+            return "In Call", f"Call ended, reading what the agent recorded ({what})"
         if state == "calling":
             return "In Call", f"Calling now ({what})"
         return "In Queue", f"Waiting in the queue ({what})"
@@ -555,6 +566,7 @@ class DashboardService:
             res = ProviderCallResult(AttemptStatus.FAILED, error=type(exc).__name__)
         out: dict = {}
         if res.status is AttemptStatus.ANSWERED:
+            self._live_reading(farmer.farmer_id)                 # the log says the call ended while the agent's notes are read
             try:
                 out = self.dialler.outputs(res.provider_call_id)
             except Exception:
@@ -832,9 +844,12 @@ class DashboardService:
             res, out = self._place(farmer, w)
             weather = {"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
                        "humidity": w.humidity_pct, "source": w.source}
+            asked = out.get("callback_time") if out.get("stop_calls_requested") != "yes" else ""
             self._save_test(fid, stamp, res.status.value, res.error, weather, res.provider_call_id, farmer.language.value,
                             res.duration_s or 0, out)
             self._email_after_test(fid, res, out, weather)
+            if asked:                                       # a test call books the callback the farmer asked for, like a real one
+                self._schedule_callback(fid, self._now().date(), asked)
         finally:
             self._live_clear(fid)                           # the saved Test row replaces the In Call row
 
@@ -873,11 +888,17 @@ class DashboardService:
                 "t.call_summary, t.callback_time, t.understood_weather, t.stop_calls_requested, t.transcript, "
                 "f.name, f.phone, f.village, f.district FROM dash_tests t LEFT JOIN dash_farmers f ON f.farmer_id=t.farmer_id "
                 "ORDER BY t.id DESC LIMIT 200").fetchall()
-        label = {"answered": "Answered", "no_answer": "No Answer or Rejected", "busy": "Busy", "failed": "Failed"}
+            booked_cbs = {(f, s): d for f, s, d in self.db.execute(
+                "SELECT farmer_id, source_date, due_at FROM dash_callbacks WHERE status<>'skipped'").fetchall()}
+        label ={"answered": "Answered", "no_answer": "No Answer or Rejected", "busy": "Busy", "failed": "Failed"}
         out = []
         for (tid, fid, at, status, note, weather, attempt_id, lang, dur, summary, cb, understood, stop, transcript,
              name, phone, village, district) in rows:
-            dash_status, disposition = self._status_for(status, understood or "", False, False)
+            dash_status, disposition = self._status_for(status, understood or "", False, False, None, bool((cb or "").strip()))
+            if dash_status == "Callback Requested":
+                booked = booked_cbs.get((fid, at[:10]))
+                disposition = (f"Callback requested for {cb} (booked for {datetime.fromisoformat(booked).strftime('%d %b, %I:%M %p')})"
+                               if booked else f"Callback requested for {cb} (not booked: time not understood or outside hours)")
             if status == "skipped":
                 disposition = (note or "skipped").replace("_", " ").title()
             w = json.loads(weather) if weather else {}
@@ -972,6 +993,7 @@ class DashboardService:
             res = ProviderCallResult(AttemptStatus.FAILED, error=type(exc).__name__)
         out: dict = {}
         if res.status is AttemptStatus.ANSWERED:
+            self._live_reading(fid)
             try:
                 out = self.dialler.outputs(res.provider_call_id)
             except Exception:
@@ -1590,10 +1612,13 @@ class DashboardService:
 
     @staticmethod
     def _status_for(status: str, understood: str, has_callback: bool, retry_pending: bool = False,
-                    callback_status: str | None = None) -> tuple[str, str]:
-        """The dashboard's status and disposition for one stored result."""
+                    callback_status: str | None = None, asked_for_callback: bool = False) -> tuple[str, str]:
+        """The dashboard's status and disposition for one stored result. asked_for_callback: the agent recorded a time the
+        farmer asked to be called back, whether or not a call could be booked for it (a test call books none)."""
         if retry_pending and not has_callback:
             return "Retrying", "Retry scheduled"
+        if status == "answered" and asked_for_callback and not has_callback:
+            return "Callback Requested", "Callback requested (not booked)"
         if status == "answered":
             if has_callback:
                 if callback_status in ("missed", "skipped"):          # the requested time passed and nobody was called
@@ -1637,7 +1662,9 @@ class DashboardService:
             cb = by_day.get((fid, day))
             retry_at = retry_due.get((fid, day))
             dash_status, disposition = self._status_for(status, understood or "", cb is not None, retry_at is not None,
-                                                        cb[1] if cb else None)
+                                                        cb[1] if cb else None, bool((cb_text or "").strip()))
+            if dash_status == "Callback Requested":
+                disposition = f"Callback requested for {cb_text} (not booked: time not understood)"
             attempts = all_attempts.get((fid, day), [])
             if status == "skipped":
                 disposition = (note or "skipped").replace("_", " ").title()

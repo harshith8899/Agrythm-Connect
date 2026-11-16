@@ -47,6 +47,13 @@ export const CallHistoryTable = ({
             <span>Callback Scheduled</span>
           </span>
         );
+      case 'callback requested':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-50 text-sky-700 border border-sky-200">
+            <Clock className="w-3 h-3 text-sky-600" />
+            <span>Callback Requested</span>
+          </span>
+        );
       case 'not confirmed':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
