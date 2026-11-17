@@ -141,8 +141,8 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
   useEffect(() => {
     if (!enabled || !autoPollInterval || autoPollInterval <= 0) return undefined;
 
-    // 3 s while a send runs, 5 s while the server is not answering (so the page fills in soon after it wakes), else 15 s
-    const every = sending ? 3 : !isBackendOnline ? 5 : autoPollInterval;
+    // 2 s while a send runs, 5 s while the server is not answering (so the page fills in soon after it wakes), else 15 s
+    const every = sending ? 2 : !isBackendOnline ? 5 : autoPollInterval;
     const timer = setInterval(() => {
       fetchAllData(true);
     }, every * 1000);

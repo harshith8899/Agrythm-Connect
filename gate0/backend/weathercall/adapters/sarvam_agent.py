@@ -78,7 +78,7 @@ class SarvamAgentTelephony:
         self.org, self.ws, self.app = e["SARVAM_ORG_ID"], e["SARVAM_WORKSPACE_ID"], e["SARVAM_APP_ID"]
         self.app_version = int(e.get("SARVAM_APP_VERSION", 1))
         self.connection_id, self.agent_phone = e["SARVAM_CONNECTION_ID"], e["SARVAM_AGENT_PHONE"]
-        self.poll_seconds = int(e.get("SARVAM_POLL_SECONDS", 10))
+        self.poll_seconds = int(e.get("SARVAM_POLL_SECONDS", 5))
         self.timeout_seconds = int(e.get("SARVAM_CALL_TIMEOUT_SECONDS", 300))
         self._open, self._sleep = opener, sleep
         self._now = now or (lambda: datetime.now(timezone.utc))

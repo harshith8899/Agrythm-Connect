@@ -144,3 +144,38 @@ def test_notes_are_dismissed_through_the_api(tmp_path):
         assert json.loads(urllib.request.urlopen(base + "/api/alerts").read()) == []
     finally:
         srv.shutdown()
+
+
+# ---- the mail setup check and the test email -----------------------------------------------------------------------
+def test_the_mail_status_never_shows_a_key_or_a_full_address(tmp_path):
+    from weathercall.adapters.mailer import RecordingMailer
+    s = DashboardService(str(tmp_path / "m.db"), dialler=MockDialler(), mailer=ResendMailer("re_secret"),
+                         env={"GATE0_WEATHER": "mock", "GATE0_MAIL_TEST_TO": "Tester@Example.com"}, now=lambda: T0)
+    m = s.mail_status()
+    assert m == {"provider": "Resend", "live": True, "test_to": "t***@example.com", "test_mode": True}
+    assert "re_secret" not in str(m) and "tester@example.com" not in str(m)
+
+
+def test_the_test_email_goes_to_the_test_address_and_is_recorded(tmp_path):
+    from weathercall.adapters.mailer import RecordingMailer
+    mail = RecordingMailer()
+    s = DashboardService(str(tmp_path / "m.db"), dialler=MockDialler(), mailer=mail,
+                         env={"GATE0_WEATHER": "mock", "GATE0_MAIL_TEST_TO": "tester@example.com"}, now=lambda: T0)
+    assert s.send_test_email() == {"status": "sent", "note": ""}
+    assert mail.sent[0][0] == "tester@example.com" and mail.sent[0][1].startswith("[Setup test] Weather update")
+    row = s.messages()[0]
+    assert row["farmer_id"] == "(setup test)" and row["status"] == "sent" and row["kind"].startswith("test:setup:")
+
+
+def test_the_test_email_says_why_it_could_not_be_sent(tmp_path):
+    from weathercall.adapters.mailer import RecordingMailer
+    env = {"GATE0_WEATHER": "mock", "GATE0_MAIL_TEST_TO": "tester@example.com"}
+    s = DashboardService(str(tmp_path / "a.db"), dialler=MockDialler(), mailer=NullMailer(), env=env, now=lambda: T0)
+    r = s.send_test_email()
+    assert r["status"] == "skipped" and "GATE0_RESEND_API_KEY" in r["note"]
+    (tmp_path / "b").mkdir()
+    s2 = DashboardService(str(tmp_path / "b" / "b.db"), dialler=MockDialler(), mailer=RecordingMailer(fail=True), env=env, now=lambda: T0)
+    assert s2.send_test_email() == {"status": "failed", "note": "ConnectionError"}
+    (tmp_path / "c").mkdir()
+    s3 = DashboardService(str(tmp_path / "c" / "c.db"), dialler=MockDialler(), mailer=NullMailer(), env={"GATE0_WEATHER": "mock"}, now=lambda: T0)
+    assert s3.send_test_email()["status"] == "skipped" and "GATE0_MAIL_TEST_TO" in s3.send_test_email()["note"]

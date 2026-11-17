@@ -138,8 +138,9 @@ def test_everything_ok(tmp_path):
                          "F1,A,9876543210,Mandya,Mandya,Karnataka,Hindi,Yes\n")
     r = s.checks()
     c = by_id(r)
-    assert r["overall"] == "ok" and [x["id"] for x in r["checks"]] == ["backend", "database", "weather", "sarvam", "phone"]
-    assert all(x["status"] == "ok" for x in r["checks"] if x["id"] != "weather") and c["weather"]["status"] == "off"
+    assert r["overall"] == "ok" and [x["id"] for x in r["checks"]] == ["backend", "database", "weather", "email", "sarvam", "phone"]
+    assert all(x["status"] == "ok" for x in r["checks"] if x["id"] not in ("weather", "email")) and c["weather"]["status"] == "off"
+    assert c["email"]["status"] == "off" and "GATE0_RESEND_API_KEY" in c["email"]["detail"]      # no mail settings in the tests
     assert "1 farmers" in c["database"]["detail"] and "version 9" in c["sarvam"]["detail"]
     assert "connected" in c["phone"]["detail"].lower()
 
@@ -219,7 +220,7 @@ def api(tmp_path):
 
 def test_api_checks_and_usage(api):
     code, body = api("/api/system/checks")
-    assert code == 200 and body["overall"] == "ok" and len(body["checks"]) == 5
+    assert code == 200 and body["overall"] == "ok" and len(body["checks"]) == 6
     code, body = api("/api/usage")
     assert code == 200 and body["today"]["billed_minutes"] == 1
     assert body["rate"] == 3.5 and body["today"]["amount"] == 3.5

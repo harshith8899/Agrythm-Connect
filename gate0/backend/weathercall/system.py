@@ -182,6 +182,7 @@ class SystemChecks:
         if timer is not None:
             out.append(timer)
         out.append(self._weather_check())
+        out.append(self._email_check())
         sarvam, phone = self._sarvam_checks(refresh)
         out += [sarvam, phone]
         report = {"overall": "fail" if any(c["status"] == "fail" for c in out) else "ok",
@@ -249,6 +250,16 @@ class SystemChecks:
                                f"{kind}: {farmers} farmers, {calls} call records, {saved} saved forecast days.", t)
         except Exception as exc:
             return self._check("database", "Database", "fail", f"Cannot read the database ({type(exc).__name__}).", t)
+
+    def _email_check(self) -> dict:
+        """Is email set up, through what, and where do test messages go. Sends nothing (the test button does that)."""
+        t = time.monotonic()
+        m = self.service.mail_status()
+        if not m["live"]:
+            return self._check("email", "Email", "off", "Not set up: add GATE0_RESEND_API_KEY (or the GATE0_SMTP_* settings) in Render.", t)
+        where = (f"Test messages go to {m['test_to']} (GATE0_MAIL_TEST_TO)." if m["test_mode"]
+                 else "No test address: each farmer's own email is used.")
+        return self._check("email", "Email", "ok", f"Sending through {m['provider']}. {where}", t)
 
     def _weather_check(self) -> dict:
         """Never asks the weather service: weather is fetched only when a call is made, so this reads what the last call saved."""
