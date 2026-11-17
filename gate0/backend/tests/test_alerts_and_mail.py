@@ -196,3 +196,17 @@ def test_the_reason_inside_a_sarvam_error_is_kept_with_digits_and_quotes_masked(
         d.push_inbound_many([{"fid": "F1", "phone": "9876543210", "language_name": "Hindi", "variables": {"farmer_name": "R"}}], "roster-x")
     t = e.value.safe_text
     assert t.startswith("HTTP 422 422: (422) Invalid Parameter") and "unknown variable '...'" in t and "9876" not in t
+
+
+def test_a_call_row_counts_the_sms_sent_for_the_day_but_not_the_emails(tmp_path):
+    s = service(tmp_path)
+    s.import_csv("Farmer ID,Farmer Name,Mobile Number,Village,District,State,Preferred Calling Language,Call Consent\n"
+                 "F1,Ramesh,9876543210,Mandya,Mandya,Karnataka,Hindi,Yes\n")
+    s._save("F1", T0.date(), status="answered")
+    with s.lock:
+        s.db.execute("INSERT INTO dash_messages VALUES('F1', ?, 'weather', 'email', 'sent', '', ?)", (T0.date().isoformat(), "x"))
+        s.db.execute("INSERT INTO dash_messages VALUES('F1', ?, 'missed', 'sms', 'sent', '', ?)", (T0.date().isoformat(), "x"))
+        s.db.execute("INSERT INTO dash_messages VALUES('F1', ?, 'callback_missed', 'sms', 'failed', '', ?)", (T0.date().isoformat(), "x"))
+        s.db.commit()
+    row = next(c for c in s.calls() if c["farmer_id"] == "F1")
+    assert row["messages_sent"] == 1

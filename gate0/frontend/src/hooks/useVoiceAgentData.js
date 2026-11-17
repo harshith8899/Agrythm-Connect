@@ -305,9 +305,10 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
         if (s === 'callback requested' || s === 'callback scheduled' || s === 'callbacks pending') {
           const isCb =
             call.status === 'Callback Scheduled' ||
+            call.status === 'Callback Requested' ||
             call.disposition === 'Callback Requested' ||
             call.callback_status === 'pending' ||
-            Boolean(call.scheduled_callback_time && !['Completed', 'Callback Done', 'Failed'].includes(call.status));
+            Boolean(call.scheduled_callback_time && !['Completed', 'Callback Done', 'Failed', 'Callback Missed'].includes(call.status));
           if (!isCb) return false;
         } else if (s === 'needs attention' || s === 'needs-attention') {
           const isAttn =
@@ -321,10 +322,16 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
             ['no_answer', 'busy'].includes(String(call.call_status || '').toLowerCase());
           if (!isUnans) return false;
         } else if (s === 'completed') {
+          const isPendingCb =
+            call.status === 'Callback Scheduled' ||
+            call.status === 'Callback Requested' ||
+            call.callback_status === 'pending';
+          if (isPendingCb) return false;
           const isComp =
             ['Completed', 'Callback Done'].includes(call.status) ||
             call.disposition === 'Weather Delivered' ||
-            call.understood_weather === 'yes';
+            call.disposition === 'Callback placed' ||
+            (call.understood_weather === 'yes' && call.callback_status !== 'pending' && call.status !== 'Callback Scheduled');
           if (!isComp) return false;
         } else if (String(call.status).toLowerCase() !== s && String(call.call_status).toLowerCase() !== s) {
           return false;
@@ -381,17 +388,21 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
     const waiting = (c) => c.status === 'In Call' || c.status === 'In Queue' || c.status === 'Calling';
     const called = scoped.filter((c) => c.status !== 'Skipped' && !waiting(c));
 
-    const isCompleted = (c) =>
-      ['Completed', 'Callback Done'].includes(c.status) ||
-      c.disposition === 'Weather Delivered' ||
-      c.understood_weather === 'yes';
-
     const isCallback = (c) =>
-      !isCompleted(c) && (
-        c.status === 'Callback Scheduled' ||
-        c.status === 'Callback Requested' ||
-        c.callback_status === 'pending' ||
-        Boolean(c.scheduled_callback_time && !['Failed', 'Not Confirmed'].includes(c.status))
+      c.status === 'Callback Scheduled' ||
+      c.status === 'Callback Requested' ||
+      c.callback_status === 'pending' ||
+      Boolean(
+        c.scheduled_callback_time &&
+        !['Completed', 'Callback Done', 'Failed', 'Not Confirmed', 'Declined', 'Callback Missed'].includes(c.status)
+      );
+
+    const isCompleted = (c) =>
+      !isCallback(c) && (
+        ['Completed', 'Callback Done'].includes(c.status) ||
+        c.disposition === 'Weather Delivered' ||
+        c.disposition === 'Callback placed' ||
+        (c.understood_weather === 'yes' && c.callback_status !== 'pending' && c.status !== 'Callback Scheduled')
       );
 
     const isUnanswered = (c) =>
