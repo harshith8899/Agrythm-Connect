@@ -24,7 +24,7 @@ services:
       - key: GATE0_TELEPHONY
         value: sarvam_agent
       - key: SARVAM_APP_VERSION
-        value: "10"
+        value: "15"
       # Secrets and ids: filled in the Render dashboard, never committed.
       - key: GATE0_DATABASE_URL        # the Supabase Session pooler address, with the password in it
         sync: false
@@ -45,6 +45,10 @@ services:
       - key: GATE0_MAIL_TEAM
         sync: false
       - key: SARVAM_INBOUND_DEPLOYMENT_ID   # the inbound deployment farmers call back on (Sarvam, Deploy); empty: no call-back line
+        sync: false
+      - key: GATE0_RESEND_API_KEY        # Resend's API key: mail over HTTPS (Render's free plan blocks SMTP); used instead of SMTP when set
+        sync: false
+      - key: GATE0_MAIL_LOGO_URL         # public https address of the logo for the email (e.g. the dashboard's /agrythm-logo.png)
         sync: false
       - key: GATE0_MAIL_TEST_TO          # testing: one address that receives every farmer's message
         sync: false

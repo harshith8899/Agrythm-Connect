@@ -11,5 +11,8 @@
   },
   // BACKEND_URL and API_TOKEN are set in the dashboard as Secrets; a deploy must never remove them.
   "keep_vars": true,
+  // Every 10 minutes from 00:00 to 17:59 UTC (05:30 to 23:29 India time) the Worker pings the backend so Render's free plan does not sleep
+  // while people use the dashboard. About 560 service hours a month, inside the free 750. Remove this line to stop it.
+  "triggers": { "crons": ["*/10 0-17 * * *"] },
   "observability": { "enabled": true }
 }

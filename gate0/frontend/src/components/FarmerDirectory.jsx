@@ -681,13 +681,13 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
         </div>
         {error && <p className="text-xs font-semibold text-rose-700">{error}</p>}
         <div className="flex flex-wrap justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 cursor-pointer">Cancel</button>
+          <button type="button" onClick={onClose} className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 cursor-pointer">Cancel</button>
           {!editing && (
-            <button type="button" disabled={busy} onClick={() => save(true)} className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-trust-navy text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 cursor-pointer">
+            <button type="button" disabled={busy} onClick={() => save(true)} className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap bg-white border border-slate-200 text-trust-navy text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 cursor-pointer">
               Save and add another
             </button>
           )}
-          <button type="submit" disabled={busy} className="px-4 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 cursor-pointer">
+          <button type="submit" disabled={busy} className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 cursor-pointer">
             {busy ? 'Saving...' : 'Save'}
           </button>
         </div>
@@ -697,7 +697,7 @@ const FarmerFormModal = ({ farmer, farmers = [], onClose, onSaved }) => {
 };
 
 const AddFarmerButton = ({ onClick }) => (
-  <button onClick={onClick} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-slate-200 text-trust-navy text-xs font-semibold hover:bg-slate-50 transition-colors cursor-pointer">
+  <button onClick={onClick} className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 bg-white border border-slate-200 text-trust-navy text-xs font-semibold hover:bg-slate-50 transition-colors cursor-pointer">
     <Plus className="w-3.5 h-3.5" />
     <span>Add farmer</span>
   </button>
@@ -1079,7 +1079,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                 setDistrictFilter('all');
                 setLanguageFilter('all');
               }}
-              className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 px-2 py-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+              className="h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap text-[11px] font-semibold text-slate-500 hover:text-rose-600 hover:bg-slate-100 cursor-pointer"
             >
               Reset Filters
             </button>
@@ -1109,7 +1109,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
             <button
               type="button"
               onClick={() => setSelectedIds(new Set())}
-              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold transition-colors cursor-pointer"
+              className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap bg-white/10 hover:bg-white/20 text-xs font-semibold transition-colors cursor-pointer"
             >
               Deselect All
             </button>
@@ -1120,11 +1120,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
               onClick={handleBatchMakeActive}
               disabled={batchActivating || selectedInactiveFarmers.length === 0}
               title={selectedInactiveFarmers.length > 0 ? `Activate ${selectedInactiveFarmers.length} inactive farmer(s)` : 'All selected farmers are already active'}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ${
-                selectedInactiveFarmers.length > 0
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                  : 'bg-white/10 text-slate-300 opacity-60 cursor-not-allowed'
-              }`}
+              className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all shadow-xs cursor-pointer ${ selectedInactiveFarmers.length > 0 ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-white/10 text-slate-300 opacity-60 cursor-not-allowed' }`}
             >
               {batchActivating ? (
                 <>
@@ -1147,7 +1143,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
               type="button"
               onClick={handleBatchCallSelected}
               disabled={batchCalling || selectedConsentedFarmers.length === 0}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-trust-green hover:bg-emerald-600 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 bg-trust-green hover:bg-emerald-600 text-white text-xs font-semibold transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {batchCalling ? (
                 <>
@@ -1254,7 +1250,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
               </label>
               <button
                 onClick={() => setEditing(farmer)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
               >
                 <Pencil className="w-3 h-3" />
                 <span>Edit</span>
@@ -1266,7 +1262,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                 onClick={() => placeCall(farmer, farmer.action)}
                 disabled={farmer.action.disabled || calling[farmer.farmer_id]}
                 title={farmer.action.why || 'Place a call now'}
-                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                className="h-9 px-3.5 rounded-xl whitespace-nowrap w-full inline-flex items-center justify-center gap-1.5 bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
               >
                 <PhoneIcon className="w-3.5 h-3.5" />
                 <span>{calling[farmer.farmer_id] ? 'Calling...' : farmer.action.label}</span>
@@ -1286,7 +1282,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
 
               <button
                 onClick={() => onSelectFarmer(farmer.farmer_name)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-trust-navy hover:text-white text-trust-navy text-xs font-semibold transition-colors cursor-pointer"
+                className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 bg-slate-50 hover:bg-trust-navy hover:text-white text-trust-navy text-xs font-semibold transition-colors cursor-pointer"
               >
                 <PhoneCall className="w-3 h-3" />
                 <span>View Call Logs</span>

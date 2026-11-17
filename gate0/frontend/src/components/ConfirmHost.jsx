@@ -87,7 +87,7 @@ export const ConfirmHost = () => {
           <button
             type="button"
             onClick={() => close(false)}
-            className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 cursor-pointer"
+            className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 cursor-pointer"
           >
             {cancelLabel}
           </button>
@@ -96,7 +96,7 @@ export const ConfirmHost = () => {
             type="button"
             onClick={() => close(answer)}
             disabled={!answer}
-            className={`px-4 py-2 rounded-xl text-white text-xs font-semibold cursor-pointer disabled:opacity-50 ${danger ? 'bg-amber-600 hover:bg-amber-700' : 'bg-trust-navy hover:bg-slate-800'}`}
+            className={`h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap text-white text-xs font-semibold cursor-pointer disabled:opacity-50 ${danger ? 'bg-amber-600 hover:bg-amber-700' : 'bg-trust-navy hover:bg-slate-800'}`}
           >
             {confirmLabel}
           </button>

@@ -141,8 +141,8 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
   useEffect(() => {
     if (!enabled || !autoPollInterval || autoPollInterval <= 0) return undefined;
 
-    // 3 s while a send runs, 5 s while the server is not answering (so the page fills in soon after it wakes), else 15 s
-    const every = sending ? 3 : !isBackendOnline ? 5 : autoPollInterval;
+    // 2 s while a send runs, 5 s while the server is not answering (so the page fills in soon after it wakes), else 15 s
+    const every = sending ? 2 : !isBackendOnline ? 5 : autoPollInterval;
     const timer = setInterval(() => {
       fetchAllData(true);
     }, every * 1000);
@@ -179,7 +179,7 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
       // Status resolution: the backend sends the dashboard's own status words
       const rawStatus = call.status || call.call_status || 'Completed';
       const statusWords = {
-        'completed': 'Completed', 'answered': 'Completed', 'callback scheduled': 'Callback Scheduled', 'callback missed': 'Callback Missed', 'callback done': 'Callback Done',
+        'completed': 'Completed', 'answered': 'Completed', 'callback scheduled': 'Callback Scheduled', 'callback requested': 'Callback Requested', 'callback missed': 'Callback Missed', 'callback done': 'Callback Done',
         'not confirmed': 'Not Confirmed', 'declined': 'Declined', 'unanswered': 'Unanswered', 'busy': 'Unanswered', 'no_answer': 'Unanswered',
         'retrying': 'Retrying', 'failed': 'Failed', 'skipped': 'Skipped', 'escalated': 'Escalated',
         'requires escalation': 'Escalated', 'calling': 'Calling', 'scheduled': 'Scheduled',

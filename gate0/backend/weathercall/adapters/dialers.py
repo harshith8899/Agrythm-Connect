@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
@@ -20,6 +21,20 @@ from ..contracts import ProviderCallResult
 from .mock import MockTelephony
 from .sarvam_agent import BASE, SarvamAgentTelephony, _result_from, to_e164
 from .sarvam_campaign import scrub
+
+def _strip_quoted(text: str) -> str:
+    """Quoted values in an error message could be a farmer's details: they are replaced."""
+    return re.sub(r"""(['"]).*?\1""", "'...'", text or "")
+
+
+class SarvamHTTPError(RuntimeError):
+    """Sarvam answered a cohort push with an error. safe_text is the HTTP code and Sarvam's error code, never its message
+    (a message can quote a phone number)."""
+
+    def __init__(self, safe_text: str):
+        super().__init__(safe_text)
+        self.safe_text = safe_text
+
 
 OUTPUT_VARS = ("call_summary", "callback_time", "understood_weather", "stop_calls_requested")
 
@@ -36,11 +51,11 @@ class MockDialler:
 
     inbound_ready = False                            # no inbound line in simulation
 
-    def push_inbound(self, phone, farmer_id, language_name, variables, cohort_name) -> str:
-        return ""
+    def push_inbound_many(self, entries, cohort_name) -> list[str]:
+        return []
 
-    def find_inbound(self, phone, start, end, known_ids):
-        return None
+    def find_inbound_calls(self, start, end, known_ids):
+        return []
 
     def outputs(self, attempt_id: str) -> dict:
         return {"call_summary": "(simulated) the farmer heard the weather update and said they understood.",
@@ -61,32 +76,69 @@ class SarvamDialler(SarvamAgentTelephony):
     def inbound_ready(self) -> bool:
         return bool(self.inbound_deployment)
 
-    def push_inbound(self, phone, farmer_id, language_name, variables, cohort_name) -> str:
-        """Tells the inbound deployment who this number is: when it calls in, the agent starts with these variables.
-        Sarvam matches the caller by number (a cohort of known callers). Returns the cohort id."""
+    def push_inbound_many(self, entries, cohort_name) -> list[str]:
+        """Tells the inbound deployment which numbers may ring and what to say to each: Sarvam matches a caller by number
+        (a cohort of known callers) and starts the agent with that person's variables. entries: dicts with phone, fid,
+        language_name and variables; at most 1000 go in one request. Returns the cohort ids."""
         if not self.inbound_ready:
             raise RuntimeError("SARVAM_INBOUND_DEPLOYMENT_ID is not set")
-        body = {"name": cohort_name, "users": [{"user_phone_number": to_e164(phone), "user_identifier": farmer_id,
-                                                  "app_variables": variables,
-                                                  "app_overrides": {"initial_language_name": language_name}}]}
         url = f"{BASE}/scheduling/v1/orgs/{self.org}/workspaces/{self.ws}/deployments/{self.inbound_deployment}/cohorts/stream"
-        return str(self._request(url, body).get("cohort_id", ""))
+        users, seen = [], set()
+        for e in entries:
+            try:
+                phone = to_e164(e["phone"])
+            except ValueError:                              # a number that cannot be dialled is left out, not the whole list
+                continue
+            if phone in seen:                               # two farmers on one number: the line can know only one of them
+                continue
+            seen.add(phone)
+            users.append({"user_phone_number": phone, "user_identifier": e["fid"],
+                          "app_variables": {k: v for k, v in e["variables"].items() if v != ""},     # no blank values
+                          "app_overrides": {"initial_language_name": e["language_name"]}})
+        ids = []
+        for i in range(0, len(users), 1000):
+            name = cohort_name if i == 0 else f"{cohort_name}-{i // 1000 + 1}"
+            try:
+                ids.append(str(self._request(url, {"name": name[:50], "users": users[i:i + 1000]}).get("cohort_id", "")))
+            except urllib.error.HTTPError as exc:
+                code, message = "", ""
+                try:
+                    err = json.load(exc).get("error") or {}
+                    code, message = str(err.get("code", "")), str(err.get("message") or "")
+                    details = (err.get("data") or {}).get("details")        # Sarvam puts the real reason here
+                    if isinstance(details, str) and details:
+                        message = f"{message} {details}".strip() if message else details
+                    elif isinstance(details, (list, dict)) and details:
+                        message = f"{message} {json.dumps(details)}".strip()
+                except Exception:
+                    pass
+                detail = f"HTTP {exc.code} {code}".strip()
+                if message:             # Sarvam's own words say which field it did not like; digits and quoted values are masked
+                    detail += ": " + _strip_quoted(scrub(message))[:140]
+                raise SarvamHTTPError(detail[:200]) from None
+        return ids
 
-    def find_inbound(self, phone, start, end, known_ids):
-        """A connected call from this number (last 4 digits) between start and end that is not one of ours: the
-        farmer calling back. Returns (result, when it ended in UTC) or None."""
-        last4 = re.sub(r"\D", "", phone or "")[-4:]
-        q = urllib.parse.urlencode({"start_datetime": start.astimezone(timezone.utc).isoformat(timespec="seconds"),
-                                    "end_datetime": end.astimezone(timezone.utc).isoformat(timespec="seconds"), "limit": 100})
-        items = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}").get("items", [])
-        mine = sorted((i for i in items if last4 and str(i.get("user_contact_masked") or "")[-4:] == last4
-                       and i.get("attempt_id") not in known_ids), key=lambda i: i.get("attempted_at") or "")
-        for item in mine:
-            result = _result_from(item, item.get("attempt_id") or "")
-            if result is not None and result.status.value == "answered":
+    def find_inbound_calls(self, start, end, known_ids):
+        """Connected calls between start and end that are not ours (not in known_ids): farmers ringing the line. Returns
+        (last 4 digits of the caller, result, when it ended in UTC), oldest first."""
+        found, offset = [], 0
+        while True:
+            q = urllib.parse.urlencode({"start_datetime": start.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                                        "end_datetime": end.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                                        "limit": 1000, "offset": offset, "sort_by": "attempted_at"})
+            page = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}")
+            for item in page.get("items", []):
+                if item.get("attempt_id") in known_ids:
+                    continue
+                result = _result_from(item, item.get("attempt_id") or "")
+                if result is None or result.status.value != "answered":
+                    continue
                 began = datetime.fromisoformat(str(item["attempted_at"]).replace("Z", "")).replace(tzinfo=timezone.utc)
-                return result, began + timedelta(seconds=result.duration_s or 0)
-        return None
+                last4 = re.sub(r"\D", "", str(item.get("user_contact_masked") or ""))[-4:]
+                found.append((last4, result, began + timedelta(seconds=result.duration_s or 0)))
+            if not page.get("next_page_uri"):
+                return found
+            offset += 1000
 
     def place(self, phone, language_name, variables) -> ProviderCallResult:
         started = self._now()
@@ -104,7 +156,7 @@ class SarvamDialler(SarvamAgentTelephony):
     def outputs(self, attempt_id: str) -> dict:
         """The agent's output variables (Sarvam fills them a little after the call ends) and the transcript."""
         filters = json.dumps([{"field": "attempt_id", "operator": "equals", "value": attempt_id}])
-        for _ in range(6):
+        for _ in range(20):                                 # up to a minute, looking every 3 s so the notes show as soon as they are in
             q = urllib.parse.urlencode({
                 "start_datetime": (self._now() - timedelta(hours=1)).isoformat(timespec="seconds"),
                 "end_datetime": (self._now() + timedelta(minutes=5)).isoformat(timespec="seconds"),
@@ -115,7 +167,7 @@ class SarvamDialler(SarvamAgentTelephony):
             if got.get("call_summary"):
                 got["transcript"] = self._transcript(item.get("interaction_id"))
                 return got
-            self._sleep(10)
+            self._sleep(3)
         return {}
 
     def _transcript(self, interaction_id: str | None) -> list[dict]:

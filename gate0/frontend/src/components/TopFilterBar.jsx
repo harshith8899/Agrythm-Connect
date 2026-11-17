@@ -88,7 +88,7 @@ export const TopFilterBar = ({
     { id: 'yesterday', label: 'Yesterday' },
   ];
 
-  const statuses = ['All Status', 'In Call', 'In Queue', 'Completed', 'Callback Scheduled', 'Callback Missed', 'Callback Done', 'Retrying', 'Not Confirmed', 'Declined', 'Unanswered', 'Failed', 'Needs Attention', 'Skipped'];
+  const statuses = ['All Status', 'In Call', 'In Queue', 'Completed', 'Callback Scheduled', 'Callback Requested', 'Callback Missed', 'Callback Done', 'Retrying', 'Not Confirmed', 'Declined', 'Unanswered', 'Failed', 'Needs Attention', 'Skipped'];
 
   const box = 'flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs min-w-0';
   const select = 'bg-transparent text-xs font-medium text-slate-700 focus:outline-hidden cursor-pointer w-full min-w-0 sm:w-auto';
@@ -120,11 +120,7 @@ export const TopFilterBar = ({
               key={preset.id}
               type="button"
               onClick={() => handleDatePresetClick(preset.id)}
-              className={`px-2.5 py-1.5 sm:py-1 text-xs font-medium rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-                dateFilter === preset.id
-                  ? 'bg-trust-navy text-white shadow-2xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-              }`}
+              className={`h-9 px-3.5 rounded-xl inline-flex items-center justify-center sm: text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${ dateFilter === preset.id ? 'bg-trust-navy text-white shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-white' }`}
             >
               {preset.label}
             </button>
@@ -184,7 +180,7 @@ export const TopFilterBar = ({
         {isFiltered && (
           <button
             onClick={resetFilters}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl font-medium transition-colors cursor-pointer"
+            className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 font-semibold transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3 h-3" />
             <span>Reset</span>

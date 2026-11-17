@@ -2,8 +2,6 @@ import React from 'react';
 import { RefreshCw, Play, Clock, LogOut } from 'lucide-react';
 
 export const Header = ({ 
-  onRefresh, 
-  refreshing, 
   syncStatus: _syncStatus, 
   isBackendOnline = true,
   activeTab,
@@ -67,11 +65,7 @@ export const Header = ({
           {/* Auto Dispatcher (9:00 AM) Indicator / Toggle */}
           <button
             onClick={onToggleAutoDispatcher}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-              isAutoEnabled 
-                ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 hover:bg-emerald-100' 
-                : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 border text-xs font-semibold transition-all cursor-pointer ${ isAutoEnabled ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 hover:bg-emerald-100' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200' }`}
             title="Toggle Automated 9:00 AM IST Daily Dispatcher"
           >
             <Clock className={`w-3.5 h-3.5 ${isAutoEnabled ? 'text-emerald-600' : 'text-slate-400'}`} />
@@ -87,11 +81,7 @@ export const Header = ({
           <button
             onClick={onTriggerDemo}
             disabled={triggeringDemo || !isBackendOnline}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 ${
-              !isBackendOnline
-                ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60'
-                : 'bg-trust-navy hover:bg-slate-800 text-white disabled:opacity-50'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all shadow-xs cursor-pointer active:scale-95 ${ !isBackendOnline ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60' : 'bg-trust-navy hover:bg-slate-800 text-white disabled:opacity-50' }`}
             title={
               !isBackendOnline
                 ? "The backend API is offline. Start it with 'npm run backend'."
@@ -113,22 +103,11 @@ export const Header = ({
             )}
           </button>
 
-          {/* Quick Refresh */}
-          <button
-            onClick={onRefresh}
-            disabled={refreshing}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
-            title="Refresh live data from the backend"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-trust-navy' : ''}`} />
-            <span className="hidden xl:inline">{refreshing ? 'Syncing...' : 'Refresh'}</span>
-          </button>
-
           {/* Logout Button */}
           {onLogout && (
             <button
               onClick={onLogout}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+              className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
               title="Sign out of admin session"
             >
               <LogOut className="w-3.5 h-3.5" />

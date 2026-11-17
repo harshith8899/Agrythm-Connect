@@ -12,8 +12,29 @@ import {
   Clock,
   Activity,
   Zap,
+  Mail,
+  X,
 } from 'lucide-react';
-import { getSystemChecks } from '../utils';
+import { getSystemChecks, getAlerts, getMessages, dismissAlerts, sendTestEmail } from '../utils';
+
+const MESSAGE_LABEL = {
+  weather: 'Weather update',
+  missed: 'We tried to call you',
+  callback_weather: 'Weather after the requested call',
+  callback_missed: 'Missed the requested call',
+};
+const MESSAGE_STATUS_STYLE = {
+  sent: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  skipped: 'bg-amber-50 text-amber-700 border-amber-200',
+  failed: 'bg-rose-50 text-rose-700 border-rose-200',
+  sending: 'bg-slate-50 text-slate-600 border-slate-200',
+};
+// a test call's key looks like "test:weather:ab12cd34": show the situation, tagged Test
+const describeMessage = (kind) => {
+  const isTest = String(kind).startsWith('test:');
+  const base = isTest ? String(kind).split(':')[1] : kind;
+  return { label: MESSAGE_LABEL[base] || base, isTest };
+};
 
 const STATUS_STYLE = {
   ok: {
@@ -62,6 +83,11 @@ const SERVICE_META = {
     category: 'Telephony & Outbound DID',
     description: 'Direct Inward Dialing (DID) carrier line providing live PSTN connectivity for farmer calls.',
   },
+  email: {
+    icon: Mail,
+    category: 'Email delivery',
+    description: 'Sends the weather email after a call; the test button sends a sample to the test address.',
+  },
   timer: {
     icon: Clock,
     category: 'Cron / Wake-up Trigger',
@@ -77,12 +103,18 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   const [systemReport, setSystemReport] = useState(null);
   const [systemError, setSystemError] = useState('');
   const [systemLoading, setSystemLoading] = useState(false);
+  const [alerts, setAlerts] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
 
   const loadSystem = useCallback(async (refresh = false) => {
     setSystemLoading(true);
     try {
-      const checks = await getSystemChecks(refresh);
+      const [checks, al, msgs] = await Promise.all([getSystemChecks(refresh), getAlerts().catch(() => []), getMessages().catch(() => [])]);
       setSystemReport(checks);
+      setAlerts(al);
+      setMessages(Array.isArray(msgs) ? msgs : []);
       setSystemError('');
     } catch (err) {
       setSystemError(err.message || 'Could not reach the backend');
@@ -90,6 +122,31 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
       setSystemLoading(false);
     }
   }, []);
+
+  // sends one sample email to the test address and shows what happened, so the mail setup can be checked without a call
+  const handleTestEmail = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await sendTestEmail();
+      setTestResult({ ok: r.status === 'sent', text: r.status === 'sent' ? 'Sent: check the test inbox.' : `${r.status}: ${r.note}` });
+      loadSystem(false);
+    } catch (err) {
+      setTestResult({ ok: false, text: err.message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // remove one note, or all of them; the list is updated at once and the server confirms in the background
+  const handleDismiss = async (id) => {
+    setAlerts((prev) => (id == null ? [] : prev.filter((a) => a.id !== id)));
+    try {
+      await dismissAlerts(id);
+    } catch {
+      loadSystem(false);        // it did not go through: show what is really there
+    }
+  };
 
   useEffect(() => {
     loadSystem(false);
@@ -149,7 +206,7 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
             <button
               onClick={() => loadSystem(true)}
               disabled={systemLoading || !isBackendOnline}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+              className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-2 bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${systemLoading ? 'animate-spin' : ''}`} />
               <span>{systemLoading ? 'Checking...' : 'Run Diagnostics'}</span>
@@ -193,6 +250,106 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
             <span className="text-[11px] text-sky-700 mt-0.5">Internal service ping</span>
           </div>
         </div>
+      </div>
+
+      {/* Needs attention and the emails sent after calls */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-5 space-y-4 shadow-2xs">
+        {/* Alerts if any */}
+        {alerts.length > 0 && (
+          <div className="bg-amber-50/70 rounded-xl border border-amber-200">
+            <div className="p-3 flex items-center justify-between gap-2 border-b border-amber-100">
+              <span className="text-[11px] font-bold tracking-wider text-amber-800 uppercase">Needs Attention ({alerts.length})</span>
+              <button
+                onClick={() => handleDismiss(null)}
+                className="h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap bg-white border border-amber-200 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
+              >
+                Clear all
+              </button>
+            </div>
+            <div className="max-h-72 overflow-y-auto divide-y divide-amber-100">
+              {alerts.map((a, i) => (
+                <div key={`${a.id ?? a.at}-${i}`} className="p-3 text-xs text-slate-700 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="font-semibold text-slate-900">{a.farmer_name || a.farmer_id || 'System'}</span>
+                    <span className="text-slate-400"> · {String(a.at).replace('T', ' ').slice(0, 16)}</span>
+                    <p className="mt-0.5 break-words">{a.text}</p>
+                  </div>
+                  {a.id != null && (
+                    <button
+                      onClick={() => handleDismiss(a.id)}
+                      title="Dismiss this note"
+                      aria-label="Dismiss this note"
+                      className="shrink-0 p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-white transition-colors cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Emails sent after calls */}
+        <div className="rounded-xl border border-slate-100">
+          <div className="p-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100">
+            <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Emails after calls ({messages.length})</span>
+            <span className="flex items-center gap-2">
+              {testResult && (
+                <span className={`text-[11px] font-semibold break-words ${testResult.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{testResult.text}</span>
+              )}
+              <button
+                onClick={handleTestEmail}
+                disabled={testing || !isBackendOnline}
+                className="h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap bg-white border border-slate-200 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {testing ? 'Sending...' : 'Send test email'}
+              </button>
+            </span>
+          </div>
+          {messages.length === 0 ? (
+            <p className="p-3 text-xs text-slate-500">
+              None yet. An email goes out after a call where the farmer understood the weather, after the last unanswered attempt, and after a
+              callback that was missed. A test call sends one only when a test address is set on the server.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-slate-400">
+                    <th className="px-3 py-2">When</th>
+                    <th className="px-3 py-2">Farmer</th>
+                    <th className="px-3 py-2">Email</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Why</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {messages.slice(0, 15).map((m, i) => {
+                    const d = describeMessage(m.kind);
+                    return (
+                      <tr key={`${m.at}-${m.kind}-${i}`}>
+                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{String(m.at).replace('T', ' ').slice(0, 16)}</td>
+                        <td className="px-3 py-2 font-medium text-slate-800">{m.farmer_name || m.farmer_id}</td>
+                        <td className="px-3 py-2 text-slate-700">
+                          {d.label}
+                          {d.isTest && <span className="ml-1.5 text-[10px] font-semibold text-slate-400 uppercase">Test</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-block px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase ${MESSAGE_STATUS_STYLE[m.status] || MESSAGE_STATUS_STYLE.sending}`}>
+                            {m.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-500">{m.note || ''}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
       </div>
 
       {/* 2. Full-Width Vertically Stacked Service Blocks (Placed Each Below the Other) */}

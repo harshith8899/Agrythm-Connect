@@ -19,7 +19,7 @@ export const SignInStatus = ({ username, info, onCancel }) => {
             (type Secret), then deploy. Signing in continues by itself once that is fixed.
           </div>
         </div>
-        <button type="button" onClick={onCancel} className="shrink-0 px-3 py-1.5 rounded-lg bg-white border border-rose-200 text-xs font-semibold cursor-pointer">Cancel</button>
+        <button type="button" onClick={onCancel} className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap shrink-0 bg-white border border-rose-200 text-xs font-semibold cursor-pointer">Cancel</button>
       </div>
     );
   }
@@ -46,7 +46,7 @@ export const SignInStatus = ({ username, info, onCancel }) => {
             )}
           </div>
         </div>
-        <button type="button" onClick={onCancel} className="shrink-0 px-3 py-1.5 rounded-lg bg-white border border-amber-200 text-xs font-semibold cursor-pointer">Cancel</button>
+        <button type="button" onClick={onCancel} className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap shrink-0 bg-white border border-amber-200 text-xs font-semibold cursor-pointer">Cancel</button>
       </div>
       <SliderLoader tone="amber" />
     </div>

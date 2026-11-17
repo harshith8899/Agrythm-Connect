@@ -239,6 +239,13 @@ export const saveUsageRate = (sarvamRate) =>
 
 /** Things the team must act on: farmers who asked to stop, failed calls, skipped runs. */
 export const getAlerts = () => getJson(`${API_BASE}/api/alerts`);
+/** Removes one note for the team (by its id), or every note when no id is given. */
+export const dismissAlerts = (id) =>
+  postJson('/api/alerts/dismiss', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(id == null ? { all: true } : { id }) });
+/** The emails sent (or not) after calls: one row per farmer, day and kind, with why when one was skipped or failed. */
+/** Sends one sample email to the test address and says what happened: { status: sent | failed | skipped, note }. */
+export const sendTestEmail = () => postJson('/api/mail/test', { headers: { 'Content-Type': 'application/json' }, body: '{}' });
+export const getMessages = () => getJson(`${API_BASE}/api/messages`);
 
 export const getCallbacks = () => getJson(`${API_BASE}/api/callbacks`);
 

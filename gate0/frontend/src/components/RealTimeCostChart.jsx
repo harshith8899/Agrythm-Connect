@@ -299,11 +299,7 @@ export const RealTimeCostChart = ({
                   setDisplayMode('cumulative');
                   setHoveredIdx(null);
                 }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  displayMode === 'cumulative'
-                    ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
+                className={`h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap text-xs font-semibold transition-all cursor-pointer ${ displayMode === 'cumulative' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
               >
                 Cumulative (₹)
               </button>
@@ -313,11 +309,7 @@ export const RealTimeCostChart = ({
                   setDisplayMode('hourly');
                   setHoveredIdx(null);
                 }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  displayMode === 'hourly'
-                    ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
+                className={`h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap text-xs font-semibold transition-all cursor-pointer ${ displayMode === 'hourly' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
               >
                 Hourly Burn (₹)
               </button>
@@ -351,11 +343,7 @@ export const RealTimeCostChart = ({
                 setDisplayMode('cumulative');
                 setHoveredIdx(null);
               }}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                displayMode === 'cumulative'
-                  ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
+              className={`h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap text-xs font-semibold transition-all cursor-pointer ${ displayMode === 'cumulative' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
             >
               Cumulative (₹)
             </button>
@@ -365,11 +353,7 @@ export const RealTimeCostChart = ({
                 setDisplayMode('hourly');
                 setHoveredIdx(null);
               }}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                displayMode === 'hourly'
-                  ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
+              className={`h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap text-xs font-semibold transition-all cursor-pointer ${ displayMode === 'hourly' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
             >
               Hourly Burn (₹)
             </button>

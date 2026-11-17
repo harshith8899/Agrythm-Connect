@@ -193,7 +193,7 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
                       }
                     }}
                     disabled={callingBack}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-trust-green text-white text-xs font-bold hover:bg-emerald-700 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                    className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 bg-trust-green text-white text-xs font-semibold hover:bg-emerald-700 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
                   >
                     <PhoneCall className={`w-3.5 h-3.5 ${callingBack ? 'animate-pulse' : ''}`} />
                     <span>{callingBack ? 'Calling...' : 'Call Back Now'}</span>

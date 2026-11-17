@@ -32,7 +32,7 @@ who finds the address could read farmer data and press "Send now" (real calls co
 2. Fill the values marked as secrets: `GATE0_DATABASE_URL` (the Supabase Session pooler address), `GATE0_API_TOKEN`, `SARVAM_AGENT_API_KEY`, `SARVAM_ORG_ID`,
    `SARVAM_WORKSPACE_ID`, `SARVAM_APP_ID`, `SARVAM_CONNECTION_ID`, `SARVAM_AGENT_PHONE` (same values as your local
    `gate0/.env`). Make the token with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and keep a copy for
-   step 2 below. `SARVAM_APP_VERSION` is 10 in `render.yaml`; change it there when a new agent version is committed.
+   step 2 below. `SARVAM_APP_VERSION` is 15 in `render.yaml`; change it there when a new agent version is committed.
 3. Deploy. Open `https://<service>.onrender.com/api/health`: it must answer `{"status": "ok"}`. Any other `/api` address
    answers 401 without the token, which is correct.
 4. The API refuses to start on a public address without `GATE0_API_TOKEN`; a failed start usually means that is missing.
@@ -40,6 +40,12 @@ who finds the address could read farmer data and press "Send now" (real calls co
    WeatherAPI.com is the weather source (Open-Meteo's free service throttles shared hosting addresses with HTTP 429). Weather is
    fetched only when a call is made, once per place and day, and the System Status tab never asks the weather service.
    Call-back line: set `SARVAM_INBOUND_DEPLOYMENT_ID` (Sarvam, Deploy, Inbound deployments) so a farmer we could not reach is told to it; the deployment and the calls use the same agent version.
+   Keeping the backend awake: the Worker's cron (`wrangler.jsonc`) pings `/api/health` every 10 minutes from 05:30 to 23:29 India time; it needs `BACKEND_URL` on the Worker, as for the proxy.
+   Email on Render's free plan: SMTP (Gmail) does not work there, because the free plan blocks the SMTP ports (the 'Emails after calls'
+   table then shows failed with an OSError). Use an HTTPS mail API instead: make a free Resend account, create an API key and put it in
+   `GATE0_RESEND_API_KEY`; set `GATE0_MAIL_LOGO_URL` to the logo's public address (the dashboard's `/agrythm-logo.png`). With no `GATE0_MAIL_FROM`
+   the sender is `onboarding@resend.dev`, which Resend only delivers to the account owner's own address: set `GATE0_MAIL_TEST_TO` to that
+   address while testing. To send to farmers, verify a domain in Resend and set `GATE0_MAIL_FROM`.
    Email (the message after a call): add `GATE0_SMTP_HOST`, `GATE0_SMTP_PORT` (587), `GATE0_SMTP_USER` and `GATE0_SMTP_PASSWORD` (secret),
    optionally `GATE0_MAIL_FROM` and `GATE0_MAIL_TEAM` (a team address that gets a copy). While testing, set `GATE0_MAIL_TEST_TO` to one address: every
    farmer's message goes there, with "[Test: name, ID]" in the subject, and farmers need no email of their own. Clear it to use each farmer's own email. Without `GATE0_SMTP_HOST` nothing is sent and each

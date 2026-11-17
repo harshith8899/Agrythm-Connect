@@ -36,6 +36,31 @@ const DAY_PRESETS = [
  * Interactive pure SVG Donut / Pie Chart Card with hover expansion and dynamic center stats.
  * Standardized header height and baseline for seamless horizontal alignment across all 4 cards.
  */
+// The hole of the donut is about 96 px wide: a long label is wrapped onto at most two short lines (and cut with an ellipsis)
+// so the text stays inside it when a slice is hovered.
+const wrapLabel = (text, maxChars = 13, maxLines = 2) => {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  words.forEach((word) => {
+    const w = word.length > maxChars ? `${word.slice(0, maxChars - 1)}…` : word;
+    if (!line) line = w;
+    else if (`${line} ${w}`.length <= maxChars) line = `${line} ${w}`;
+    else {
+      lines.push(line);
+      line = w;
+    }
+  });
+  if (line) lines.push(line);
+  if (lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines);
+    const last = kept[maxLines - 1];
+    kept[maxLines - 1] = `${last.slice(0, Math.max(1, maxChars - 1))}…`;
+    return kept;
+  }
+  return lines.length ? lines : [''];
+};
+
 export const SvgDonutCard = ({
   title,
   subtitle,
@@ -60,6 +85,9 @@ export const SvgDonutCard = ({
 
   // Active slice for dynamic center display
   const activeSlice = hoveredId ? slices.find((s) => s.id === hoveredId) : null;
+  const labelLines = wrapLabel(activeSlice ? activeSlice.label : centerTitle);
+  const valueText = String(activeSlice ? (isCurrency ? rupees(activeSlice.value) : activeSlice.value) : centerValue);
+  const valueSize = valueText.length > 10 ? 10 : valueText.length > 8 ? 12 : 14;   // a long number shrinks to stay inside the hole
 
   // Compute arc segments
   let currentAngle = -Math.PI / 2;
@@ -158,28 +186,26 @@ export const SvgDonutCard = ({
           {/* Dynamic Center Text */}
           <text
             x={cx}
-            y={cy - 6}
+            y={cy - 6 - (labelLines.length - 1) * 11}
             textAnchor="middle"
             fill="#64748B"
-            fontSize="10"
+            fontSize="9"
             fontWeight="600"
-            className="uppercase tracking-wider"
+            className="uppercase"
           >
-            {activeSlice ? activeSlice.label : centerTitle}
+            {labelLines.map((l, i) => (
+              <tspan key={i} x={cx} dy={i === 0 ? 0 : 11}>{l}</tspan>
+            ))}
           </text>
           <text
             x={cx}
             y={cy + 13}
             textAnchor="middle"
             fill="#0F2444"
-            fontSize="14"
+            fontSize={valueSize}
             fontWeight="800"
           >
-            {activeSlice
-              ? isCurrency
-                ? rupees(activeSlice.value)
-                : activeSlice.value
-              : centerValue}
+            {valueText}
           </text>
           {activeSlice && (
             <text
@@ -634,11 +660,7 @@ export const DonutAnalyticsGrid = ({
               key={preset.id}
               type="button"
               onClick={() => handlePresetChange(preset.id)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                dayFilter === preset.id
-                  ? 'bg-trust-navy text-white shadow-2xs'
-                  : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200/80 hover:bg-slate-50'
-              }`}
+              className={`h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap text-xs font-semibold transition-all cursor-pointer ${ dayFilter === preset.id ? 'bg-trust-navy text-white shadow-2xs' : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200/80 hover:bg-slate-50' }`}
             >
               {preset.label}
             </button>

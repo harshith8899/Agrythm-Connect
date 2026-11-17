@@ -15,6 +15,7 @@ import re
 import sqlite3
 import tempfile
 import threading
+import uuid
 from datetime import date, datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -156,6 +157,19 @@ def mask_email(email: str) -> str:
     return f"{local[:1]}***@{domain}"
 
 
+def _error_detail(exc: BaseException) -> str:
+    """What to record about an error: its type and a code, never its message (it could quote an address or a number)."""
+    safe = getattr(exc, "safe_text", "")
+    if safe:
+        return str(safe)[:200]
+    name = type(exc).__name__
+    code = getattr(exc, "smtp_code", None)
+    if isinstance(code, int):
+        return f"{name} (SMTP {code})"
+    errno = getattr(exc, "errno", None) if isinstance(exc, OSError) else None
+    return f"{name} (errno {errno})" if isinstance(errno, int) else name
+
+
 class DBFarmers:
     """FarmerSource over the imported farmers: the shape a real backend adapter would have."""
 
@@ -203,6 +217,7 @@ class DashboardService:
         self.cb_lock = threading.Lock()
         self._tick_lock = threading.Lock()
         self._manual: set[str] = set()          # farmers with a call placed by hand in progress
+        self.async_inbound = True               # farmer changes update the inbound line in the background (tests switch it off)
         self.draining = False                   # set when the host asks the process to stop: finish the calls, start no new one
 
     def _make_ports(self) -> Ports:
@@ -238,17 +253,38 @@ class DashboardService:
 
     # -- alerts for the team, and farmers who asked us to stop -------------------------------------------------------
     def _alert(self, kind: str, fid: str, text: str) -> None:
+        """A note for the team. The same note for the same farmer is not repeated within 30 minutes (a failing push or
+        mail would otherwise fill the list)."""
+        since = (self._now() - timedelta(minutes=30)).isoformat(timespec="seconds")
         with self.lock:
+            if self.db.execute("SELECT 1 FROM dash_alerts WHERE kind=? AND farmer_id=? AND text=? AND at>=?",
+                               (kind, fid, text, since)).fetchone():
+                return
             self.db.execute("INSERT INTO dash_alerts(at, kind, farmer_id, text) VALUES(?,?,?,?)",
                             (self._now().isoformat(timespec="seconds"), kind, fid, text))
             self.db.commit()
 
     def alerts(self, limit: int = 50) -> list[dict]:
         with self.lock:
-            rows = self.db.execute("SELECT a.at, a.kind, a.farmer_id, f.name, a.text FROM dash_alerts a "
+            rows = self.db.execute("SELECT a.at, a.kind, a.farmer_id, f.name, a.text, a.id FROM dash_alerts a "
                                    "LEFT JOIN dash_farmers f ON f.farmer_id=a.farmer_id ORDER BY a.id DESC LIMIT ?",
                                    (limit,)).fetchall()
-        return [{"at": r[0], "kind": r[1], "farmer_id": r[2], "farmer_name": r[3] or "", "text": r[4]} for r in rows]
+        return [{"id": r[5], "at": r[0], "kind": r[1], "farmer_id": r[2], "farmer_name": r[3] or "", "text": r[4]} for r in rows]
+
+    def dismiss_alerts(self, ids: list | None = None) -> int:
+        """Deletes the notes with these ids, or every note when ids is None. Returns how many were removed."""
+        with self.lock:
+            if ids is None:
+                n = self.db.execute("SELECT COUNT(*) FROM dash_alerts").fetchone()[0]
+                self.db.execute("DELETE FROM dash_alerts")
+            else:
+                clean = [int(i) for i in ids if str(i).lstrip("-").isdigit()]
+                n = 0
+                for i in clean:
+                    n += self.db.execute("SELECT COUNT(*) FROM dash_alerts WHERE id=?", (i,)).fetchone()[0]
+                    self.db.execute("DELETE FROM dash_alerts WHERE id=?", (i,))
+            self.db.commit()
+        return n
 
     def _is_paused(self, fid: str) -> bool:
         with self.lock:
@@ -302,6 +338,7 @@ class DashboardService:
                     f.farmer_id, f.display_name, f.phone, f.language.value, village, district, state,
                     f.latitude, f.longitude, int(f.consent), int(f.active), _clean_email(email)))
             self.db.commit()
+        self._refresh_inbound_later([f.farmer_id for f in farmers])
         return {"imported": len(farmers), "no_location": [f.farmer_id for f in farmers if not (f.latitude or f.longitude)]}
 
     _FARMER_COLS = "farmer_id,name,phone,language,village,district,state,lat,lon,consent,active,email"
@@ -382,6 +419,7 @@ class DashboardService:
                             "consent,active,email) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (
                 fid, name[:80], phone, lang.value, village, district, state, lat, lon, int(consent), int(active), email))
             self.db.commit()
+        self._refresh_inbound_later([fid])
         return next(f for f in self.farmers() if f["farmer_id"] == fid)
 
     def update_farmer(self, fid: str, data: dict) -> dict:
@@ -428,6 +466,7 @@ class DashboardService:
                             "lon=?, consent=?, active=?, email=? WHERE farmer_id=?",
                             (name[:80], phone, language, village, district, state, lat, lon, consent, active, email, fid))
             self.db.commit()
+        self._refresh_inbound_later([fid])
         return next(f for f in self.farmers() if f["farmer_id"] == fid)
 
     # -- calls in progress: shown on the call log from the moment they are triggered --------------------------------
@@ -438,6 +477,15 @@ class DashboardService:
             with self.lock:
                 self.db.execute("INSERT OR REPLACE INTO dash_live VALUES(?,?,?,?,?,?)",
                                 (fid, day.isoformat(), kind, attempt, state, self._now().isoformat(timespec="seconds")))
+                self.db.commit()
+        except Exception:
+            pass
+
+    def _live_reading(self, fid: str) -> None:
+        """The call has ended: the row stays In Call but says the agent's notes are being read. Only an existing row changes."""
+        try:
+            with self.lock:
+                self.db.execute("UPDATE dash_live SET state='reading' WHERE farmer_id=?", (fid,))
                 self.db.commit()
         except Exception:
             pass
@@ -474,6 +522,8 @@ class DashboardService:
         _, _, kind, attempt, state, _ = lv
         what = {"retry": f"attempt {attempt} of {self.settings.max_attempts}", "callback": "callback", "test": "test call",
                 "manual": "call placed by hand"}.get(kind, "today's call")
+        if state == "reading":
+            return "In Call", f"Call ended, reading what the agent recorded ({what})"
         if state == "calling":
             return "In Call", f"Calling now ({what})"
         return "In Queue", f"Waiting in the queue ({what})"
@@ -496,7 +546,7 @@ class DashboardService:
             "note": "", "retry_count": 0, "duration_seconds": 0, "attempts_used": 0, "max_attempts": self.settings.max_attempts,
             "next_attempt_at": None, "scheduled_callback_time": None, "callback_status": None, "callback_requested_text": "",
             "summary": "", "understood_weather": "", "stop_calls_requested": "", "transcript": [], "attempts_log": [],
-            "call_mode": self.dialler.mode, "attempt_id": "", "messages_sent": 0}
+            "call_mode": self.dialler.mode, "attempt_id": ""}
 
     # -- sending the day's calls ---------------------------------------------------------------------------------
     def _save(self, fid: str, day: date, **kw) -> None:
@@ -550,6 +600,7 @@ class DashboardService:
             res = ProviderCallResult(AttemptStatus.FAILED, error=type(exc).__name__)
         out: dict = {}
         if res.status is AttemptStatus.ANSWERED:
+            self._live_reading(farmer.farmer_id)                 # the log says the call ended while the agent's notes are read
             try:
                 out = self.dialler.outputs(res.provider_call_id)
             except Exception:
@@ -581,8 +632,7 @@ class DashboardService:
             self._alert("provider_failure", fid,
                         f"The call failed and will not be retried ({scrub(res.error or 'provider error')[:80]}).")
         self._message_after_call(fid, day, res, out, weather, more_to_come=planned or self._has_callback(fid, day))
-        if not out.get("callback_time") and self._not_reached(res, out):
-            self._offer_callback_in(fid, day, weather)
+        self._refresh_inbound([fid])                        # what the inbound line should say if they ring us now
 
     # -- retries: 3 attempts, 30 min then 1 hour; a farmer who asked for a callback or to stop is not retried ----------
     def _has_callback(self, fid: str, day: date) -> bool:
@@ -758,22 +808,13 @@ class DashboardService:
         if mode == "retry" and self.running:
             raise ValueError("today's send is running; try again when it finishes")
         kind, seq, attempt = "first", 1, 1
-        cb_row = None
         with self.lock:
             if fid in self._manual:
                 raise ValueError("a call to this farmer is already in progress")
-            cb_row = self.db.execute(
-                "SELECT due_at, source_date FROM dash_callbacks WHERE farmer_id=? AND status='pending' "
-                "ORDER BY due_at DESC LIMIT 1", (fid,)
-            ).fetchone()
             row = None if mode == "test" else self.db.execute(
                 "SELECT status, note, understood_weather, stop_calls_requested FROM dash_results "
                 "WHERE farmer_id=? AND call_date=?", (fid, day.isoformat())).fetchone()
-        if cb_row and mode != "test":
-            kind = "callback"
-            cb_due_at, cb_source_date = cb_row
-            attempt = 1
-        elif row:
+        if row:
             status, note, understood, stop = row
             understood = understood or ""
             if self._has_callback(fid, day):
@@ -803,13 +844,7 @@ class DashboardService:
                     return
                 with self.cb_lock:
                     ports = self._make_ports()
-                    if kind == "callback":
-                        self._cb_update(fid, cb_due_at, status="calling", note=now.isoformat(timespec="seconds"))
-                        try:
-                            self._callback_one(ports, fid, cb_due_at, date.fromisoformat(cb_source_date))
-                        except Exception as exc:
-                            self._cb_update(fid, cb_due_at, status="error", note=type(exc).__name__)
-                    elif kind == "first":
+                    if kind == "first":
                         self.ports = ports
                         self.fire_one(fid, day, "manual")
                     else:
@@ -843,10 +878,31 @@ class DashboardService:
             res, out = self._place(farmer, w)
             weather = {"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
                        "humidity": w.humidity_pct, "source": w.source}
+            asked = out.get("callback_time") if out.get("stop_calls_requested") != "yes" else ""
             self._save_test(fid, stamp, res.status.value, res.error, weather, res.provider_call_id, farmer.language.value,
                             res.duration_s or 0, out)
+            self._email_after_test(fid, res, out, weather)
+            if asked:                                       # a test call books the callback the farmer asked for, like a real one
+                self._schedule_callback(fid, self._now().date(), asked)
         finally:
             self._live_clear(fid)                           # the saved Test row replaces the In Call row
+
+    def _email_after_test(self, fid: str, res: ProviderCallResult, out: dict, weather: dict) -> None:
+        """A test call emails the test address (GATE0_MAIL_TEST_TO) as a real call would, so the email can be tried without
+        a real farmer's day: recorded under its own key, so every test call sends and none uses up the real message. With no
+        test address set a test call sends nothing, and never writes to a farmer's own address. Never raises."""
+        try:
+            if not self.mail_test_to or out.get("callback_time"):
+                return
+            if res.status is AttemptStatus.ANSWERED and out.get("understood_weather") == "yes":
+                kind = KIND_WEATHER
+            elif self._not_reached(res, out):
+                kind = KIND_MISSED
+            else:
+                return
+            self._send_message(fid, self._now().date(), kind, weather, record_kind=f"test:{kind}:{uuid.uuid4().hex[:8]}")
+        except Exception:
+            pass
 
     def _save_test(self, fid, stamp, status, note, weather, attempt_id, language, duration, out) -> None:
         transcript = [{"speaker": m["speaker"], "text": scrub(m["text"])} for m in out.pop("transcript", None) or []]
@@ -866,11 +922,17 @@ class DashboardService:
                 "t.call_summary, t.callback_time, t.understood_weather, t.stop_calls_requested, t.transcript, "
                 "f.name, f.phone, f.village, f.district FROM dash_tests t LEFT JOIN dash_farmers f ON f.farmer_id=t.farmer_id "
                 "ORDER BY t.id DESC LIMIT 200").fetchall()
-        label = {"answered": "Answered", "no_answer": "No Answer or Rejected", "busy": "Busy", "failed": "Failed"}
+            booked_cbs = {(f, s): d for f, s, d in self.db.execute(
+                "SELECT farmer_id, source_date, due_at FROM dash_callbacks WHERE status<>'skipped'").fetchall()}
+        label ={"answered": "Answered", "no_answer": "No Answer or Rejected", "busy": "Busy", "failed": "Failed"}
         out = []
         for (tid, fid, at, status, note, weather, attempt_id, lang, dur, summary, cb, understood, stop, transcript,
              name, phone, village, district) in rows:
-            dash_status, disposition = self._status_for(status, understood or "", False, False)
+            dash_status, disposition = self._status_for(status, understood or "", False, False, None, bool((cb or "").strip()))
+            if dash_status == "Callback Requested":
+                booked = booked_cbs.get((fid, at[:10]))
+                disposition = (f"Callback requested for {cb} (booked for {datetime.fromisoformat(booked).strftime('%d %b, %I:%M %p')})"
+                               if booked else f"Callback requested for {cb} (not booked: time not understood or outside hours)")
             if status == "skipped":
                 disposition = (note or "skipped").replace("_", " ").title()
             w = json.loads(weather) if weather else {}
@@ -889,7 +951,7 @@ class DashboardService:
                 "transcript": json.loads(transcript) if transcript else [],
                 "attempts_log": [{"attempt_number": 1, "status": label.get(status, status), "duration_seconds": dur or 0,
                                   "error_message": scrub(note or "")}] if status != "skipped" else [],
-                "call_mode": self.dialler.mode, "attempt_id": attempt_id or "", "messages_sent": 0})
+                "call_mode": self.dialler.mode, "attempt_id": attempt_id or ""})
         return out
 
     # -- callbacks: one more call at the time the farmer asked for, never retried ---------------------------------
@@ -934,8 +996,7 @@ class DashboardService:
                 if datetime.fromisoformat(due_at) < now - timedelta(minutes=GRACE_MINUTES):
                     self._cb_update(fid, due_at, status="missed",
                                     note=f"not placed within {GRACE_MINUTES} min of the requested time")
-                    self._offer_callback_in(fid, datetime.fromisoformat(due_at).date(), self._saved_weather(fid, source_date),
-                                            callback_time=datetime.fromisoformat(due_at).strftime("%H:%M"))
+                    self._refresh_inbound([fid])
                     self._send_message(fid, datetime.fromisoformat(due_at).date(), KIND_CALLBACK_MISSED,
                                        self._saved_weather(fid, source_date),
                                        callback_time=datetime.fromisoformat(due_at).strftime("%H:%M"))
@@ -966,6 +1027,7 @@ class DashboardService:
             res = ProviderCallResult(AttemptStatus.FAILED, error=type(exc).__name__)
         out: dict = {}
         if res.status is AttemptStatus.ANSWERED:
+            self._live_reading(fid)
             try:
                 out = self.dialler.outputs(res.provider_call_id)
             except Exception:
@@ -993,14 +1055,6 @@ class DashboardService:
                 continue
         self._cb_update(fid, due_at, status=res.status.value, note=res.error, attempt_id=res.provider_call_id,
                         call_summary=out.get("call_summary", ""), understood_weather=out.get("understood_weather", ""))
-        # Also update dash_results so the call record updates to Completed / Callback Done
-        transcript = [{"speaker": m["speaker"], "text": scrub(m["text"])} for m in out.get("transcript", []) or []]
-        lang_val = farmer.language.value if hasattr(farmer.language, "value") else str(farmer.language)
-        self._save(fid, source_day, status=res.status.value, note=res.error or "Callback placed",
-                   attempt_id=res.provider_call_id, mode=self.dialler.mode, language=lang_val,
-                   duration_s=res.duration_s, understood_weather=out.get("understood_weather", "yes"),
-                   call_summary=out.get("call_summary", "Callback completed successfully."),
-                   transcript=json.dumps(transcript) if transcript else "")
         if out.get("stop_calls_requested") == "yes":
             self._note_stop(fid, due_day)
         elif out.get("callback_time"):                      # asked to be called later again: allowed twice at most
@@ -1012,9 +1066,7 @@ class DashboardService:
             else:
                 self._alert("callback_limit", fid,
                             f"Asked to move the callback again after {MAX_RESCHEDULES} reschedules; no more callbacks.")
-        if not out.get("callback_time") and self._not_reached(res, out):
-            self._offer_callback_in(fid, due_day, weather or self._saved_weather(fid, source_day.isoformat()),
-                                    callback_time=datetime.fromisoformat(due_at).strftime("%H:%M"))
+        self._refresh_inbound([fid])
         # a callback is never retried: the message follows it (the weather if understood, 'we tried to reach you' if not)
         self._message_after_call(fid, due_day, res, out, weather or self._saved_weather(fid, source_day.isoformat()),
                                  more_to_come=bool(out.get("callback_time")) and out.get("stop_calls_requested") != "yes",
@@ -1027,27 +1079,6 @@ class DashboardService:
                                    "LEFT JOIN dash_farmers f ON f.farmer_id=c.farmer_id ORDER BY c.due_at DESC").fetchall()
         keys = ("farmer_id", "farmer_name", "due_at", "status", "note", "summary", "understood", "asked")
         return [dict(zip(keys, r)) for r in rows]
-
-    def schedule_manual_callback(self, fid: str, text: str = "in 2 hours") -> dict:
-        now = self._now()
-        day = now.date()
-        due = parse_callback(text, now) or (now + timedelta(hours=2))
-        with self.lock:
-            self.db.execute(
-                "INSERT OR REPLACE INTO dash_callbacks(farmer_id, due_at, source_date, status, note, attempt_id, "
-                "call_summary, understood_weather, requested_text, updated_at, reschedules) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (fid, due.isoformat(timespec="seconds"), day.isoformat(), "pending", "Scheduled callback",
-                 "", "", "", text, now.isoformat(timespec="seconds"), 0)
-            )
-            row = self.db.execute("SELECT status FROM dash_results WHERE farmer_id=? AND call_date=?", (fid, day.isoformat())).fetchone()
-            if row:
-                self.db.execute("UPDATE dash_results SET callback_time=?, status='answered', understood_weather='' WHERE farmer_id=? AND call_date=?",
-                                (text, fid, day.isoformat()))
-            else:
-                self._save(fid, day, status="answered", note="Callback requested", callback_time=text, understood_weather="")
-            self.db.commit()
-        return {"scheduled": True, "farmer_id": fid, "due_at": due.isoformat(timespec="seconds")}
 
     # -- the background timer: callbacks when due, and the daily send when switched on ------------------------------
     def tick(self) -> bool:
@@ -1139,7 +1170,7 @@ class DashboardService:
                 recovered += 1
         return recovered
 
-    # -- a farmer who rings back: the inbound line is told who they are, and their call is brought in as a result ---------
+    # -- farmers who ring the number: only registered farmers are known to the inbound line --------------------------------
     @staticmethod
     def _not_reached(res: ProviderCallResult, out: dict) -> bool:
         """True when the call ended without the farmer being served and nothing else (a callback, a stop, a decline)
@@ -1151,119 +1182,201 @@ class DashboardService:
                 or (res.status is AttemptStatus.ANSWERED and understood in ("no", "unclear", "no_response"))
                 or (res.status is AttemptStatus.FAILED and res.error == NETWORK_DROP))
 
-    def _offer_callback_in(self, fid: str, day: date, weather: dict, callback_time: str = "") -> None:
-        """Tells the inbound line that this farmer could not be reached today, with their weather, so that if they call
-        the number back the agent greets them by name, says we tried to reach them and offers the weather again. Once per
-        farmer and day (again when the missed call was one they had asked for). Never raises."""
+    def _inbound_ready(self) -> bool:
+        return bool(getattr(self.dialler, "inbound_ready", False))
+
+    def _caller_state(self, fid: str, day: date) -> tuple[str, str]:
+        """What the inbound line should know about a farmer who rings today: (state, a sentence for the agent).
+        unregistered (no consent or inactive: treated as an unknown number), stopped, callback HH:MM (waiting for the
+        call they asked for), completed, declined, callback_missed HH:MM, missed (called today, not completed), not_called."""
+        d = day.isoformat()
+        with self.lock:
+            f = self.db.execute("SELECT consent, active FROM dash_farmers WHERE farmer_id=?", (fid,)).fetchone()
+            res = self.db.execute("SELECT understood_weather, stop_calls_requested FROM dash_results WHERE farmer_id=? "
+                                  "AND call_date=?", (fid, d)).fetchone()
+            cbs = self.db.execute("SELECT due_at, status, understood_weather FROM dash_callbacks WHERE farmer_id=? "
+                                  "AND (source_date=? OR substr(due_at,1,10)=?) ORDER BY due_at", (fid, d, d)).fetchall()
+            retry = self.db.execute("SELECT 1 FROM dash_retries WHERE farmer_id=? AND call_date=? AND status='pending'",
+                                    (fid, d)).fetchone()
+        if not f or not f[0] or not f[1]:
+            return "unregistered", ""
+        if self._is_paused(fid) or (res and res[1] == "yes"):
+            return "stopped", "The farmer asked us to stop the calls."
+        understood = (res[0] or "") if res else ""
+        hhmm = lambda due: datetime.fromisoformat(due).strftime("%H:%M")      # noqa: E731
+        pending = [c for c in cbs if c[1] == "pending"]
+        if understood == "yes" or any((c[2] or "") == "yes" for c in cbs):
+            return "completed", "We already gave this farmer today's weather and they said they understood it."
+        if pending:
+            t = hhmm(pending[0][0])
+            return f"callback {t}", (f"The farmer asked us to call back at {t} (24-hour time) and is calling before that; "
+                                     "we will still call at that time.")
+        if understood == "declined":
+            return "declined", "The farmer told us they do not need today's weather."
+        gone = [c for c in cbs if c[1] in ("missed", "no_answer", "busy", "failed")]
+        if gone:
+            t = hhmm(gone[-1][0])
+            return f"callback_missed {t}", (f"The farmer had asked us to call back at {t} (24-hour time). We called at that "
+                                            "time and could not reach them, and we will not call again today.")
+        if res or retry:
+            return "missed", "We called this farmer today to give the weather and could not reach them."
+        return "not_called", "We have not called this farmer yet today; they are calling us first."
+
+    def _refresh_inbound(self, fids: list[str] | None = None, force: bool = False, ports: Ports | None = None) -> int:
+        """Tells the inbound line which numbers may ring and what happened today for each: every registered farmer (consent
+        and active) with their name, place, weather and a sentence about today; a farmer who is no longer registered is sent
+        with a blank name, so the agent treats the number as unknown. Only farmers whose state changed are sent, unless
+        force (the daily full list). Returns how many were sent. Never raises."""
         try:
-            if not getattr(self.dialler, "inbound_ready", False) or not has_full_weather(weather or {}):
-                return
-            context = f"callback {callback_time}" if callback_time else "missed"
+            if not self._inbound_ready():
+                return 0
+            day = self._now().date()
             with self.lock:
-                r = self.db.execute("SELECT name,phone,language,village,district,consent,active FROM dash_farmers "
-                                    "WHERE farmer_id=?", (fid,)).fetchone()
-                prev = self.db.execute("SELECT context FROM dash_inbound WHERE farmer_id=? AND call_date=?",
-                                       (fid, day.isoformat())).fetchone()
-            if not r or not r[5] or not r[6] or not r[1] or self._is_paused(fid):
-                return
-            if prev and (not callback_time or prev[0] == context):
-                return
-            now = self._now().isoformat(timespec="seconds")
-            with self.lock:
-                self.db.execute("INSERT OR REPLACE INTO dash_inbound VALUES(?,?,?,?,?,?)",
-                                (fid, day.isoformat(), context, "waiting", "", now))
-                self.db.commit()
-            if callback_time:
-                why = (f"The farmer had asked us to call back at {callback_time} (24-hour time). We called at that time "
-                       "and could not reach them, and we will not call again today.")
-            else:
-                why = "We called this farmer today to give the weather and could not reach them."
-            variables = {"farmer_name": r[0], "place_name": r[3] or r[4], "temp_min_c": str(weather["temp_min"]),
-                         "temp_max_c": str(weather["temp_max"]), "wind_kmh": str(weather["wind"]),
-                         "rain_chance_pct": str(weather["rain"]), "humidity_pct": str(weather["humidity"]),
-                         "callback_context": why + " They are now calling us back."}
+                ids = fids if fids is not None else [r[0] for r in self.db.execute("SELECT farmer_id FROM dash_farmers ORDER BY farmer_id")]
+            entries: list[dict] = []
+            for fid in ids:
+                state, text = self._caller_state(fid, day)
+                with self.lock:
+                    prev = self.db.execute("SELECT context, status FROM dash_inbound WHERE farmer_id=? AND call_date=?",
+                                           (fid, day.isoformat())).fetchone()
+                    r = self.db.execute("SELECT name,phone,language,village,district,lat,lon FROM dash_farmers WHERE farmer_id=?",
+                                        (fid,)).fetchone()
+                if not r or not r[1] or (prev and prev[0] == state and prev[1] != "failed" and not force):
+                    continue
+                blank = {"farmer_name": "", "place_name": "", "temp_min_c": "", "temp_max_c": "", "wind_kmh": "",
+                         "rain_chance_pct": "", "humidity_pct": "", "callback_context": ""}
+                variables = dict(blank)
+                if state not in ("unregistered", "stopped"):
+                    weather = self._saved_weather(fid, day.isoformat())
+                    if not has_full_weather(weather):
+                        try:
+                            ports = ports or self._make_ports()
+                            w = ports.weather.get_weather(r[3] or r[4], r[5], r[6], day)
+                        except Exception:
+                            w = None
+                        weather = ({"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh,
+                                    "rain": w.rain_chance_pct, "humidity": w.humidity_pct} if w is not None else {})
+                    variables.update({"farmer_name": r[0], "place_name": r[3] or r[4],
+                                      "temp_min_c": str(weather.get("temp_min", "")), "temp_max_c": str(weather.get("temp_max", "")),
+                                      "wind_kmh": str(weather.get("wind", "")), "rain_chance_pct": str(weather.get("rain", "")),
+                                      "humidity_pct": str(weather.get("humidity", "")), "callback_context": text + " They are now calling us."})
+                elif state == "stopped":
+                    variables.update({"farmer_name": r[0], "callback_context": text + " They are now calling us."})
+                entries.append({"fid": fid, "state": state, "phone": r[1], "language_name": _LANG_NAMES[Language(r[2])],
+                                "variables": variables})
+            if not entries:
+                return 0
             status, note = "waiting", ""
             try:
-                self.dialler.push_inbound(r[1], fid, _LANG_NAMES[Language(r[2])], variables,
-                                          f"back-{day.isoformat()}-{fid}"[:50])
-            except Exception as exc:                        # type only: an error text could quote the number
-                status, note = "failed", type(exc).__name__
-                self._alert("inbound_push_failed", fid, f"The call-back line could not be told about this farmer ({type(exc).__name__}).")
+                self.dialler.push_inbound_many(entries, f"roster-{self._now():%Y%m%d-%H%M%S}")
+            except Exception as exc:                        # type only: an error text could quote a number
+                status, note = "failed", _error_detail(exc)
+                self._alert("inbound_push_failed", "", f"The call-back line could not be updated ({note}).")
+            now = self._now().isoformat(timespec="seconds")
             with self.lock:
-                self.db.execute("UPDATE dash_inbound SET status=?, note=? WHERE farmer_id=? AND call_date=?",
-                                (status, note, fid, day.isoformat()))
+                for e in entries:
+                    self.db.execute("INSERT OR REPLACE INTO dash_inbound VALUES(?,?,?,?,?,?)",
+                                    (e["fid"], day.isoformat(), e["state"], status, note, now))
                 self.db.commit()
+            return len(entries)
         except Exception:
-            pass
+            return 0
+
+    def _refresh_inbound_later(self, fids: list[str] | None = None) -> None:
+        """The same, off the request that changed a farmer (it may need weather lookups)."""
+        if not self._inbound_ready():
+            return
+        if self.async_inbound:
+            threading.Thread(target=self._refresh_inbound, args=(fids,), daemon=True).start()
+        else:
+            self._refresh_inbound(fids)
+
+    def _daily_inbound_roster(self) -> None:
+        """Once a day, the full list again (the day's states start fresh)."""
+        today = self._now().date().isoformat()
+        if self._inbound_ready() and self._get_setting("inbound_roster_date") != today:
+            self._refresh_inbound(force=True)
+            self._set_setting("inbound_roster_date", today)
 
     def sync_inbound(self, now: datetime | None = None) -> int:
-        """Brings in the calls farmers made back to the inbound line: each becomes that farmer's result, and a farmer who
-        was served (understood the weather, declined, asked to stop or for another time) has their waiting retries and
-        callbacks dropped, so nobody is rung again right after calling us. Run at the start of every pass, before any
-        retry or callback is placed. Returns how many calls were brought in."""
+        """Brings in the calls farmers made to the inbound line: each becomes that farmer's result (the weather email
+        follows), and a farmer who was served (understood the weather, declined, asked to stop or for another time) has
+        their waiting retries dropped, and a pending callback too if they understood, so nobody is rung right after
+        calling us. One look at Sarvam's call records per pass, matched to farmers by the last 4 digits of the number
+        (a number two farmers share is left alone); a call from a number that is not a farmer is ignored. Run at the
+        start of every pass, before any retry or callback is placed. Returns how many calls were brought in."""
         now = now or self._now()
-        if not getattr(self.dialler, "inbound_ready", False):
+        if not self._inbound_ready():
             return 0
         brought = 0
         try:
+            day = now.date()
             with self.lock:
-                self.db.execute("UPDATE dash_inbound SET status='expired' WHERE status='waiting' AND call_date<?",
-                                (now.date().isoformat(),))
+                self.db.execute("UPDATE dash_inbound SET status='expired' WHERE status='waiting' AND call_date<?", (day.isoformat(),))
                 self.db.commit()
-                rows = self.db.execute("SELECT farmer_id, call_date, pushed_at FROM dash_inbound WHERE status='waiting' "
-                                       "AND call_date=?", (now.date().isoformat(),)).fetchall()
+                rows = self.db.execute("SELECT farmer_id, context FROM dash_inbound WHERE status='waiting' AND call_date=? "
+                                       "AND context NOT IN ('unregistered','stopped')", (day.isoformat(),)).fetchall()
+                known = {r[0] for r in self.db.execute("SELECT provider_call_id FROM attempts WHERE call_date=?",
+                                                       (day.isoformat(),)).fetchall()}
             if not rows:
                 return 0
             ports = self._make_ports()
-            for fid, day_s, pushed_at in rows:
+            by_last4: dict[str, list[tuple[str, str]]] = {}
+            for fid, context in rows:
+                farmer = ports.farmers.get_context(fid)
+                if farmer is not None and farmer.phone:
+                    by_last4.setdefault(re.sub(r"\D", "", farmer.phone)[-4:], []).append((fid, context))
+            start = datetime.combine(day, dtime(0, 0), IST)
+            for last4, res, ended in self.dialler.find_inbound_calls(start, now, known):
+                who = by_last4.get(last4, [])
+                if len(who) != 1:                           # not a farmer we told the line about, or the number is shared
+                    continue
                 try:
-                    brought += self._sync_one_inbound(ports, fid, date.fromisoformat(day_s), datetime.fromisoformat(pushed_at), now)
+                    brought += self._apply_inbound_call(ports, who[0][0], who[0][1], day, res, ended)
                 except Exception:                           # one farmer's problem never blocks the others
                     continue
+                known.add(res.provider_call_id)
         except Exception:
             pass
         return brought
 
-    def _sync_one_inbound(self, ports: Ports, fid: str, day: date, pushed_at: datetime, now: datetime) -> int:
+    def _apply_inbound_call(self, ports: Ports, fid: str, context: str, day: date, res: ProviderCallResult,
+                            ended: datetime) -> int:
         farmer = ports.farmers.get_context(fid)
-        if farmer is None or not farmer.phone:
+        if farmer is None:
             return 0
-        with self.lock:
-            known = {r[0] for r in self.db.execute("SELECT provider_call_id FROM attempts WHERE farmer_id=? AND call_date=?",
-                                                   (fid, day.isoformat())).fetchall()}
-        found = self.dialler.find_inbound(farmer.phone, pushed_at, now, known)
-        if not found:
-            return 0
-        res, ended = found
         out = self._outputs(res)
         weather = self._saved_weather(fid, day.isoformat())
         for n in range(1, 10):                              # a free attempt number for that day
             try:
                 ports.ledger.record_attempt(CallAttempt(
                     farmer_id=fid, call_date=day, attempt_no=n, status=res.status, language=farmer.language,
-                    message_text="(farmer called back)", provider_call_id=res.provider_call_id, duration_s=res.duration_s,
+                    message_text="(farmer called)", provider_call_id=res.provider_call_id, duration_s=res.duration_s,
                     error=res.error, weather_source=weather.get("source", "")))
                 break
             except IntegrityError:
                 ports.ledger.db.rollback()
         else:
             return 0
-        ports.ledger.db.execute("UPDATE day_results SET result=? WHERE farmer_id=? AND call_date=?",
-                                (final_result(res.status).value, fid, day.isoformat()))
+        if context == "completed":                          # asked for the weather again: the day's result stays as it is
+            return 1
+        cur = ports.ledger.db.execute("UPDATE day_results SET result=? WHERE farmer_id=? AND call_date=?",
+                                      (final_result(res.status).value, fid, day.isoformat()))
+        if cur.rowcount == 0:                               # rang before today's own call: this is the day's call
+            ports.ledger.record_day_result(FarmerDayResult(fid, day, final_result(res.status), n))
         ports.ledger.db.commit()
         understood = out.get("understood_weather", "")
         self._store_outcome(fid, day, farmer, None, n, res, out, at=ended, weather=weather)
         served = understood in ("yes", "declined") or out.get("stop_calls_requested") == "yes" or bool(out.get("callback_time"))
-        with self.lock:
-            if served:                                      # nobody is rung again right after calling us
+        if served:                                          # nobody is rung again right after calling us
+            with self.lock:
                 self.db.execute("UPDATE dash_retries SET status='dropped', note='farmer called back' WHERE farmer_id=? "
                                 "AND call_date=? AND status='pending'", (fid, day.isoformat()))
                 if understood == "yes":
                     self.db.execute("UPDATE dash_callbacks SET status='skipped', note='farmer called back first' "
                                     "WHERE farmer_id=? AND status='pending'", (fid,))
-                self.db.execute("UPDATE dash_inbound SET status='called_back', note=? WHERE farmer_id=? AND call_date=?",
-                                (understood or "answered", fid, day.isoformat()))
-            self.db.commit()
+                self.db.commit()
+        self._refresh_inbound([fid])                        # what they should hear if they ring again today
         return 1
 
     def inbound(self, limit: int = 100) -> list[dict]:
@@ -1297,62 +1410,79 @@ class DashboardService:
         except Exception:                                   # a message problem never disturbs the call results
             pass
 
-    def _send_message(self, fid: str, day: date, kind: str, weather: dict | None = None, callback_time: str = "") -> str:
-        """Emails or sends advisory SMS to the farmer, once per farmer, day and kind. Never raises. Returns what happened, for the tests and the log."""
+    def _send_message(self, fid: str, day: date, kind: str, weather: dict | None = None, callback_time: str = "",
+                      record_kind: str = "") -> str:
+        """Emails the farmer, once per farmer, day and kind. Never raises. Returns what happened, for the tests and the log."""
         try:
             with self.lock:
-                r = self.db.execute("SELECT name,language,village,district,email,consent,active,phone FROM dash_farmers "
+                r = self.db.execute("SELECT name,language,village,district,email,consent,active FROM dash_farmers "
                                     "WHERE farmer_id=?", (fid,)).fetchone()
             if not r or not r[5] or not r[6] or self._is_paused(fid):
                 return "not sent: farmer not callable"
+            rk = record_kind or kind                       # the key a message is recorded under (a test call has its own)
+            if rk.startswith("test:") and not self.mail_test_to:
+                return "not sent: a test call only emails the test address"
             name, village, district, email = r[0], r[2], r[3], r[4] or ""
-            phone = r[7] if len(r) > 7 and r[7] else ""
             weather = weather or self._saved_weather(fid, day.isoformat())
             now = self._now().isoformat(timespec="seconds")
-            channel = "sms" if not (email or self.mail_test_to) else "email"
             with self.lock:                                 # claim first: the primary key stops a second message
                 claimed = self.db.execute("INSERT OR IGNORE INTO dash_messages VALUES(?,?,?,?,?,?,?)",
-                                          (fid, day.isoformat(), kind, channel, "sending", "", now)).rowcount
+                                          (fid, day.isoformat(), rk, "email", "sending", "", now)).rowcount
                 self.db.commit()
             if claimed != 1:
                 return "not sent: already sent"
             status, note = "sent", ""
             test_to = self.mail_test_to
-            if email or test_to:
+            if not (email or test_to):
+                status, note = "skipped", "no email address for this farmer"
+            elif not has_full_weather(weather):
+                status, note = "skipped", "weather facts missing"
+            else:
                 subject, body, html = build_email(name, village or district, weather, kind, callback_time)
                 if test_to:
                     subject = f"[Test: {name}, {fid}] {subject}"
                 try:
                     self.mailer.send(test_to or email, subject, body, html)
-                    status, note, channel = "sent", f"Sent email to {test_to or email}", "email"
                 except MailNotConfigured:
-                    if phone:
-                        status, note, channel = "sent", f"Sent advisory SMS to {mask_phone(phone)}", "sms"
-                    else:
-                        status, note, channel = "skipped", "email is not set up (no SMTP settings)", "email"
+                    status, note = "skipped", "email is not set up (no SMTP settings)"
                 except Exception as exc:                    # type only: an error text could quote the address
-                    if phone:
-                        status, note, channel = "sent", f"Sent advisory SMS to {mask_phone(phone)}", "sms"
-                    else:
-                        status, note, channel = "failed", type(exc).__name__, "email"
-                        self._alert("message_failed", fid, f"The {kind} email could not be sent ({type(exc).__name__}).")
-            elif phone:
-                status, note, channel = "sent", f"Sent advisory SMS to {mask_phone(phone)}", "sms"
-            else:
-                status, note, channel = "skipped", "no phone or email for this farmer", "sms"
-
+                    status, note = "failed", _error_detail(exc)
+                    self._alert("message_failed", fid, f"The {kind} email could not be sent ({note}).")
             with self.lock:
-                self.db.execute("UPDATE dash_messages SET status=?, note=?, at=?, channel=? WHERE farmer_id=? AND call_date=? AND kind=?",
-                                (status, note, self._now().isoformat(timespec="seconds"), channel, fid, day.isoformat(), kind))
+                self.db.execute("UPDATE dash_messages SET status=?, note=?, at=? WHERE farmer_id=? AND call_date=? AND kind=?",
+                                (status, note, self._now().isoformat(timespec="seconds"), fid, day.isoformat(), rk))
                 self.db.commit()
             return status
         except Exception as exc:
             return f"error: {type(exc).__name__}"
 
-    def manual_send_message(self, fid: str, kind: str = "weather") -> str:
-        """Manually dispatches an advisory message to a farmer and updates telemetry."""
-        day = self._now().date()
-        return self._send_message(fid, day, kind)
+    def mail_status(self) -> dict:
+        """How email is set up, for System Status (never the key, never a full address)."""
+        label = getattr(self.mailer, "label", "not configured")
+        return {"provider": label, "live": bool(getattr(self.mailer, "live", False)),
+                "test_to": mask_email(self.mail_test_to), "test_mode": bool(self.mail_test_to)}
+
+    def send_test_email(self) -> dict:
+        """Sends a sample weather email to the test address (GATE0_MAIL_TEST_TO) right now and says what happened, so the
+        mail setup can be checked without making a call. Recorded in the Emails table as '(setup test)'."""
+        if not self.mail_test_to:
+            return {"status": "skipped", "note": "GATE0_MAIL_TEST_TO is not set, so there is nowhere to send a test"}
+        subject, body, html = build_email("Test", "your village", {"temp_min": 21, "temp_max": 32, "wind": 14, "rain": 30, "humidity": 65},
+                                          KIND_WEATHER)
+        status, note = "sent", ""
+        try:
+            self.mailer.send(self.mail_test_to, f"[Setup test] {subject}", body, html)
+        except MailNotConfigured:
+            status, note = "skipped", "email is not set up (no GATE0_RESEND_API_KEY and no GATE0_SMTP_HOST on the server)"
+        except Exception as exc:                            # type and code only: a message could quote the address
+            status, note = "failed", _error_detail(exc)
+        now = self._now()
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO dash_messages VALUES(?,?,?,?,?,?,?)",
+                            ("(setup test)", now.date().isoformat(), f"test:setup:{uuid.uuid4().hex[:8]}", "email", status, note,
+                             now.isoformat(timespec="seconds")))
+            self.db.commit()
+        return {"status": status, "note": note}
 
     def messages(self, limit: int = 100) -> list[dict]:
         with self.lock:
@@ -1388,6 +1518,7 @@ class DashboardService:
             return
         self.recover_interrupted()
         self.recover_live()
+        self._daily_inbound_roster()
         self.sync_inbound()
         self.run_due_callbacks()
         self.run_due_retries()
@@ -1543,10 +1674,13 @@ class DashboardService:
 
     @staticmethod
     def _status_for(status: str, understood: str, has_callback: bool, retry_pending: bool = False,
-                    callback_status: str | None = None) -> tuple[str, str]:
-        """The dashboard's status and disposition for one stored result."""
+                    callback_status: str | None = None, asked_for_callback: bool = False) -> tuple[str, str]:
+        """The dashboard's status and disposition for one stored result. asked_for_callback: the agent recorded a time the
+        farmer asked to be called back, whether or not a call could be booked for it (a test call books none)."""
         if retry_pending and not has_callback:
             return "Retrying", "Retry scheduled"
+        if status == "answered" and asked_for_callback and not has_callback:
+            return "Callback Requested", "Callback requested (not booked)"
         if status == "answered":
             if has_callback:
                 if callback_status in ("missed", "skipped"):          # the requested time passed and nobody was called
@@ -1579,10 +1713,10 @@ class DashboardService:
             cbs = self.db.execute("SELECT farmer_id, source_date, due_at, status FROM dash_callbacks").fetchall()
             rts = self.db.execute("SELECT farmer_id, call_date, due_at FROM dash_retries "
                                   "WHERE status IN ('pending','calling')").fetchall()
-            msg_rows = self.db.execute("SELECT farmer_id, call_date, COUNT(*) FROM dash_messages "
-                                       "WHERE status='sent' GROUP BY farmer_id, call_date").fetchall()
+            sms_rows = self.db.execute("SELECT farmer_id, call_date, COUNT(*) FROM dash_messages WHERE status='sent' "
+                                       "AND channel='sms' GROUP BY farmer_id, call_date").fetchall()
         retry_due = {(fid, day): due for fid, day, due in rts}
-        msg_counts = {(fid, day): count for fid, day, count in msg_rows}
+        sms_sent = {(fid, day): n for fid, day, n in sms_rows}        # SMS cost money; email does not, so only SMS is counted
         all_attempts = self._all_attempts()
         by_day: dict[tuple[str, str], tuple[str, str]] = {}
         for fid, src, due, st in cbs:
@@ -1593,7 +1727,9 @@ class DashboardService:
             cb = by_day.get((fid, day))
             retry_at = retry_due.get((fid, day))
             dash_status, disposition = self._status_for(status, understood or "", cb is not None, retry_at is not None,
-                                                        cb[1] if cb else None)
+                                                        cb[1] if cb else None, bool((cb_text or "").strip()))
+            if dash_status == "Callback Requested":
+                disposition = f"Callback requested for {cb_text} (not booked: time not understood)"
             attempts = all_attempts.get((fid, day), [])
             if status == "skipped":
                 disposition = (note or "skipped").replace("_", " ").title()
@@ -1616,8 +1752,7 @@ class DashboardService:
                 "callback_status": cb[1] if cb else None, "callback_requested_text": cb_text or "",
                 "summary": summary or "", "understood_weather": understood or "", "stop_calls_requested": stop or "",
                 "transcript": json.loads(transcript) if transcript else [], "attempts_log": attempts,
-                "call_mode": mode or "", "attempt_id": attempt_id or "",
-                "messages_sent": msg_counts.get((fid, day), 0)})
+                "call_mode": mode or "", "attempt_id": attempt_id or "", "messages_sent": sms_sent.get((fid, day), 0)})
         out += self._test_rows()
         live = {lv[0]: lv for lv in self._live_rows()}
         shown = set()

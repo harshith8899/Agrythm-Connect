@@ -325,11 +325,7 @@ export const InteractiveUsageChart = ({
               setChartView('breakdown');
               setHoveredIdx(null);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-              chartView === 'breakdown'
-                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all cursor-pointer ${ chartView === 'breakdown' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
           >
             <PieChart className="w-3.5 h-3.5 text-trust-green" />
             Breakdown
@@ -340,11 +336,7 @@ export const InteractiveUsageChart = ({
               setChartView('realtime');
               setHoveredIdx(null);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-              chartView === 'realtime'
-                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all cursor-pointer ${ chartView === 'realtime' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
           >
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -358,11 +350,7 @@ export const InteractiveUsageChart = ({
               setChartView('daily');
               setHoveredIdx(null);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-              chartView === 'daily'
-                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all cursor-pointer ${ chartView === 'daily' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
           >
             <BarChart3 className="w-3.5 h-3.5 text-slate-600" />
             Daily Trends
@@ -373,11 +361,7 @@ export const InteractiveUsageChart = ({
               setChartView('table');
               setHoveredIdx(null);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-              chartView === 'table'
-                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all cursor-pointer ${ chartView === 'table' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
           >
             <Table className="w-3.5 h-3.5" />
             Daily Table
@@ -1042,7 +1026,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
         <button
           onClick={() => load(true)}
           disabled={loading || !isBackendOnline}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+          className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           <span>Refresh</span>
@@ -1093,7 +1077,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
             <button
               onClick={handleSaveBalance}
               disabled={balanceInput === ''}
-              className="px-3 py-1 rounded-lg bg-trust-navy text-white font-semibold hover:bg-slate-800 transition-colors cursor-pointer text-xs disabled:opacity-50"
+              className="h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap bg-trust-navy text-white font-semibold hover:bg-slate-800 transition-colors cursor-pointer text-xs disabled:opacity-50"
             >
               Save balance
             </button>
@@ -1303,7 +1287,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
 
                 <button
                   onClick={handleSaveRate}
-                  className="px-2.5 py-1 rounded-lg bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer"
                 >
                   Save
                 </button>
