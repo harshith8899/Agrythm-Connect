@@ -22,6 +22,11 @@ from .mock import MockTelephony
 from .sarvam_agent import BASE, SarvamAgentTelephony, _result_from, to_e164
 from .sarvam_campaign import scrub
 
+def _strip_quoted(text: str) -> str:
+    """Quoted values in an error message could be a farmer's details: they are replaced."""
+    return re.sub(r"""(['"]).*?\1""", "'...'", text or "")
+
+
 class SarvamHTTPError(RuntimeError):
     """Sarvam answered a cohort push with an error. safe_text is the HTTP code and Sarvam's error code, never its message
     (a message can quote a phone number)."""
@@ -78,19 +83,34 @@ class SarvamDialler(SarvamAgentTelephony):
         if not self.inbound_ready:
             raise RuntimeError("SARVAM_INBOUND_DEPLOYMENT_ID is not set")
         url = f"{BASE}/scheduling/v1/orgs/{self.org}/workspaces/{self.ws}/deployments/{self.inbound_deployment}/cohorts/stream"
+        users, seen = [], set()
+        for e in entries:
+            try:
+                phone = to_e164(e["phone"])
+            except ValueError:                              # a number that cannot be dialled is left out, not the whole list
+                continue
+            if phone in seen:                               # two farmers on one number: the line can know only one of them
+                continue
+            seen.add(phone)
+            users.append({"user_phone_number": phone, "user_identifier": e["fid"],
+                          "app_variables": {k: v for k, v in e["variables"].items() if v != ""},     # no blank values
+                          "app_overrides": {"initial_language_name": e["language_name"]}})
         ids = []
-        for i in range(0, len(entries), 1000):
-            users = [{"user_phone_number": to_e164(e["phone"]), "user_identifier": e["fid"], "app_variables": e["variables"],
-                      "app_overrides": {"initial_language_name": e["language_name"]}} for e in entries[i:i + 1000]]
+        for i in range(0, len(users), 1000):
             name = cohort_name if i == 0 else f"{cohort_name}-{i // 1000 + 1}"
             try:
-                ids.append(str(self._request(url, {"name": name[:50], "users": users}).get("cohort_id", "")))
+                ids.append(str(self._request(url, {"name": name[:50], "users": users[i:i + 1000]}).get("cohort_id", "")))
             except urllib.error.HTTPError as exc:
+                code, message = "", ""
                 try:
-                    code = str((json.load(exc).get("error") or {}).get("code", ""))
+                    err = json.load(exc).get("error") or {}
+                    code, message = str(err.get("code", "")), str(err.get("message") or "")
                 except Exception:
-                    code = ""
-                raise SarvamHTTPError(f"HTTP {exc.code} {code}".strip()[:80]) from None
+                    pass
+                detail = f"HTTP {exc.code} {code}".strip()
+                if message:             # Sarvam's own words say which field it did not like; digits and quoted values are masked
+                    detail += ": " + _strip_quoted(scrub(message))[:100]
+                raise SarvamHTTPError(detail[:160]) from None
         return ids
 
     def find_inbound_calls(self, start, end, known_ids):

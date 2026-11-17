@@ -272,12 +272,12 @@ class Opener:
 def test_push_inbound_many_streams_a_cohort_to_the_inbound_deployment_in_chunks_of_1000():
     op = Opener({"cohort_id": "coh-1"})
     d = SarvamDialler(env=ENV, opener=op)
-    entries = [{"fid": f"F{i}", "phone": "9876543210", "language_name": "Hindi", "variables": {"farmer_name": f"n{i}"}} for i in range(1001)]
+    entries = [{"fid": f"F{i}", "phone": f"98765{i:05d}", "language_name": "Hindi", "variables": {"farmer_name": f"n{i}"}} for i in range(1001)]
     assert d.inbound_ready and d.push_inbound_many(entries, "roster-x") == ["coh-1", "coh-1"]
     url, method, body = op.requests[0]
     assert url.endswith("/scheduling/v1/orgs/o/workspaces/w/deployments/dep-1/cohorts/stream") and method == "POST"
     assert body["name"] == "roster-x" and len(body["users"]) == 1000 and op.requests[1][2]["name"] == "roster-x-2"
-    assert body["users"][0] == {"user_phone_number": "+919876543210", "user_identifier": "F0",
+    assert body["users"][0] == {"user_phone_number": "+919876500000", "user_identifier": "F0",
                                 "app_variables": {"farmer_name": "n0"}, "app_overrides": {"initial_language_name": "Hindi"}}
 
 
@@ -297,3 +297,19 @@ def test_find_inbound_calls_skips_our_own_calls_and_unanswered_ones_and_reads_ev
     found = d.find_inbound_calls(T0, T0 + timedelta(hours=1), {"OUT1"})
     assert len(found) == 1 and found[0][0] == "3210" and found[0][1].provider_call_id == "IN1" and found[0][1].duration_s == 90
     assert found[0][2] == datetime(2026, 11, 15, 3, 51, 30, tzinfo=found[0][2].tzinfo)
+
+
+def test_the_cohort_push_leaves_out_blank_values_shared_numbers_and_numbers_that_cannot_be_dialled():
+    op = Opener({"cohort_id": "coh-1"})
+    d = SarvamDialler(env=ENV, opener=op)
+    entries = [
+        {"fid": "F1", "phone": "9876543210", "language_name": "Hindi", "variables": {"farmer_name": "Ramesh", "temp_min_c": ""}},
+        {"fid": "F2", "phone": "9876543210", "language_name": "Hindi", "variables": {"farmer_name": "Same number"}},   # shared
+        {"fid": "F3", "phone": "FAKE-0003", "language_name": "Hindi", "variables": {"farmer_name": "Bad number"}},      # cannot be dialled
+        {"fid": "F4", "phone": "9876543211", "language_name": "English", "variables": {"farmer_name": "", "callback_context": ""}},
+    ]
+    assert d.push_inbound_many(entries, "roster-x") == ["coh-1"]
+    users = op.requests[0][2]["users"]
+    assert [u["user_identifier"] for u in users] == ["F1", "F4"]
+    assert users[0]["app_variables"] == {"farmer_name": "Ramesh"}           # the blank value is not sent
+    assert users[1]["app_variables"] == {}                                   # an unknown number carries no values at all

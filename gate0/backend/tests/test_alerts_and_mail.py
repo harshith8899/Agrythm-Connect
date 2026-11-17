@@ -91,7 +91,8 @@ def test_a_failed_cohort_push_says_the_http_code_and_sarvams_error_code_but_not_
     d = SarvamDialler(env=ENV, opener=Opener(err))
     with pytest.raises(SarvamHTTPError) as e:
         d.push_inbound_many([{"fid": "F1", "phone": "9876543210", "language_name": "Hindi", "variables": {}}], "roster-x")
-    assert e.value.safe_text == "HTTP 422 invalid_parameter" and "9876" not in str(e.value)
+    assert e.value.safe_text.startswith("HTTP 422 invalid_parameter: ") and "9876" not in str(e.value)
+    assert "is not valid" in e.value.safe_text                              # the part that says what was wrong is kept
 
 
 # ---- notes for the team --------------------------------------------------------------------------------------------
@@ -179,3 +180,8 @@ def test_the_test_email_says_why_it_could_not_be_sent(tmp_path):
     (tmp_path / "c").mkdir()
     s3 = DashboardService(str(tmp_path / "c" / "c.db"), dialler=MockDialler(), mailer=NullMailer(), env={"GATE0_WEATHER": "mock"}, now=lambda: T0)
     assert s3.send_test_email()["status"] == "skipped" and "GATE0_MAIL_TEST_TO" in s3.send_test_email()["note"]
+
+
+def test_quoted_values_in_a_sarvam_message_are_masked():
+    from weathercall.adapters.dialers import _strip_quoted
+    assert _strip_quoted("value 'Ramesh Kumar' is not allowed for \"farmer_name\"") == "value '...' is not allowed for '...'"

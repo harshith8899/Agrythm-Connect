@@ -161,7 +161,7 @@ def _error_detail(exc: BaseException) -> str:
     """What to record about an error: its type and a code, never its message (it could quote an address or a number)."""
     safe = getattr(exc, "safe_text", "")
     if safe:
-        return str(safe)[:80]
+        return str(safe)[:160]
     name = type(exc).__name__
     code = getattr(exc, "smtp_code", None)
     if isinstance(code, int):
