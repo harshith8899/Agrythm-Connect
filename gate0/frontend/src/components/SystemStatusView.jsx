@@ -15,7 +15,7 @@ import {
   Mail,
   X,
 } from 'lucide-react';
-import { getSystemChecks, getAlerts, getMessages, dismissAlerts, sendTestEmail } from '../utils';
+import { getSystemChecks, getAlerts, getMessages, dismissAlerts, dismissMessages, sendTestEmail } from '../utils';
 
 const MESSAGE_LABEL = {
   weather: 'Weather update',
@@ -135,6 +135,16 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
       setTestResult({ ok: false, text: err.message });
     } finally {
       setTesting(false);
+    }
+  };
+
+  // remove one email log row, or all of them
+  const handleDismissMessage = async (key) => {
+    setMessages((prev) => (key == null ? [] : prev.filter((m) => m.key !== key)));
+    try {
+      await dismissMessages(key);
+    } catch {
+      loadSystem(false);
     }
   };
 
@@ -298,6 +308,14 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
               {testResult && (
                 <span className={`text-[11px] font-semibold break-words ${testResult.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{testResult.text}</span>
               )}
+              {messages.length > 0 && (
+                <button
+                  onClick={() => handleDismissMessage(null)}
+                  className="h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap text-[11px] font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Clear all
+                </button>
+              )}
               <button
                 onClick={handleTestEmail}
                 disabled={testing || !isBackendOnline}
@@ -322,6 +340,7 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
                     <th className="px-3 py-2">Email</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Why</th>
+                    <th className="px-3 py-2 w-8"><span className="sr-only">Remove</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -341,6 +360,18 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
                           </span>
                         </td>
                         <td className="px-3 py-2 text-slate-500">{m.note || ''}</td>
+                        <td className="px-3 py-2 text-right">
+                          {m.key && (
+                            <button
+                              onClick={() => handleDismissMessage(m.key)}
+                              title="Remove this row"
+                              aria-label="Remove this row"
+                              className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}

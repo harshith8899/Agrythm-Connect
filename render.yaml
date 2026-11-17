@@ -50,6 +50,8 @@ services:
         sync: false
       - key: GATE0_MAIL_LOGO_URL         # public https address of the logo for the email (e.g. the dashboard's /agrythm-logo.png)
         sync: false
+      - key: SARVAM_API_KEY              # a Sarvam API key (dashboard.sarvam.ai): used for the English translation of transcripts
+        sync: false
       - key: GATE0_MAIL_TEST_TO          # testing: one address that receives every farmer's message
         sync: false
       - key: GATE0_API_TOKEN

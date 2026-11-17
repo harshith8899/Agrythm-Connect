@@ -169,6 +169,8 @@ def make_handler(
                     calls = service.calls()
                     limit = int(q["limit"][0]) if "limit" in q else None
                     return self._send(200, calls[:limit] if limit else calls)
+                if path.startswith("/api/calls/") and path.endswith("/translation"):
+                    return self._send(200, service.transcript_english(urllib.parse.unquote(path[len("/api/calls/"):-len("/translation")])))
                 if path.startswith("/api/calls/"):
                     call = service.call(urllib.parse.unquote(path[len("/api/calls/"):]))
                     return self._send(200, call) if call else self._send(404, {"error": "Call not found"})
@@ -247,6 +249,14 @@ def make_handler(
                     return self._send(202, service.manual_call(fid, mode))
                 if path == "/api/mail/test":            # sends one sample email to the test address and reports what happened
                     return self._send(200, service.send_test_email())
+                if path == "/api/messages/dismiss":      # {"key": "F1|2026-11-16|weather"}, {"keys": [...]} or {"all": true}
+                    fields = json.loads(body or "{}")
+                    if not isinstance(fields, dict):
+                        raise ValueError("expected a JSON object")
+                    if fields.get("all") is True:
+                        return self._send(200, {"removed": service.dismiss_messages(None)})
+                    keys = fields.get("keys") if isinstance(fields.get("keys"), list) else [fields.get("key")]
+                    return self._send(200, {"removed": service.dismiss_messages([k for k in keys if k])})
                 if path == "/api/alerts/dismiss":       # {"id": 5}, {"ids": [5, 6]} or {"all": true}
                     fields = json.loads(body or "{}")
                     if not isinstance(fields, dict):
