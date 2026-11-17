@@ -1456,6 +1456,34 @@ class DashboardService:
         except Exception as exc:
             return f"error: {type(exc).__name__}"
 
+    def mail_status(self) -> dict:
+        """How email is set up, for System Status (never the key, never a full address)."""
+        label = getattr(self.mailer, "label", "not configured")
+        return {"provider": label, "live": bool(getattr(self.mailer, "live", False)),
+                "test_to": mask_email(self.mail_test_to), "test_mode": bool(self.mail_test_to)}
+
+    def send_test_email(self) -> dict:
+        """Sends a sample weather email to the test address (GATE0_MAIL_TEST_TO) right now and says what happened, so the
+        mail setup can be checked without making a call. Recorded in the Emails table as '(setup test)'."""
+        if not self.mail_test_to:
+            return {"status": "skipped", "note": "GATE0_MAIL_TEST_TO is not set, so there is nowhere to send a test"}
+        subject, body, html = build_email("Test", "your village", {"temp_min": 21, "temp_max": 32, "wind": 14, "rain": 30, "humidity": 65},
+                                          KIND_WEATHER)
+        status, note = "sent", ""
+        try:
+            self.mailer.send(self.mail_test_to, f"[Setup test] {subject}", body, html)
+        except MailNotConfigured:
+            status, note = "skipped", "email is not set up (no GATE0_RESEND_API_KEY and no GATE0_SMTP_HOST on the server)"
+        except Exception as exc:                            # type and code only: a message could quote the address
+            status, note = "failed", _error_detail(exc)
+        now = self._now()
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO dash_messages VALUES(?,?,?,?,?,?,?)",
+                            ("(setup test)", now.date().isoformat(), f"test:setup:{uuid.uuid4().hex[:8]}", "email", status, note,
+                             now.isoformat(timespec="seconds")))
+            self.db.commit()
+        return {"status": status, "note": note}
+
     def messages(self, limit: int = 100) -> list[dict]:
         with self.lock:
             rows = self.db.execute("SELECT m.at, m.farmer_id, f.name, m.call_date, m.kind, m.channel, m.status, m.note "

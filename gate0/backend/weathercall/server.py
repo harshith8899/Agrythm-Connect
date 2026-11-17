@@ -245,6 +245,8 @@ def make_handler(
                     fields = json.loads(body or "{}")
                     mode = fields.get("mode", "retry") if isinstance(fields, dict) else "retry"
                     return self._send(202, service.manual_call(fid, mode))
+                if path == "/api/mail/test":            # sends one sample email to the test address and reports what happened
+                    return self._send(200, service.send_test_email())
                 if path == "/api/alerts/dismiss":       # {"id": 5}, {"ids": [5, 6]} or {"all": true}
                     fields = json.loads(body or "{}")
                     if not isinstance(fields, dict):

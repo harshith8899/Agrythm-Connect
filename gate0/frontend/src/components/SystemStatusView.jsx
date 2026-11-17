@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, MinusCircle, X } from 'lucide-react';
-import { getSystemChecks, getAlerts, getMessages, dismissAlerts } from '../utils';
+import { getSystemChecks, getAlerts, getMessages, dismissAlerts, sendTestEmail } from '../utils';
 import { CostAnalyticsView } from './CostAnalyticsView';
 
 const MESSAGE_LABEL = {
@@ -36,6 +36,8 @@ export const SystemStatusView = ({ isBackendOnline = true, callLogs = [] }) => {
   const [systemReport, setSystemReport] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
   const [systemError, setSystemError] = useState('');
   const [systemLoading, setSystemLoading] = useState(false);
 
@@ -53,6 +55,21 @@ export const SystemStatusView = ({ isBackendOnline = true, callLogs = [] }) => {
       setSystemLoading(false);
     }
   }, []);
+
+  // sends one sample email to the test address and shows what happened, so the mail setup can be checked without a call
+  const handleTestEmail = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await sendTestEmail();
+      setTestResult({ ok: r.status === 'sent', text: r.status === 'sent' ? 'Sent: check the test inbox.' : `${r.status}: ${r.note}` });
+      loadSystem(false);
+    } catch (err) {
+      setTestResult({ ok: false, text: err.message });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   // remove one note, or all of them; the list is updated at once and the server confirms in the background
   const handleDismiss = async (id) => {
@@ -151,8 +168,20 @@ export const SystemStatusView = ({ isBackendOnline = true, callLogs = [] }) => {
 
         {/* Emails sent after calls */}
         <div className="rounded-xl border border-slate-100">
-          <div className="p-3 text-[11px] font-bold tracking-wider text-slate-500 uppercase border-b border-slate-100">
-            Emails after calls ({messages.length})
+          <div className="p-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100">
+            <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Emails after calls ({messages.length})</span>
+            <span className="flex items-center gap-2">
+              {testResult && (
+                <span className={`text-[11px] font-semibold break-words ${testResult.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{testResult.text}</span>
+              )}
+              <button
+                onClick={handleTestEmail}
+                disabled={testing || !isBackendOnline}
+                className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {testing ? 'Sending...' : 'Send test email'}
+              </button>
+            </span>
           </div>
           {messages.length === 0 ? (
             <p className="p-3 text-xs text-slate-500">
