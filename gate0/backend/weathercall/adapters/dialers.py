@@ -105,12 +105,17 @@ class SarvamDialler(SarvamAgentTelephony):
                 try:
                     err = json.load(exc).get("error") or {}
                     code, message = str(err.get("code", "")), str(err.get("message") or "")
+                    details = (err.get("data") or {}).get("details")        # Sarvam puts the real reason here
+                    if isinstance(details, str) and details:
+                        message = f"{message} {details}".strip() if message else details
+                    elif isinstance(details, (list, dict)) and details:
+                        message = f"{message} {json.dumps(details)}".strip()
                 except Exception:
                     pass
                 detail = f"HTTP {exc.code} {code}".strip()
                 if message:             # Sarvam's own words say which field it did not like; digits and quoted values are masked
-                    detail += ": " + _strip_quoted(scrub(message))[:100]
-                raise SarvamHTTPError(detail[:160]) from None
+                    detail += ": " + _strip_quoted(scrub(message))[:140]
+                raise SarvamHTTPError(detail[:200]) from None
         return ids
 
     def find_inbound_calls(self, start, end, known_ids):

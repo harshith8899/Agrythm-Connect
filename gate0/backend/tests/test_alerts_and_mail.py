@@ -185,3 +185,14 @@ def test_the_test_email_says_why_it_could_not_be_sent(tmp_path):
 def test_quoted_values_in_a_sarvam_message_are_masked():
     from weathercall.adapters.dialers import _strip_quoted
     assert _strip_quoted("value 'Ramesh Kumar' is not allowed for \"farmer_name\"") == "value '...' is not allowed for '...'"
+
+
+def test_the_reason_inside_a_sarvam_error_is_kept_with_digits_and_quotes_masked():
+    body = {"error": {"message": "(422) Invalid Parameter", "type": "invalid_parameter", "code": 422,
+                      "data": {"details": "app_variables: unknown variable 'farmer_nam' for user +919876543210"}}}
+    err = urllib.error.HTTPError("u", 422, "x", {}, io.BytesIO(json.dumps(body).encode()))
+    d = SarvamDialler(env=ENV, opener=Opener(err))
+    with pytest.raises(SarvamHTTPError) as e:
+        d.push_inbound_many([{"fid": "F1", "phone": "9876543210", "language_name": "Hindi", "variables": {"farmer_name": "R"}}], "roster-x")
+    t = e.value.safe_text
+    assert t.startswith("HTTP 422 422: (422) Invalid Parameter") and "unknown variable '...'" in t and "9876" not in t
