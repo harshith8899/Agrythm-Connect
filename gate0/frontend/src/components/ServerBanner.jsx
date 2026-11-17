@@ -38,7 +38,7 @@ export const ServerBanner = ({ isOnline, loading, hasConnected, waitingSince, on
         </div>
         <button
           onClick={onRetry}
-          className="shrink-0 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer"
+          className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap shrink-0 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs transition-colors shadow-2xs cursor-pointer"
         >
           Retry Connection
         </button>

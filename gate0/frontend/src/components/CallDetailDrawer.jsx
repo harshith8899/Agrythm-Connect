@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   X, 
   CloudRain, 
@@ -6,6 +6,7 @@ import {
   Wind, 
   Droplets, 
   Phone, 
+  PhoneCall,
   MapPin, 
   MessageSquare,
   Clock,
@@ -20,7 +21,9 @@ const LANG_CODES = { Hindi: 'hi', Kannada: 'kn', Telugu: 'te', English: 'en' };
 // Fonts that carry the Indian scripts, so Kannada, Telugu and Hindi are drawn properly on every device
 const INDIC_FONTS = "'Noto Sans Kannada', 'Noto Sans Telugu', 'Noto Sans Devanagari', 'Nirmala UI', 'Mangal', Inter, system-ui, sans-serif";
 
-export const CallDetailDrawer = ({ call, onClose }) => {
+export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
+  const [callingBack, setCallingBack] = useState(false);
+  const [callNote, setCallNote] = useState(null);
 
   if (!call) return null;
 
@@ -35,7 +38,8 @@ export const CallDetailDrawer = ({ call, onClose }) => {
     return `${secs}s`;
   };
 
-  const isCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested';
+  const isPendingCallback = call.status === 'Callback Scheduled' || call.callback_status === 'pending';
+  const isCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested' || isPendingCallback;
   const attempts = Array.isArray(call.attempts_log) ? call.attempts_log : [];
 
   // Why the call is not finished, in plain words (a rejected call and an unpicked one look the same to the network)
@@ -168,21 +172,49 @@ export const CallDetailDrawer = ({ call, onClose }) => {
 
           {/* Callback Requested Highlight (if present) */}
           {isCallback && (
-            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-1.5">
-              <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wider">
-                <Calendar className="w-4 h-4 text-amber-700" />
-                <span>Specific Reschedule / Callback Requested</span>
+            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wider">
+                  <Calendar className="w-4 h-4 text-amber-700" />
+                  <span>Specific Reschedule / Callback Requested</span>
+                </div>
+                {isPendingCallback && onCallBack && (
+                  <button
+                    onClick={async () => {
+                      setCallingBack(true);
+                      setCallNote(null);
+                      try {
+                        await onCallBack(call);
+                        setCallNote({ ok: true, text: 'Callback call placed. Result will update shortly.' });
+                      } catch (err) {
+                        setCallNote({ ok: false, text: err.message || 'Call failed' });
+                      } finally {
+                        setCallingBack(false);
+                      }
+                    }}
+                    disabled={callingBack}
+                    className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 bg-trust-green text-white text-xs font-semibold hover:bg-emerald-700 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <PhoneCall className={`w-3.5 h-3.5 ${callingBack ? 'animate-pulse' : ''}`} />
+                    <span>{callingBack ? 'Calling...' : 'Call Back Now'}</span>
+                  </button>
+                )}
               </div>
               <div className="flex items-center justify-between text-xs pt-1">
                 <span className="text-amber-800">Scheduled Callback Slot:</span>
                 <span className="font-bold font-mono text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded-lg border border-amber-300">
-                  {call.scheduled_callback_time || 'Today, 5:00 PM'}
+                  {call.scheduled_callback_time || 'Callback Pending'}
                 </span>
               </div>
               <p className="text-[11px] text-amber-700 leading-relaxed pt-0.5">
                 Callback status: <strong>{call.callback_status || 'pending'}</strong>
                 {call.callback_requested_text ? ` (the farmer said: ${call.callback_requested_text})` : ''}. One call is placed at that time and it is not retried.
               </p>
+              {callNote && (
+                <div className={`p-2 rounded-lg text-xs font-semibold ${callNote.ok ? 'bg-emerald-100 text-trust-green border border-emerald-200' : 'bg-rose-100 text-rose-700 border border-rose-200'}`}>
+                  {callNote.text}
+                </div>
+              )}
             </div>
           )}
 
@@ -223,6 +255,21 @@ export const CallDetailDrawer = ({ call, onClose }) => {
                 )}
               </div>
               {call.note && <p className="text-[11px] text-slate-500 break-words">{call.note}</p>}
+            </div>
+          )}
+
+          {/* Advisory Message Dispatched */}
+          {Number(call.messages_sent || 0) > 0 && (
+            <div className="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-200/80 flex items-center justify-between text-xs shadow-2xs">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-sky-500" />
+                <span className="font-semibold text-sky-950">
+                  Advisory SMS Message Dispatched
+                </span>
+              </div>
+              <span className="font-mono font-bold text-sky-700 bg-white px-2.5 py-0.5 rounded-lg border border-sky-200">
+                {call.messages_sent} sent (₹{(call.messages_sent * 0.20).toFixed(2)})
+              </span>
             </div>
           )}
 

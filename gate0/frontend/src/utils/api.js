@@ -211,6 +211,14 @@ export const updateFarmer = (farmerId, fields) => sendJson('PUT', `/api/farmers/
 export const callFarmer = (farmerId, mode = 'retry') =>
   postJson(`/api/farmers/${encodeURIComponent(farmerId)}/call`, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
 
+/** Schedules a callback for a farmer at a specific or relative time (e.g. 'in 2 hours', 'at 4 PM'). */
+export const scheduleCallback = (farmerId, time = 'in 2 hours') =>
+  postJson(`/api/farmers/${encodeURIComponent(farmerId)}/callback`, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ time }) });
+
+/** Manually dispatches an advisory SMS message to a farmer. */
+export const sendFarmerMessage = (farmerId, kind = 'weather') =>
+  postJson(`/api/farmers/${encodeURIComponent(farmerId)}/message`, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) });
+
 /** Uploads a farmers CSV (Farmer ID, Farmer Name, Mobile Number, Village, District, State, Language, Consent). */
 export const importFarmersCsv = async (file) =>
   postJson('/api/farmers/import', { headers: { 'Content-Type': 'text/csv' }, body: await file.text() });

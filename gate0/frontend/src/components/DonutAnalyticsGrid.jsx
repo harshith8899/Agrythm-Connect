@@ -36,6 +36,31 @@ const DAY_PRESETS = [
  * Interactive pure SVG Donut / Pie Chart Card with hover expansion and dynamic center stats.
  * Standardized header height and baseline for seamless horizontal alignment across all 4 cards.
  */
+// The hole of the donut is about 96 px wide: a long label is wrapped onto at most two short lines (and cut with an ellipsis)
+// so the text stays inside it when a slice is hovered.
+const wrapLabel = (text, maxChars = 13, maxLines = 2) => {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  words.forEach((word) => {
+    const w = word.length > maxChars ? `${word.slice(0, maxChars - 1)}…` : word;
+    if (!line) line = w;
+    else if (`${line} ${w}`.length <= maxChars) line = `${line} ${w}`;
+    else {
+      lines.push(line);
+      line = w;
+    }
+  });
+  if (line) lines.push(line);
+  if (lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines);
+    const last = kept[maxLines - 1];
+    kept[maxLines - 1] = `${last.slice(0, Math.max(1, maxChars - 1))}…`;
+    return kept;
+  }
+  return lines.length ? lines : [''];
+};
+
 export const SvgDonutCard = ({
   title,
   subtitle,
@@ -60,6 +85,9 @@ export const SvgDonutCard = ({
 
   // Active slice for dynamic center display
   const activeSlice = hoveredId ? slices.find((s) => s.id === hoveredId) : null;
+  const labelLines = wrapLabel(activeSlice ? activeSlice.label : centerTitle);
+  const valueText = String(activeSlice ? (isCurrency ? rupees(activeSlice.value) : activeSlice.value) : centerValue);
+  const valueSize = valueText.length > 10 ? 10 : valueText.length > 8 ? 12 : 14;   // a long number shrinks to stay inside the hole
 
   // Compute arc segments
   let currentAngle = -Math.PI / 2;
@@ -158,28 +186,26 @@ export const SvgDonutCard = ({
           {/* Dynamic Center Text */}
           <text
             x={cx}
-            y={cy - 6}
+            y={cy - 6 - (labelLines.length - 1) * 11}
             textAnchor="middle"
             fill="#64748B"
-            fontSize="10"
+            fontSize="9"
             fontWeight="600"
-            className="uppercase tracking-wider"
+            className="uppercase"
           >
-            {activeSlice ? activeSlice.label : centerTitle}
+            {labelLines.map((l, i) => (
+              <tspan key={i} x={cx} dy={i === 0 ? 0 : 11}>{l}</tspan>
+            ))}
           </text>
           <text
             x={cx}
             y={cy + 13}
             textAnchor="middle"
             fill="#0F2444"
-            fontSize="14"
+            fontSize={valueSize}
             fontWeight="800"
           >
-            {activeSlice
-              ? isCurrency
-                ? rupees(activeSlice.value)
-                : activeSlice.value
-              : centerValue}
+            {valueText}
           </text>
           {activeSlice && (
             <text
@@ -353,8 +379,8 @@ export const DonutAnalyticsGrid = ({
     let totalMessages = 0;
 
     filteredCalls.forEach((c) => {
-      // 1 message sent per farmer outreach (advisory SMS / WhatsApp summary)
-      const msgs = Number(c.messages_sent ?? c.sms_count ?? 1);
+      // 1 message sent per farmer outreach IF explicitly recorded in telemetry
+      const msgs = Number(c.messages_sent ?? c.sms_count ?? 0);
       totalMessages += msgs;
 
       const isConn =
@@ -397,13 +423,17 @@ export const DonutAnalyticsGrid = ({
             color: '#1E6F43', // Trust Green
             secondaryText: `${totalBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
           },
-          {
-            id: 'messages',
-            label: 'Advisory Messages',
-            value: messageCost,
-            color: '#0284C7', // Sky Blue
-            secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
-          },
+          ...(totalMessages > 0
+            ? [
+                {
+                  id: 'messages',
+                  label: 'Advisory Messages',
+                  value: messageCost,
+                  color: '#0284C7', // Sky Blue
+                  secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
+                },
+              ]
+            : []),
           {
             id: 'carriage',
             label: 'Number Rental',
@@ -420,13 +450,17 @@ export const DonutAnalyticsGrid = ({
             color: '#1E6F43', // Trust Green
             secondaryText: `${totalBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
           },
-          {
-            id: 'messages',
-            label: 'Advisory Messages',
-            value: messageCost,
-            color: '#0284C7', // Sky Blue
-            secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
-          },
+          ...(totalMessages > 0
+            ? [
+                {
+                  id: 'messages',
+                  label: 'Advisory Messages',
+                  value: messageCost,
+                  color: '#0284C7', // Sky Blue
+                  secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
+                },
+              ]
+            : []),
         ];
 
     // 2. Call Outcomes Data
@@ -626,11 +660,7 @@ export const DonutAnalyticsGrid = ({
               key={preset.id}
               type="button"
               onClick={() => handlePresetChange(preset.id)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                dayFilter === preset.id
-                  ? 'bg-trust-navy text-white shadow-2xs'
-                  : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200/80 hover:bg-slate-50'
-              }`}
+              className={`h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap text-xs font-semibold transition-all cursor-pointer ${ dayFilter === preset.id ? 'bg-trust-navy text-white shadow-2xs' : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200/80 hover:bg-slate-50' }`}
             >
               {preset.label}
             </button>
@@ -670,9 +700,13 @@ export const DonutAnalyticsGrid = ({
         <SvgDonutCard
           title="Spend Split"
           subtitle={
-            analytics.isMultiDayBillingCycle
-              ? 'Voice AI vs. messages vs. number rental'
-              : 'Voice AI calls vs. advisory messages'
+            analytics.totalMessages > 0
+              ? analytics.isMultiDayBillingCycle
+                ? 'Voice AI vs. messages vs. number rental'
+                : 'Voice AI calls vs. advisory messages'
+              : analytics.isMultiDayBillingCycle
+              ? 'Voice AI usage vs. number rental'
+              : 'Sarvam Voice AI call usage'
           }
           slices={analytics.costSplitSlices}
           centerTitle={analytics.isMultiDayBillingCycle ? 'Total Spend' : 'Daily Spend'}
@@ -680,12 +714,14 @@ export const DonutAnalyticsGrid = ({
           isCurrency={true}
           footer={
             <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-sky-50/70 border border-sky-200/60 text-[11px]">
-                <span className="text-sky-800 font-medium">Messages Dispatched:</span>
-                <span className="font-bold font-mono text-sky-950 shrink-0 whitespace-nowrap">
-                  {analytics.totalMessages} sent ({rupees(analytics.messageCost)})
-                </span>
-              </div>
+              {analytics.totalMessages > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-sky-50/70 border border-sky-200/60 text-[11px]">
+                  <span className="text-sky-800 font-medium">Messages Dispatched:</span>
+                  <span className="font-bold font-mono text-sky-950 shrink-0 whitespace-nowrap">
+                    {analytics.totalMessages} sent ({rupees(analytics.messageCost)})
+                  </span>
+                </div>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-slate-100/60 border border-slate-200/50 text-[11px]">
                 <span className="text-slate-500 font-medium">Connected Calls:</span>
                 <span className="font-bold font-mono text-slate-800 shrink-0 whitespace-nowrap">

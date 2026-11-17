@@ -86,8 +86,8 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5, messageRate = 0.2) {
     day.total_attempts += 1;
     day.calls += 1;
 
-    // 1 advisory SMS / WhatsApp message sent per call outreach
-    const msgs = Number(call.messages_sent ?? call.sms_count ?? 1);
+    // 1 advisory SMS / WhatsApp message sent per call outreach IF explicitly recorded in telemetry
+    const msgs = Number(call.messages_sent ?? call.sms_count ?? 0);
     day.messages_sent += msgs;
 
     const farmerId = String(call.farmer_id || call.phone || call.Farmer_Name || call.name || '').trim();
@@ -236,6 +236,10 @@ export const InteractiveUsageChart = ({
     return [...days].sort((a, b) => a.date.localeCompare(b.date));
   }, [days]);
 
+  const hasTableMessages = useMemo(() => {
+    return chronologicalDays.some((d) => Number(d.messages_sent || 0) > 0);
+  }, [chronologicalDays]);
+
   const n = chronologicalDays.length;
 
   const svgWidth = 660;
@@ -321,11 +325,7 @@ export const InteractiveUsageChart = ({
               setChartView('breakdown');
               setHoveredIdx(null);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-              chartView === 'breakdown'
-                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all cursor-pointer ${ chartView === 'breakdown' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
           >
             <PieChart className="w-3.5 h-3.5 text-trust-green" />
             Breakdown
@@ -336,11 +336,7 @@ export const InteractiveUsageChart = ({
               setChartView('realtime');
               setHoveredIdx(null);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-              chartView === 'realtime'
-                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all cursor-pointer ${ chartView === 'realtime' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
           >
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -354,11 +350,7 @@ export const InteractiveUsageChart = ({
               setChartView('daily');
               setHoveredIdx(null);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-              chartView === 'daily'
-                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all cursor-pointer ${ chartView === 'daily' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
           >
             <BarChart3 className="w-3.5 h-3.5 text-slate-600" />
             Daily Trends
@@ -369,11 +361,7 @@ export const InteractiveUsageChart = ({
               setChartView('table');
               setHoveredIdx(null);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-              chartView === 'table'
-                ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 text-xs font-semibold transition-all cursor-pointer ${ chartView === 'table' ? 'bg-white text-trust-navy shadow-xs border border-slate-200/50' : 'text-slate-500 hover:text-slate-800' }`}
           >
             <Table className="w-3.5 h-3.5" />
             Daily Table
@@ -422,10 +410,10 @@ export const InteractiveUsageChart = ({
                   <th className="py-2.5 pr-4">Farmers Reached</th>
                   <th className="py-2.5 pr-4">Farmer Reach %</th>
                   <th className="py-2.5 pr-4">Dial Attempts (Retries)</th>
-                  <th className="py-2.5 pr-4">Messages Sent</th>
+                  {hasTableMessages && <th className="py-2.5 pr-4">Messages Sent</th>}
                   <th className="py-2.5 pr-4">Billed Minutes</th>
                   <th className="py-2.5 pr-4">Voice AI Spend</th>
-                  <th className="py-2.5 pr-4">SMS Spend</th>
+                  {hasTableMessages && <th className="py-2.5 pr-4">SMS Spend</th>}
                   <th className="py-2.5">Total Spend</th>
                 </tr>
               </thead>
@@ -434,7 +422,7 @@ export const InteractiveUsageChart = ({
                   const targeted = day.farmers_targeted || day.calls;
                   const reached = day.farmers_reached || day.connected;
                   const reachPct = targeted > 0 ? Math.round((reached / targeted) * 100) : 0;
-                  const msgs = day.messages_sent || day.calls || 0;
+                  const msgs = Number(day.messages_sent || 0);
                   const voiceSpend = day.voice_amount !== undefined ? day.voice_amount : Math.round(day.billed_minutes * rate * 100) / 100;
                   const smsSpend = day.message_amount !== undefined ? day.message_amount : Math.round(msgs * messageRate * 100) / 100;
                   return (
@@ -449,10 +437,18 @@ export const InteractiveUsageChart = ({
                           <span className="text-[10px] text-amber-600 font-semibold ml-1">({day.retries} retries)</span>
                         )}
                       </td>
-                      <td className="py-2.5 pr-4 font-mono text-sky-700 font-medium">{msgs} sent</td>
+                      {hasTableMessages && (
+                        <td className="py-2.5 pr-4 font-mono text-sky-700 font-medium">
+                          {msgs > 0 ? `${msgs} sent` : '—'}
+                        </td>
+                      )}
                       <td className="py-2.5 pr-4 font-mono">{day.billed_minutes}m</td>
                       <td className="py-2.5 pr-4 font-mono font-medium text-slate-700">{rupees(voiceSpend)}</td>
-                      <td className="py-2.5 pr-4 font-mono font-medium text-sky-800">{rupees(smsSpend)}</td>
+                      {hasTableMessages && (
+                        <td className="py-2.5 pr-4 font-mono font-medium text-sky-800">
+                          {msgs > 0 ? rupees(smsSpend) : '—'}
+                        </td>
+                      )}
                       <td className="py-2.5 font-mono font-bold text-slate-900">{rupees(day.amount)}</td>
                     </tr>
                   );
@@ -554,6 +550,14 @@ export const InteractiveUsageChart = ({
                           </span>
                           <span>Billed: {hoveredDay.billed_minutes}m</span>
                         </div>
+                        {Number(hoveredDay.messages_sent || 0) > 0 && (
+                          <div className="flex items-center justify-between text-[10px] text-sky-400">
+                            <span>Advisory Messages:</span>
+                            <span className="font-bold">
+                              {hoveredDay.messages_sent} sent ({rupees(hoveredDay.message_amount)})
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -884,6 +888,10 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
     return generateSimulatedUsage(callLogs, rate, smsRate);
   }, [usage, error, callLogs, rateInput, smsRateInput]);
 
+  const hasAnyMessages = useMemo(() => {
+    return (callLogs || []).some((c) => Number(c.messages_sent ?? c.sms_count ?? 0) > 0);
+  }, [callLogs]);
+
   // Dynamic Telemetry filtered strictly according to user selection (Today, Yesterday, 7d, 14d, or Custom Date)
   const dynamicTimeframeStats = useMemo(() => {
     const today = new Date();
@@ -913,7 +921,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
 
     const targetedSet = new Set();
     const reachedSet = new Set();
-    let totalBilledMins = 0;
+    let localBilledMins = 0;
     let totalMessages = 0;
     let retryCount = 0;
 
@@ -921,7 +929,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
       const farmerId = String(c.farmer_id || c.phone || c.Farmer_Name || c.name || '').trim();
       if (farmerId) targetedSet.add(farmerId);
 
-      const msgs = Number(c.messages_sent ?? c.sms_count ?? 1);
+      const msgs = Number(c.messages_sent ?? c.sms_count ?? 0);
       totalMessages += msgs;
 
       if (Number(c.retry_count || c.attempt_number || 1) > 1) {
@@ -938,19 +946,41 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
       if (isConnected) {
         if (farmerId) reachedSet.add(farmerId);
         const sec = Number(c.duration_sec ?? c.duration ?? 0);
-        totalBilledMins += Math.max(1, Math.ceil(sec / 60));
+        localBilledMins += Math.max(1, Math.ceil(sec / 60));
       }
     });
 
-    const targetedCount = targetedSet.size || periodCalls.length;
-    const reachedCount = reachedSet.size;
+    // Check if real backend usage telemetry is available and configured
+    const isConfiguredBackend = Boolean(usage && usage.configured);
+    let backendPeriodData = null;
+
+    if (isConfiguredBackend) {
+      if (selectedTimeframe === 'today') {
+        backendPeriodData = usage.today;
+      } else if (selectedTimeframe === 'yesterday') {
+        backendPeriodData = (usage.days || []).find((d) => d.date === yesterdayStr);
+      } else if (selectedTimeframe === '7d') {
+        backendPeriodData = usage.week;
+      } else if (selectedTimeframe === '14d') {
+        backendPeriodData = usage.window;
+      } else if (selectedTimeframe === 'custom' && customDate) {
+        backendPeriodData = (usage.days || []).find((d) => d.date === customDate);
+      }
+    }
+
+    const voiceRate = Number(rateInput || (usage && usage.rate) || 3.5);
+    const smsRate = Number(smsRateInput || 0.2);
+
+    const dialAttempts = backendPeriodData ? (backendPeriodData.calls ?? periodCalls.length) : periodCalls.length;
+    const reachedCount = backendPeriodData ? (backendPeriodData.connected ?? reachedSet.size) : reachedSet.size;
+    const targetedCount = targetedSet.size || dialAttempts;
     const reachPct = targetedCount > 0 ? (reachedCount / targetedCount) * 100 : 0;
-    const dialAttempts = periodCalls.length;
     const retries = retryCount || Math.max(0, dialAttempts - targetedCount);
 
-    const voiceRate = Number(rateInput || 3.5);
-    const smsRate = Number(smsRateInput || 0.2);
-    const voiceSpend = Math.round(totalBilledMins * voiceRate * 100) / 100;
+    const totalBilledMins = backendPeriodData ? (backendPeriodData.billed_minutes ?? localBilledMins) : localBilledMins;
+    const voiceSpend = backendPeriodData && backendPeriodData.amount !== undefined
+      ? backendPeriodData.amount
+      : Math.round(totalBilledMins * voiceRate * 100) / 100;
     const messageSpend = Math.round(totalMessages * smsRate * 100) / 100;
     const operationalSpend = Math.round((voiceSpend + messageSpend) * 100) / 100;
 
@@ -978,7 +1008,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
       costPerReachedFarmer,
       timeframeLabel,
     };
-  }, [callLogs, selectedTimeframe, customDate, rateInput, smsRateInput]);
+  }, [callLogs, selectedTimeframe, customDate, rateInput, smsRateInput, usage]);
 
   const noCalls = activeUsage && activeUsage.window && (activeUsage.days || []).length === 0;
 
@@ -990,13 +1020,13 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
           <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Cost Analytics</span>
           <h2 className="text-xl font-bold text-slate-900">Telephony & AI Expenditure</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Sarvam Voice AI usage (₹{Number(rateInput || 3.5).toFixed(2)}/min), advisory messages (₹{Number(smsRateInput || 0.2).toFixed(2)}/msg), and fixed monthly number rental (₹59.00/mo, billed separately).
+            Sarvam Voice AI usage (₹{Number(rateInput || 3.5).toFixed(2)}/min){hasAnyMessages ? `, advisory messages (₹${Number(smsRateInput || 0.2).toFixed(2)}/msg),` : ''} and fixed monthly number rental (₹59.00/mo, billed separately).
           </p>
         </div>
         <button
           onClick={() => load(true)}
           disabled={loading || !isBackendOnline}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+          className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           <span>Refresh</span>
@@ -1047,7 +1077,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
             <button
               onClick={handleSaveBalance}
               disabled={balanceInput === ''}
-              className="px-3 py-1 rounded-lg bg-trust-navy text-white font-semibold hover:bg-slate-800 transition-colors cursor-pointer text-xs disabled:opacity-50"
+              className="h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap bg-trust-navy text-white font-semibold hover:bg-slate-800 transition-colors cursor-pointer text-xs disabled:opacity-50"
             >
               Save balance
             </button>
@@ -1098,7 +1128,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
               </div>
               <div className="text-2xl font-bold text-slate-900 mt-1">{rupees(activeUsage.today?.amount)}</div>
               <div className="text-[11px] text-slate-500 mt-2.5 pt-2 border-t border-slate-100 break-words leading-relaxed">
-                {activeUsage.today?.billed_minutes || 0}m voice ({rupees(activeUsage.today?.voice_amount)}) · {activeUsage.today?.messages_sent || activeUsage.today?.calls || 0} SMS ({rupees(activeUsage.today?.message_amount)}) · {activeUsage.today?.farmers_reached || activeUsage.today?.connected || 0} of {activeUsage.today?.farmers_targeted || activeUsage.today?.calls || 0} farmers reached
+                {activeUsage.today?.billed_minutes || 0}m voice ({rupees(activeUsage.today?.voice_amount ?? activeUsage.today?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.today?.messages_sent || 0) > 0 ? ` · ${activeUsage.today.messages_sent} SMS (${rupees(activeUsage.today?.message_amount || 0)})` : ''} · {activeUsage.today?.farmers_reached || activeUsage.today?.connected || 0} of {activeUsage.today?.farmers_targeted || activeUsage.today?.calls || 0} farmers reached
               </div>
             </button>
 
@@ -1125,7 +1155,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
               </div>
               <div className="text-2xl font-bold text-slate-900 mt-1">{rupees(activeUsage.week?.amount)}</div>
               <div className="text-[11px] text-slate-500 mt-2.5 pt-2 border-t border-slate-100 break-words leading-relaxed">
-                {activeUsage.week?.billed_minutes || 0}m voice ({rupees(activeUsage.week?.voice_amount)}) · {activeUsage.week?.messages_sent || activeUsage.week?.calls || 0} SMS ({rupees(activeUsage.week?.message_amount)}) · {activeUsage.week?.farmers_reached || activeUsage.week?.connected || 0} of {activeUsage.week?.farmers_targeted || activeUsage.week?.calls || 0} farmers reached
+                {activeUsage.week?.billed_minutes || 0}m voice ({rupees(activeUsage.week?.voice_amount ?? activeUsage.week?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.week?.messages_sent || 0) > 0 ? ` · ${activeUsage.week.messages_sent} SMS (${rupees(activeUsage.week?.message_amount || 0)})` : ''} · {activeUsage.week?.farmers_reached || activeUsage.week?.connected || 0} of {activeUsage.week?.farmers_targeted || activeUsage.week?.calls || 0} farmers reached
               </div>
             </button>
 
@@ -1152,7 +1182,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
               </div>
               <div className="text-2xl font-bold text-trust-green mt-1">{rupees(activeUsage.window?.amount)}</div>
               <div className="text-[11px] text-slate-500 mt-2.5 pt-2 border-t border-slate-100 break-words leading-relaxed">
-                {activeUsage.window?.billed_minutes || 0}m voice ({rupees(activeUsage.window?.voice_amount)}) · {activeUsage.window?.messages_sent || activeUsage.window?.calls || 0} SMS ({rupees(activeUsage.window?.message_amount)}) · {activeUsage.window?.farmers_reached || activeUsage.window?.connected || 0} of {activeUsage.window?.farmers_targeted || activeUsage.window?.calls || 0} farmers reached
+                {activeUsage.window?.billed_minutes || 0}m voice ({rupees(activeUsage.window?.voice_amount ?? activeUsage.window?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.window?.messages_sent || 0) > 0 ? ` · ${activeUsage.window.messages_sent} SMS (${rupees(activeUsage.window?.message_amount || 0)})` : ''} · {activeUsage.window?.farmers_reached || activeUsage.window?.connected || 0} of {activeUsage.window?.farmers_targeted || activeUsage.window?.calls || 0} farmers reached
               </div>
             </button>
           </div>
@@ -1192,15 +1222,18 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
                   )}
                 </div>
 
-                <div className="h-4 w-px bg-slate-200 hidden sm:block" />
-
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Messages Sent:</span>
-                  <span className="font-bold text-sky-700 text-sm">{dynamicTimeframeStats.totalMessages}</span>
-                  <span className="text-slate-400 text-[11px]">
-                    ({rupees(dynamicTimeframeStats.messageSpend)})
-                  </span>
-                </div>
+                {dynamicTimeframeStats.totalMessages > 0 && (
+                  <>
+                    <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Messages Sent:</span>
+                      <span className="font-bold text-sky-700 text-sm">{dynamicTimeframeStats.totalMessages}</span>
+                      <span className="text-slate-400 text-[11px]">
+                        ({rupees(dynamicTimeframeStats.messageSpend)})
+                      </span>
+                    </div>
+                  </>
+                )}
 
                 <div className="h-4 w-px bg-slate-200 hidden sm:block" />
 
@@ -1211,7 +1244,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
                 </div>
               </div>
 
-              {/* Clean Dual-Rate Editor (Voice AI & SMS) */}
+              {/* Clean Rate Editor (Voice AI, and SMS only when messages exist) */}
               <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-3 py-2 rounded-xl text-xs shrink-0 self-start lg:self-auto">
                 <div className="flex items-center gap-1.5">
                   <label htmlFor="rate" className="font-semibold text-slate-700 whitespace-nowrap">
@@ -1230,28 +1263,31 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
                   <span className="text-slate-500 text-[11px]">/m</span>
                 </div>
 
-                <div className="h-4 w-px bg-slate-200" />
-
-                <div className="flex items-center gap-1.5">
-                  <label htmlFor="smsRate" className="font-semibold text-slate-700 whitespace-nowrap">
-                    SMS:
-                  </label>
-                  <span className="text-slate-400 font-medium">₹</span>
-                  <input
-                    id="smsRate"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={smsRateInput}
-                    onChange={(e) => setSmsRateInput(e.target.value)}
-                    className="w-14 px-1.5 py-0.5 bg-white border border-slate-200 rounded-md text-xs font-bold text-slate-900 text-center focus:ring-1 focus:ring-trust-navy focus:outline-hidden"
-                  />
-                  <span className="text-slate-500 text-[11px]">/msg</span>
-                </div>
+                {hasAnyMessages && (
+                  <>
+                    <div className="h-4 w-px bg-slate-200" />
+                    <div className="flex items-center gap-1.5">
+                      <label htmlFor="smsRate" className="font-semibold text-slate-700 whitespace-nowrap">
+                        SMS:
+                      </label>
+                      <span className="text-slate-400 font-medium">₹</span>
+                      <input
+                        id="smsRate"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={smsRateInput}
+                        onChange={(e) => setSmsRateInput(e.target.value)}
+                        className="w-14 px-1.5 py-0.5 bg-white border border-slate-200 rounded-md text-xs font-bold text-slate-900 text-center focus:ring-1 focus:ring-trust-navy focus:outline-hidden"
+                      />
+                      <span className="text-slate-500 text-[11px]">/msg</span>
+                    </div>
+                  </>
+                )}
 
                 <button
                   onClick={handleSaveRate}
-                  className="px-2.5 py-1 rounded-lg bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap bg-trust-navy text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer"
                 >
                   Save
                 </button>

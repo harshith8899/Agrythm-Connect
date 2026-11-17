@@ -1713,7 +1713,10 @@ class DashboardService:
             cbs = self.db.execute("SELECT farmer_id, source_date, due_at, status FROM dash_callbacks").fetchall()
             rts = self.db.execute("SELECT farmer_id, call_date, due_at FROM dash_retries "
                                   "WHERE status IN ('pending','calling')").fetchall()
+            sms_rows = self.db.execute("SELECT farmer_id, call_date, COUNT(*) FROM dash_messages WHERE status='sent' "
+                                       "AND channel='sms' GROUP BY farmer_id, call_date").fetchall()
         retry_due = {(fid, day): due for fid, day, due in rts}
+        sms_sent = {(fid, day): n for fid, day, n in sms_rows}        # SMS cost money; email does not, so only SMS is counted
         all_attempts = self._all_attempts()
         by_day: dict[tuple[str, str], tuple[str, str]] = {}
         for fid, src, due, st in cbs:
@@ -1749,7 +1752,7 @@ class DashboardService:
                 "callback_status": cb[1] if cb else None, "callback_requested_text": cb_text or "",
                 "summary": summary or "", "understood_weather": understood or "", "stop_calls_requested": stop or "",
                 "transcript": json.loads(transcript) if transcript else [], "attempts_log": attempts,
-                "call_mode": mode or "", "attempt_id": attempt_id or ""})
+                "call_mode": mode or "", "attempt_id": attempt_id or "", "messages_sent": sms_sent.get((fid, day), 0)})
         out += self._test_rows()
         live = {lv[0]: lv for lv in self._live_rows()}
         shown = set()
