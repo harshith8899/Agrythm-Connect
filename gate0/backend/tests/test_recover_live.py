@@ -140,7 +140,16 @@ def test_a_restarting_process_starts_no_new_call(tmp_path):
     assert s.calls() == [] and s._get_setting("last_auto_run_date") == ""
 
 
-def test_the_daily_send_stops_after_the_call_in_hand_when_the_process_is_stopping(tmp_path):
+def test_the_daily_send_places_no_new_call_when_the_process_is_already_stopping(tmp_path):
+    d = Lost(None)
+    s, _ = make(tmp_path, d, TWO)
+    s.draining = True
+    s.fire(D)
+    assert {c["farmer_id"]: c["status"] for c in s.calls()} == {"F1": "In Queue", "F2": "In Queue"}      # both wait for the restart
+    assert s.last_run["counts"] == {}
+
+
+def test_calls_in_hand_finish_and_are_saved_when_the_process_is_stopping(tmp_path):
     class Stopping(Lost):
         def place(self, phone, language_name, variables):
             self.service.draining = True                                             # the host asks the process to stop mid-call
@@ -153,7 +162,8 @@ def test_the_daily_send_stops_after_the_call_in_hand_when_the_process_is_stoppin
     d.service = s
     s.fire(D)
     seen = {c["farmer_id"]: c["status"] for c in s.calls()}
-    assert seen["F1"] == "Completed" and seen["F2"] == "In Queue"                   # F1 finished and saved; F2 waits for the restart
+    assert "Completed" in seen.values() and "In Call" not in seen.values()          # a call that was on the phone finished and was saved
+    assert set(seen.values()) <= {"Completed", "In Queue"}                          # one that had not started waits for the restart
 
 
 def test_wait_idle_returns_when_no_call_is_on_the_phone(tmp_path):

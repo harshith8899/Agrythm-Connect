@@ -167,7 +167,7 @@ class SarvamDialler(SarvamAgentTelephony):
             if got.get("call_summary"):
                 got["transcript"] = self._transcript(item.get("interaction_id"))
                 return got
-            self._sleep(3)
+            self._sleep(self.poll_every(3))
         return {}
 
     def _transcript(self, interaction_id: str | None) -> list[dict]:

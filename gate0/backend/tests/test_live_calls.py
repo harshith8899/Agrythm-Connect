@@ -80,15 +80,15 @@ def test_a_retry_shows_which_attempt_is_in_call_on_the_row_that_already_exists(t
     assert statuses(s) == {"F1": "Completed"}
 
 
-def test_a_due_retry_is_in_queue_until_its_turn(tmp_path):
+def test_every_due_retry_is_placed_at_the_same_time(tmp_path):
     d = Watching([A.NO_ANSWER, A.NO_ANSWER, A.ANSWERED, A.ANSWERED])
     s, clock = make(tmp_path, d)
     s.import_csv(TWO)
     s.fire(D)
     clock["now"] = T0 + timedelta(minutes=30)
     assert s.run_due_retries() == 2
-    assert d.seen[2]["F1"][0] == "In Call" and d.seen[2]["F2"][0] == "In Queue"
-    assert d.seen[3]["F2"][0] == "In Call"
+    assert d.seen[2]["F1"][0] == "In Call" and d.seen[3]["F2"][0] == "In Call"
+    assert s.db.execute("SELECT COUNT(*) FROM dash_live").fetchone()[0] == 0
 
 
 def test_a_test_call_shows_as_its_own_in_call_row(tmp_path):
