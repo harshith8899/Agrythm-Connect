@@ -7,6 +7,7 @@ import {
   CheckCircle2, 
   AlertCircle, 
   PhoneOutgoing,
+  PhoneIncoming,
   Database,
   ExternalLink,
   ShieldAlert,
@@ -306,6 +307,11 @@ export const CallHistoryTable = ({
                   {Number(call.messages_sent || 0) > 0 && (
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">SMS Sent</span>
                   )}
+                  {call.direction === 'incoming' && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200" title="The farmer rang us">
+                      <PhoneIncoming className="w-3 h-3" />Incoming
+                    </span>
+                  )}
                   {call.is_test && (
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200">TEST</span>
                   )}
@@ -463,6 +469,11 @@ export const CallHistoryTable = ({
                         {getStatusBadge(call.status, call.disposition, call.skip_reason)}
                         {Number(call.messages_sent || 0) > 0 && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">SMS Sent</span>
+                        )}
+                        {call.direction === 'incoming' && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200" title="The farmer rang us">
+                            <PhoneIncoming className="w-3 h-3" />Incoming
+                          </span>
                         )}
                         {call.is_test && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200">TEST</span>

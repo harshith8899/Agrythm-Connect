@@ -10,6 +10,7 @@ the calling window (5:00 to 22:00 IST), at most 30 minutes late, and never retri
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -23,6 +24,7 @@ from typing import Callable
 from .adapters.dialers import OUTPUT_VARS, make_dialler
 from .adapters.local import SQLiteLedger
 from .adapters.mailer import MailNotConfigured, make_mailer
+from .adapters.translate import TranslateError, make_translator
 from .adapters.mock import MockVoice, MockWeather
 from .adapters.weatherapi import geocode, make_weather
 from .adapters.sarvam_agent import _LANG_NAMES
@@ -79,6 +81,11 @@ CREATE TABLE IF NOT EXISTS dash_retries(
 CREATE TABLE IF NOT EXISTS dash_live(
   farmer_id TEXT PRIMARY KEY, call_date TEXT, kind TEXT, attempt_no INT, state TEXT, since TEXT);
 CREATE TABLE IF NOT EXISTS dash_settings(key TEXT PRIMARY KEY, value TEXT);
+-- every call made to the inbound line, whoever rang (the dashboard's incoming calls)
+CREATE TABLE IF NOT EXISTS dash_incoming(
+  attempt_id TEXT PRIMARY KEY, call_date TEXT, at TEXT, last4 TEXT, farmer_id TEXT, duration_s INT, outcome TEXT, note TEXT);
+-- English text for what was said (a translation is made once and kept); h is a hash of the language and the text
+CREATE TABLE IF NOT EXISTS dash_translations(h TEXT PRIMARY KEY, english TEXT);
 -- a farmer we could not reach today, told to the inbound line so that, if they ring back, the agent knows who they are
 CREATE TABLE IF NOT EXISTS dash_inbound(
   farmer_id TEXT, call_date TEXT, context TEXT, status TEXT, note TEXT, pushed_at TEXT,
@@ -192,7 +199,7 @@ class DBFarmers:
 
 class DashboardService:
     def __init__(self, db_path: str, weather=None, dialler=None, note: str = "", env: dict | None = None,
-                 now: Callable[[], datetime] | None = None, mailer=None):
+                 now: Callable[[], datetime] | None = None, mailer=None, translator=None):
         import os
         self.db_path = db_path
         self._now = now or (lambda: datetime.now(IST))
@@ -201,11 +208,14 @@ class DashboardService:
         self.db.executescript(_SCHEMA)
         if "reschedules" not in table_columns(self.db, "dash_callbacks"):      # databases made before the reschedule limit
             self.db.execute("ALTER TABLE dash_callbacks ADD COLUMN reschedules INT DEFAULT 0")
+        if "hidden" not in table_columns(self.db, "dash_messages"):             # email log rows can be removed from the list
+            self.db.execute("ALTER TABLE dash_messages ADD COLUMN hidden INT DEFAULT 0")
         if "email" not in table_columns(self.db, "dash_farmers"):               # databases made before email messages
             self.db.execute("ALTER TABLE dash_farmers ADD COLUMN email TEXT DEFAULT ''")
         self.settings = Settings.from_env()
         self.dialler, self.note = (dialler, note) if dialler else make_dialler(env)
         self.mailer = mailer or make_mailer(env)
+        self.translator = translator if translator is not None else make_translator(env)
         # testing: every farmer's message goes to this one address (as if it were that farmer's), with the farmer named in the subject
         self.mail_test_to = _clean_email((env if env is not None else os.environ).get("GATE0_MAIL_TEST_TO", ""))
         e = env if env is not None else os.environ
@@ -1299,12 +1309,13 @@ class DashboardService:
             self._set_setting("inbound_roster_date", today)
 
     def sync_inbound(self, now: datetime | None = None) -> int:
-        """Brings in the calls farmers made to the inbound line: each becomes that farmer's result (the weather email
-        follows), and a farmer who was served (understood the weather, declined, asked to stop or for another time) has
-        their waiting retries dropped, and a pending callback too if they understood, so nobody is rung right after
-        calling us. One look at Sarvam's call records per pass, matched to farmers by the last 4 digits of the number
-        (a number two farmers share is left alone); a call from a number that is not a farmer is ignored. Run at the
-        start of every pass, before any retry or callback is placed. Returns how many calls were brought in."""
+        """Brings in the calls made to the inbound line. Each is logged (dash_incoming) so the dashboard shows every incoming
+        call, whoever rang; a call from a farmer we told the line about becomes that farmer's result (the weather email
+        follows) and, when they were served (understood the weather, declined, asked to stop or for another time), their
+        waiting retries are dropped, and a pending callback too if they understood, so nobody is rung right after calling
+        us. One look at Sarvam's call records per pass, matched to farmers by the last 4 digits of the number (a number two
+        farmers share is left alone). Run at the start of every pass, before any retry or callback is placed. Returns how
+        many calls were brought in as results."""
         now = now or self._now()
         if not self._inbound_ready():
             return 0
@@ -1318,27 +1329,79 @@ class DashboardService:
                                        "AND context NOT IN ('unregistered','stopped')", (day.isoformat(),)).fetchall()
                 known = {r[0] for r in self.db.execute("SELECT provider_call_id FROM attempts WHERE call_date=?",
                                                        (day.isoformat(),)).fetchall()}
-            if not rows:
-                return 0
+                known |= {r[0] for r in self.db.execute("SELECT attempt_id FROM dash_incoming WHERE call_date=?",
+                                                        (day.isoformat(),)).fetchall()}
+                everyone = self.db.execute("SELECT farmer_id, phone, consent, active FROM dash_farmers").fetchall()
             ports = self._make_ports()
-            by_last4: dict[str, list[tuple[str, str]]] = {}
+            waiting_by_last4: dict[str, list[tuple[str, str]]] = {}
             for fid, context in rows:
                 farmer = ports.farmers.get_context(fid)
                 if farmer is not None and farmer.phone:
-                    by_last4.setdefault(re.sub(r"\D", "", farmer.phone)[-4:], []).append((fid, context))
+                    waiting_by_last4.setdefault(re.sub(r"\D", "", farmer.phone)[-4:], []).append((fid, context))
+            all_by_last4: dict[str, list[tuple[str, bool]]] = {}
+            for fid, phone, consent, active in everyone:
+                if phone:
+                    all_by_last4.setdefault(re.sub(r"\D", "", phone)[-4:], []).append((fid, bool(consent and active)))
             start = datetime.combine(day, dtime(0, 0), IST)
             for last4, res, ended in self.dialler.find_inbound_calls(start, now, known):
-                who = by_last4.get(last4, [])
-                if len(who) != 1:                           # not a farmer we told the line about, or the number is shared
-                    continue
-                try:
-                    brought += self._apply_inbound_call(ports, who[0][0], who[0][1], day, res, ended)
-                except Exception:                           # one farmer's problem never blocks the others
-                    continue
+                who = waiting_by_last4.get(last4, [])
+                if len(who) == 1:
+                    try:
+                        if self._apply_inbound_call(ports, who[0][0], who[0][1], day, res, ended):
+                            brought += 1
+                        self._log_incoming(res, day, ended, last4, who[0][0], "answered", "Answered by the agent")
+                    except Exception:                       # one farmer's problem never blocks the others
+                        continue
+                else:
+                    known_fids = all_by_last4.get(last4, [])
+                    if len(known_fids) == 1:
+                        fid, registered = known_fids[0]
+                        outcome, note = (("not_registered", "This farmer is inactive or has not given consent: the agent ends the call")
+                                         if not registered else ("answered", "Answered by the agent (the line had no details for this farmer)"))
+                    elif len(known_fids) > 1:
+                        fid, outcome, note = "", "shared_number", "A number two farmers share: not matched to either"
+                    else:
+                        fid, outcome, note = "", "unknown_number", "Not a registered farmer: the agent ends the call"
+                    self._log_incoming(res, day, ended, last4, fid, outcome, note)
                 known.add(res.provider_call_id)
         except Exception:
             pass
         return brought
+
+    def _log_incoming(self, res: ProviderCallResult, day: date, ended: datetime, last4: str, fid: str, outcome: str, note: str) -> None:
+        """One row per call to the inbound line (the dashboard's incoming calls); never raises."""
+        try:
+            with self.lock:
+                self.db.execute("INSERT OR IGNORE INTO dash_incoming VALUES(?,?,?,?,?,?,?,?)",
+                                (res.provider_call_id, day.isoformat(), ended.astimezone(IST).isoformat(timespec="seconds"), last4,
+                                 fid, res.duration_s or 0, outcome, note))
+                self.db.commit()
+        except Exception:
+            pass
+
+    def _incoming_rows(self) -> list[dict]:
+        """Calls to the inbound line that are not a farmer's result (an unknown number, an inactive farmer, a shared number),
+        shaped like the other call rows so the call log can list them with the incoming mark."""
+        with self.lock:
+            rows = self.db.execute("SELECT i.attempt_id, i.call_date, i.at, i.last4, i.farmer_id, i.duration_s, i.outcome, i.note, "
+                                   "f.name, f.village, f.district FROM dash_incoming i LEFT JOIN dash_farmers f "
+                                   "ON f.farmer_id=i.farmer_id WHERE i.outcome<>'answered' ORDER BY i.at DESC LIMIT 200").fetchall()
+        out = []
+        for attempt_id, call_date, at, last4, fid, dur, outcome, note, name, village, district in rows:
+            title = {"not_registered": "Incoming call: not a registered farmer (inactive or no consent)",
+                     "shared_number": "Incoming call: number shared by two farmers",
+                     "unknown_number": "Incoming call: unknown number"}.get(outcome, "Incoming call")
+            out.append({
+                "call_id": f"IN-{attempt_id}", "direction": "incoming", "farmer_id": fid or "", "farmer_name": name or "Unknown number",
+                "phone_number": "******" + last4, "location": ", ".join(x for x in (village, district) if x), "village": village or "",
+                "district": district or "", "call_date": call_date, "created_at": at, "language": "", "weather_temp": None,
+                "weather_windspeed": None, "weather_rainfall": None, "weather_humidity": None, "weather_source": "",
+                "status": "Skipped", "disposition": title, "note": note, "retry_count": 0, "duration_seconds": dur or 0,
+                "attempts_used": 0, "max_attempts": self.settings.max_attempts, "next_attempt_at": None,
+                "scheduled_callback_time": None, "callback_status": None, "callback_requested_text": "", "summary": note,
+                "understood_weather": "", "stop_calls_requested": "", "transcript": [], "attempts_log": [],
+                "call_mode": self.dialler.mode, "attempt_id": attempt_id, "messages_sent": 0})
+        return out
 
     def _apply_inbound_call(self, ports: Ports, fid: str, context: str, day: date, res: ProviderCallResult,
                             ended: datetime) -> int:
@@ -1426,7 +1489,7 @@ class DashboardService:
             weather = weather or self._saved_weather(fid, day.isoformat())
             now = self._now().isoformat(timespec="seconds")
             with self.lock:                                 # claim first: the primary key stops a second message
-                claimed = self.db.execute("INSERT OR IGNORE INTO dash_messages VALUES(?,?,?,?,?,?,?)",
+                claimed = self.db.execute("INSERT OR IGNORE INTO dash_messages(farmer_id, call_date, kind, channel, status, note, at) VALUES(?,?,?,?,?,?,?)",
                                           (fid, day.isoformat(), rk, "email", "sending", "", now)).rowcount
                 self.db.commit()
             if claimed != 1:
@@ -1478,7 +1541,7 @@ class DashboardService:
             status, note = "failed", _error_detail(exc)
         now = self._now()
         with self.lock:
-            self.db.execute("INSERT OR REPLACE INTO dash_messages VALUES(?,?,?,?,?,?,?)",
+            self.db.execute("INSERT OR REPLACE INTO dash_messages(farmer_id, call_date, kind, channel, status, note, at) VALUES(?,?,?,?,?,?,?)",
                             ("(setup test)", now.date().isoformat(), f"test:setup:{uuid.uuid4().hex[:8]}", "email", status, note,
                              now.isoformat(timespec="seconds")))
             self.db.commit()
@@ -1488,9 +1551,57 @@ class DashboardService:
         with self.lock:
             rows = self.db.execute("SELECT m.at, m.farmer_id, f.name, m.call_date, m.kind, m.channel, m.status, m.note "
                                    "FROM dash_messages m LEFT JOIN dash_farmers f ON f.farmer_id=m.farmer_id "
-                                   "ORDER BY m.at DESC LIMIT ?", (limit,)).fetchall()
-        return [{"at": r[0], "farmer_id": r[1], "farmer_name": r[2] or "", "call_date": r[3], "kind": r[4],
-                 "channel": r[5], "status": r[6], "note": r[7]} for r in rows]
+                                   "WHERE COALESCE(m.hidden, 0)=0 ORDER BY m.at DESC LIMIT ?", (limit,)).fetchall()
+        return [{"key": f"{r[1]}|{r[3]}|{r[4]}", "at": r[0], "farmer_id": r[1], "farmer_name": r[2] or "", "call_date": r[3],
+                 "kind": r[4], "channel": r[5], "status": r[6], "note": r[7]} for r in rows]
+
+    def dismiss_messages(self, keys: list | None = None) -> int:
+        """Removes email log rows from the list (all of them when keys is None). The rows are kept, only hidden, because
+        a row is also what stops the same email going out twice for a farmer and day. Returns how many were hidden."""
+        with self.lock:
+            if keys is None:
+                n = self.db.execute("SELECT COUNT(*) FROM dash_messages WHERE COALESCE(hidden, 0)=0").fetchone()[0]
+                self.db.execute("UPDATE dash_messages SET hidden=1")
+            else:
+                n = 0
+                for key in keys:
+                    parts = str(key).split("|")
+                    if len(parts) != 3:
+                        continue
+                    n += self.db.execute("SELECT COUNT(*) FROM dash_messages WHERE farmer_id=? AND call_date=? AND kind=? "
+                                         "AND COALESCE(hidden, 0)=0", tuple(parts)).fetchone()[0]
+                    self.db.execute("UPDATE dash_messages SET hidden=1 WHERE farmer_id=? AND call_date=? AND kind=?", tuple(parts))
+            self.db.commit()
+        return n
+
+    def transcript_english(self, call_id: str) -> dict:
+        """The call's transcript with an English line under each turn, translated through Sarvam and kept so each turn is
+        translated once. {available, turns: [{speaker, text, english}], error}."""
+        call = self.call(call_id)
+        if call is None:
+            raise KeyError(call_id)
+        turns = [{"speaker": t.get("speaker", ""), "text": t.get("text", "")} for t in call.get("transcript") or []]
+        language = call.get("language") or ""
+        if self.translator is None:
+            return {"available": False, "turns": turns, "error": "Translation is not set up: add SARVAM_API_KEY in Render."}
+        if not self.translator.needs_translation(language):
+            return {"available": True, "turns": [{**t, "english": t["text"]} for t in turns], "error": ""}
+        out, error = [], ""
+        for t in turns:
+            h = hashlib.sha1(f"{language}|{t['text']}".encode()).hexdigest()
+            with self.lock:
+                row = self.db.execute("SELECT english FROM dash_translations WHERE h=?", (h,)).fetchone()
+            english = row[0] if row else None
+            if english is None and not error:
+                try:
+                    english = self.translator.translate(t["text"], language)
+                    with self.lock:
+                        self.db.execute("INSERT OR IGNORE INTO dash_translations VALUES(?,?)", (h, english))
+                        self.db.commit()
+                except Exception as exc:                    # the first failure stops the rest: type and code only
+                    error = _error_detail(exc)
+            out.append({**t, "english": english or ""})
+        return {"available": True, "turns": out, "error": f"Translation failed ({error})" if error else ""}
 
     def _outputs(self, res: ProviderCallResult) -> dict:
         if res.status is not AttemptStatus.ANSWERED:
@@ -1661,15 +1772,16 @@ class DashboardService:
         """Every attempt, grouped by (farmer, day), in one query (one round trip, however many calls are listed)."""
         with self.lock:
             try:
-                rows = self.db.execute("SELECT farmer_id, call_date, attempt_no, status, duration_s, error FROM attempts "
+                rows = self.db.execute("SELECT farmer_id, call_date, attempt_no, status, duration_s, error, message_text FROM attempts "
                                        "ORDER BY farmer_id, call_date, attempt_no").fetchall()
             except OperationalError:
                 rows = []
         label = {"answered": "Answered", "no_answer": "No Answer or Rejected", "busy": "Busy", "failed": "Failed"}
         out: dict[tuple[str, str], list[dict]] = {}
-        for fid, day, n, status, dur, err in rows:
+        for fid, day, n, status, dur, err, msg in rows:
             out.setdefault((fid, day), []).append({"attempt_number": n, "status": label.get(status, status),
-                                                   "duration_seconds": dur or 0, "error_message": err or ""})
+                                                   "duration_seconds": dur or 0, "error_message": err or "",
+                                                   "incoming": msg == "(farmer called)"})
         return out
 
     @staticmethod
@@ -1752,8 +1864,10 @@ class DashboardService:
                 "callback_status": cb[1] if cb else None, "callback_requested_text": cb_text or "",
                 "summary": summary or "", "understood_weather": understood or "", "stop_calls_requested": stop or "",
                 "transcript": json.loads(transcript) if transcript else [], "attempts_log": attempts,
-                "call_mode": mode or "", "attempt_id": attempt_id or "", "messages_sent": sms_sent.get((fid, day), 0)})
+                "call_mode": mode or "", "attempt_id": attempt_id or "", "messages_sent": sms_sent.get((fid, day), 0),
+                "direction": "incoming" if attempts and attempts[-1].get("incoming") else "outgoing"})
         out += self._test_rows()
+        out += self._incoming_rows()
         live = {lv[0]: lv for lv in self._live_rows()}
         shown = set()
         for c in out:                                       # a farmer being called now: the row says so

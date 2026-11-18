@@ -7,6 +7,8 @@ import {
   Droplets, 
   Phone, 
   PhoneCall,
+  PhoneIncoming,
+  Languages,
   MapPin, 
   MessageSquare,
   Clock,
@@ -15,7 +17,7 @@ import {
   Bot
 } from 'lucide-react';
 
-import { maskPhoneNumber } from '../utils';
+import { maskPhoneNumber, getCallTranslation } from '../utils';
 
 const LANG_CODES = { Hindi: 'hi', Kannada: 'kn', Telugu: 'te', English: 'en' };
 // Fonts that carry the Indian scripts, so Kannada, Telugu and Hindi are drawn properly on every device
@@ -24,6 +26,25 @@ const INDIC_FONTS = "'Noto Sans Kannada', 'Noto Sans Telugu', 'Noto Sans Devanag
 export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
   const [callingBack, setCallingBack] = useState(false);
   const [callNote, setCallNote] = useState(null);
+  const [english, setEnglish] = useState({ show: false, loading: false, turns: null, error: '' });   // the English under each turn
+
+  const toggleEnglish = async () => {
+    if (english.show) {
+      setEnglish((e) => ({ ...e, show: false }));
+      return;
+    }
+    if (english.turns) {
+      setEnglish((e) => ({ ...e, show: true }));
+      return;
+    }
+    setEnglish({ show: true, loading: true, turns: null, error: '' });
+    try {
+      const r = await getCallTranslation(call.call_id);
+      setEnglish({ show: true, loading: false, turns: r.turns || [], error: r.error || '' });
+    } catch (err) {
+      setEnglish({ show: true, loading: false, turns: null, error: err.message || 'Could not translate' });
+    }
+  };
 
   if (!call) return null;
 
@@ -380,12 +401,27 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
           <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-3.5">
             <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
               <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">Conversation</span>
-              {(call.language || call.primary_language) && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                  {call.language || call.primary_language}
-                </span>
-              )}
+              <span className="flex items-center gap-2">
+                {(call.language || call.primary_language) && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                    {call.language || call.primary_language}
+                  </span>
+                )}
+                {transcriptItems.length > 0 && (
+                  <button
+                    onClick={toggleEnglish}
+                    disabled={english.loading}
+                    className="h-8 px-3 rounded-lg inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[11px] font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Languages className="w-3.5 h-3.5" />
+                    {english.loading ? 'Translating...' : english.show ? 'Hide English' : 'Show English'}
+                  </button>
+                )}
+              </span>
             </div>
+            {english.show && english.error && (
+              <p className="text-[11px] font-semibold text-rose-700">{english.error}</p>
+            )}
 
             {call.summary && (
               <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-100 text-xs text-slate-700 leading-relaxed">
@@ -435,6 +471,11 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
                         >
                           {text}
                         </p>
+                        {english.show && english.turns && (english.turns[idx]?.english || '') !== '' && (
+                          <p className="mt-1.5 pt-1.5 border-t border-slate-200/70 text-[12px] leading-relaxed text-slate-500 italic whitespace-pre-line break-words">
+                            {english.turns[idx].english}
+                          </p>
+                        )}
                       </div>
                     </div>
                   );
