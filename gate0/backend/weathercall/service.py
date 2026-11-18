@@ -30,7 +30,7 @@ from .adapters.mailer import MailNotConfigured, make_mailer
 from .adapters.translate import TranslateError, make_translator
 from .adapters.mock import MockVoice, MockWeather
 from .adapters.weatherapi import geocode, make_weather
-from .adapters.sarvam_agent import _LANG_NAMES
+from .adapters.sarvam_agent import _LANG_NAMES, to_e164
 from .adapters.sarvam_campaign import IST, scrub
 from .adapters.sheet import _ALIASES, _LANG, _key, _read_rows, load_farmers
 from .adapters.weather_store import StoredWeather
@@ -165,6 +165,17 @@ def mask_email(email: str) -> str:
         return ""
     local, domain = email.split("@", 1)
     return f"{local[:1]}***@{domain}"
+
+
+def _caller_keys(phone: str) -> list[str]:
+    """How a caller can be recognised: the SHA-256 of the +91 number (what Sarvam's call record carries as the hashed contact,
+    exact) and the last 4 digits (a fallback when the record has no hash)."""
+    keys = [re.sub(r"\D", "", phone or "")[-4:]]
+    try:
+        keys.append(hashlib.sha256(to_e164(phone).encode()).hexdigest())
+    except ValueError:
+        pass
+    return keys
 
 
 def _error_detail(exc: BaseException) -> str:
@@ -1406,7 +1417,7 @@ class DashboardService:
         now = now or self._now()
         if not self._inbound_ready():
             return 0
-        brought = 0
+        brought, seen, error = 0, 0, ""
         try:
             day = now.date()
             with self.lock:
@@ -1420,18 +1431,24 @@ class DashboardService:
                                                         (day.isoformat(),)).fetchall()}
                 everyone = self.db.execute("SELECT farmer_id, phone, consent, active FROM dash_farmers").fetchall()
             ports = self._make_ports()
-            waiting_by_last4: dict[str, list[tuple[str, str]]] = {}
+            waiting_by_key: dict[str, list[tuple[str, str]]] = {}
             for fid, context in rows:
                 farmer = ports.farmers.get_context(fid)
                 if farmer is not None and farmer.phone:
-                    waiting_by_last4.setdefault(re.sub(r"\D", "", farmer.phone)[-4:], []).append((fid, context))
-            all_by_last4: dict[str, list[tuple[str, bool]]] = {}
+                    for k in _caller_keys(farmer.phone):
+                        waiting_by_key.setdefault(k, []).append((fid, context))
+            all_by_key: dict[str, list[tuple[str, bool]]] = {}
             for fid, phone, consent, active in everyone:
                 if phone:
-                    all_by_last4.setdefault(re.sub(r"\D", "", phone)[-4:], []).append((fid, bool(consent and active)))
+                    for k in _caller_keys(phone):
+                        all_by_key.setdefault(k, []).append((fid, bool(consent and active)))
             start = datetime.combine(day, dtime(0, 0), IST)
-            for last4, res, ended in self.dialler.find_inbound_calls(start, now, known):
-                who = waiting_by_last4.get(last4, [])
+            for call in self.dialler.find_inbound_calls(start, now, known):
+                last4, res, ended = call[0], call[1], call[2]
+                chash = call[3] if len(call) > 3 else ""
+                key = chash or last4                          # the exact hash of the number when Sarvam gives it, else the last 4 digits
+                seen += 1
+                who = waiting_by_key.get(key, [])
                 if len(who) == 1:
                     try:
                         if self._apply_inbound_call(ports, who[0][0], who[0][1], day, res, ended):
@@ -1440,7 +1457,7 @@ class DashboardService:
                     except Exception:                       # one farmer's problem never blocks the others
                         continue
                 else:
-                    known_fids = all_by_last4.get(last4, [])
+                    known_fids = all_by_key.get(key, [])
                     if len(known_fids) == 1:
                         fid, registered = known_fids[0]
                         outcome, note = (("not_registered", "This farmer is inactive or has not given consent: the agent ends the call")
@@ -1451,6 +1468,11 @@ class DashboardService:
                         fid, outcome, note = "", "unknown_number", "Not a registered farmer: the agent ends the call"
                     self._log_incoming(res, day, ended, last4, fid, outcome, note)
                 known.add(res.provider_call_id)
+        except Exception as exc:                            # the dashboard shows this, so a failing look is not silent
+            error = _error_detail(exc)
+        try:
+            self._set_setting("inbound_sync", json.dumps({"at": now.isoformat(timespec="seconds"), "seen": seen,
+                                                          "applied": brought, "error": error}))
         except Exception:
             pass
         return brought
@@ -1528,6 +1550,19 @@ class DashboardService:
                 self.db.commit()
         self._refresh_inbound([fid])                        # what they should hear if they ring again today
         return 1
+
+    def incoming(self, limit: int = 30) -> dict:
+        """The incoming line at a glance: when it was last looked at, what the look found or the error, and the latest calls to it."""
+        try:
+            sync = json.loads(self._get_setting("inbound_sync") or "{}")
+        except ValueError:
+            sync = {}
+        with self.lock:
+            rows = self.db.execute("SELECT i.at, i.last4, i.farmer_id, f.name, i.duration_s, i.outcome, i.note FROM dash_incoming i "
+                                   "LEFT JOIN dash_farmers f ON f.farmer_id=i.farmer_id ORDER BY i.at DESC LIMIT ?", (limit,)).fetchall()
+        return {"ready": self._inbound_ready(), "sync": sync,
+                "calls": [{"at": r[0], "number": "******" + r[1], "farmer_id": r[2] or "", "farmer_name": r[3] or "Unknown number",
+                           "duration_seconds": r[4] or 0, "outcome": r[5], "note": r[6]} for r in rows]}
 
     def inbound(self, limit: int = 100) -> list[dict]:
         with self.lock:
@@ -1730,6 +1765,18 @@ class DashboardService:
                             f"Today's calls were skipped: the backend was not running until after {CALL_TO:%H:%M}.")
             else:
                 self.start_fire(now.date())
+
+    def inbound_loop(self, every: int = 10) -> None:
+        """Looks at the calls made to the inbound line every 10 s, on its own, so an incoming call reaches the dashboard soon
+        after Sarvam reports it and not at the pace of the slower pass that places retries and callbacks."""
+        import time as _t
+        while True:
+            try:
+                if not self.draining:
+                    self.sync_inbound()
+            except Exception:
+                pass
+            _t.sleep(every)
 
     def scheduler_loop(self, every: int = 30) -> None:
         import time as _t

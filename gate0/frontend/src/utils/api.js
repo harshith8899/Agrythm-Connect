@@ -250,6 +250,8 @@ export const getCallTranslation = (callId) => getJson(`${API_BASE}/api/calls/${e
 /** Removes one email log row (by its key), or all of them when no key is given. The email is still never sent twice. */
 export const dismissMessages = (key) =>
   postJson('/api/messages/dismiss', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(key == null ? { all: true } : { key }) });
+/** The incoming line at a glance: { ready, sync: { at, seen, applied, error }, calls: [...] }. */
+export const getIncoming = () => getJson(`${API_BASE}/api/incoming`);
 export const getMessages = () => getJson(`${API_BASE}/api/messages`);
 
 export const getCallbacks = () => getJson(`${API_BASE}/api/callbacks`);

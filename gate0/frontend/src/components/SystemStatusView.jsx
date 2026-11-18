@@ -15,7 +15,7 @@ import {
   Mail,
   X,
 } from 'lucide-react';
-import { getSystemChecks, getAlerts, getMessages, dismissAlerts, dismissMessages, sendTestEmail } from '../utils';
+import { getSystemChecks, getAlerts, getMessages, getIncoming, dismissAlerts, dismissMessages, sendTestEmail } from '../utils';
 
 const MESSAGE_LABEL = {
   weather: 'Weather update',
@@ -105,13 +105,15 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   const [systemLoading, setSystemLoading] = useState(false);
   const [alerts, setAlerts] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [incoming, setIncoming] = useState(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
   const loadSystem = useCallback(async (refresh = false) => {
     setSystemLoading(true);
     try {
-      const [checks, al, msgs] = await Promise.all([getSystemChecks(refresh), getAlerts().catch(() => []), getMessages().catch(() => [])]);
+      const [checks, al, msgs, inc] = await Promise.all([getSystemChecks(refresh), getAlerts().catch(() => []), getMessages().catch(() => []), getIncoming().catch(() => null)]);
+      setIncoming(inc);
       setSystemReport(checks);
       setAlerts(al);
       setMessages(Array.isArray(msgs) ? msgs : []);
@@ -297,6 +299,33 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* The incoming line: when it was last looked at and the latest calls to it */}
+        {incoming && incoming.ready && (
+          <div className="rounded-xl border border-slate-100">
+            <div className="p-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100">
+              <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Incoming line ({(incoming.calls || []).length} recent)</span>
+              <span className="text-[11px] text-slate-500">
+                {incoming.sync && incoming.sync.at
+                  ? `Last checked ${String(incoming.sync.at).replace('T', ' ').slice(0, 19)} · ${incoming.sync.seen} call(s) seen`
+                  : 'Not checked yet'}
+                {incoming.sync && incoming.sync.error ? <span className="ml-2 font-semibold text-rose-700">Problem: {incoming.sync.error}</span> : null}
+              </span>
+            </div>
+            {(incoming.calls || []).length === 0 ? (
+              <p className="p-3 text-xs text-slate-500">No calls to the number yet.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100 text-xs">
+                {incoming.calls.slice(0, 5).map((c, i) => (
+                  <li key={`${c.at}-${i}`} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <span><strong className="text-slate-800">{c.farmer_name}</strong> <span className="text-slate-400 font-mono">{c.number}</span> · {String(c.at).replace('T', ' ').slice(0, 16)} · {c.duration_seconds}s</span>
+                    <span className="text-slate-500">{c.note}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 

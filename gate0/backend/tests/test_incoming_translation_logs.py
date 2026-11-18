@@ -179,3 +179,38 @@ def test_the_translator_key_comes_from_the_environment():
     assert make_translator({}) is None
     assert isinstance(make_translator({"SARVAM_API_KEY": "k"}), SarvamTranslator)
     assert isinstance(make_translator({"SARVAM_TRANSLATE_API_KEY": "k"}), SarvamTranslator)
+
+
+# ---- the real shape of Sarvam's records for calls to the line ------------------------------------------------------------
+def test_two_calls_to_the_line_are_both_logged_and_two_numbers_ending_the_same_are_told_apart(tmp_path):
+    import hashlib
+    from weathercall.adapters.dialers import SarvamDialler
+    from weathercall.adapters.sarvam_agent import to_e164
+
+    def record(number, interaction, minute):
+        return {"attempt_id": "NO_JOB_ID", "interaction_id": interaction, "channel_direction": "inbound",
+                "connectivity_status": "connected", "duration_in_seconds": 13, "attempted_at": f"2026-11-17T05:{minute}:20",
+                "user_contact_masked": "+91******" + number[-4:],
+                "user_contact_hashed": hashlib.sha256(to_e164(number).encode()).hexdigest()}
+
+    env = {"SARVAM_ORG_ID": "o", "SARVAM_WORKSPACE_ID": "w", "SARVAM_APP_ID": "a", "SARVAM_CONNECTION_ID": "c",
+           "SARVAM_AGENT_PHONE": "+910000000000", "SARVAM_AGENT_API_KEY": "k", "SARVAM_INBOUND_DEPLOYMENT_ID": "dep"}
+    items = [record("9000003736", "20261117/aaa-10:36:20", "06"), record("9111113736", "20261117/bbb-10:40:11", "10")]
+
+    class Opener:
+        def __call__(self, req, timeout=0):
+            return io.BytesIO(json.dumps({"items": items}).encode())
+
+    dialler = SarvamDialler(env=env, opener=Opener())
+    s = DashboardService(str(tmp_path / "h.db"), dialler=dialler, env={"GATE0_WEATHER": "mock"}, now=lambda: T0 + timedelta(hours=8))
+    s.async_inbound = False
+    s.import_csv("Farmer ID,Farmer Name,Mobile Number,Village,District,State,Preferred Calling Language,Call Consent,Active\n"
+                 "F1,Ramesh,9000003736,Mandya,Mandya,Karnataka,Hindi,Yes,No\n"          # inactive
+                 "F2,Lakshmi,9222223736,Mysuru,Mysuru,Karnataka,English,Yes,Yes\n")     # same last 4 digits, different number
+    s.sync_inbound(T0 + timedelta(hours=8))
+    rows = {c["call_id"]: c for c in s.calls() if c["call_id"].startswith("IN-")}
+    assert set(rows) == {"IN-20261117/aaa-10:36:20", "IN-20261117/bbb-10:40:11"}      # each call has its own row
+    first, second = rows["IN-20261117/aaa-10:36:20"], rows["IN-20261117/bbb-10:40:11"]
+    assert first["farmer_name"] == "Ramesh" and "not a registered farmer" in first["disposition"].lower()   # the exact number, not the last 4
+    assert second["farmer_name"] == "Unknown number"                          # 9111113736 is nobody's, though it ends like two others
+    assert s.incoming()["sync"]["seen"] == 2 and s.incoming()["sync"]["error"] == ""

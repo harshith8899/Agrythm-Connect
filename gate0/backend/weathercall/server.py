@@ -182,6 +182,8 @@ def make_handler(
                     return self._send(200, service.alerts())
                 if path == "/api/messages":
                     return self._send(200, service.messages())
+                if path == "/api/incoming":
+                    return self._send(200, service.incoming())
                 if path == "/api/inbound":
                     return self._send(200, service.inbound())
                 if path == "/api/orchestrator/status":
@@ -323,6 +325,7 @@ def run(port: int | None = None) -> None:
     port = port or int(os.environ.get("PORT", 8000))
     server = ThreadingHTTPServer((host, port), make_handler(service, origins, token=token, admin_user=admin_user, admin_password=admin_password, require_auth=True))
     threading.Thread(target=service.scheduler_loop, daemon=True).start()   # callbacks, and the daily send if switched on
+    threading.Thread(target=service.inbound_loop, daemon=True).start()     # calls to the inbound line, looked at every 10 s
     print(f"Agrythm Connect API on http://{host}:{port}  (database: {'Postgres (Supabase)' if is_postgres(db) else 'SQLite file'}; calls: {service.dialler.mode}; "
           f"weather: {getattr(service._weather, 'label', 'Open-Meteo') if service.real_weather else 'mock'}; daily auto-send: "
           f"{'ON' if service.auto_dispatch_enabled() else 'off'})" + (f"\n  note: {service.note}" if service.note else ""))
