@@ -36,7 +36,7 @@ class StoredWeather:
         self.inner = inner
         self.retry_minutes = tuple(retry_minutes)
         self._sleep, self._today = sleep, today
-        self.db = connect(path)
+        self.db = connect(path, check_same_thread=False)
         self.db.executescript(_SCHEMA)
         have = table_columns(self.db, "weather")
         for col in ("wind_kmh", "humidity_pct"):          # older files: those rows stay unusable (NULL) as fallback

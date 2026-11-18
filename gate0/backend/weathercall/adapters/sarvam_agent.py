@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -81,6 +82,8 @@ class SarvamAgentTelephony:
         self.poll_seconds = int(e.get("SARVAM_POLL_SECONDS", 5))
         self.timeout_seconds = int(e.get("SARVAM_CALL_TIMEOUT_SECONDS", 300))
         self._open, self._sleep = opener, sleep
+        self._live = 0                                   # calls being waited on right now
+        self._live_lock = threading.Lock()
         self._now = now or (lambda: datetime.now(timezone.utc))
 
     def __repr__(self) -> str:
@@ -110,12 +113,27 @@ class SarvamAgentTelephony:
         attempt_id = created["attempt_id"]
         return self._wait_for_outcome(attempt_id, started)
 
+    def poll_every(self, floor: int | None = None) -> int:
+        """Seconds between looks at Sarvam for one call. With many calls on the phone at once each one looks less often, so the
+        whole group stays at about 5 looks a second however many farmers are being called (at most 30 s between looks)."""
+        return min(30, max(floor or self.poll_seconds, -(-self._live // 5)))
+
     def _wait_for_outcome(self, attempt_id: str, started: datetime) -> ProviderCallResult:
+        with self._live_lock:
+            self._live += 1
+        try:
+            return self._wait_for_outcome_inner(attempt_id, started)
+        finally:
+            with self._live_lock:
+                self._live -= 1
+
+    def _wait_for_outcome_inner(self, attempt_id: str, started: datetime) -> ProviderCallResult:
         filters = json.dumps([{"field": "attempt_id", "operator": "equals", "value": attempt_id}])
         waited = 0
         while waited < self.timeout_seconds:
-            self._sleep(self.poll_seconds)
-            waited += self.poll_seconds
+            every = self.poll_every()
+            self._sleep(every)
+            waited += every
             # end time moves each poll, so the 60 s response cache never hands back a stale page
             q = urllib.parse.urlencode({
                 "start_datetime": (started - timedelta(minutes=5)).isoformat(timespec="seconds"),

@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import queue
 import re
 import sqlite3
 import tempfile
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import date, datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -228,12 +231,67 @@ class DashboardService:
         self._tick_lock = threading.Lock()
         self._manual: set[str] = set()          # farmers with a call placed by hand in progress
         self.async_inbound = True               # farmer changes update the inbound line in the background (tests switch it off)
+        # Calls are placed at the same time, as many as there are farmers (up to this many): the long part of a call is waiting
+        # for Sarvam, which costs no database. Database work borrows one of a few shared connections for a moment (the
+        # Supabase pooler allows few connections), so a hundred calls never mean a hundred connections.
+        self.max_parallel = max(1, int(e.get("GATE0_MAX_PARALLEL_CALLS") or 100))
+        self.db_pool = max(1, int(e.get("GATE0_DB_POOL") or 4))
+        self._ports_pool: queue.LifoQueue = queue.LifoQueue()
+        self._ports_made = 0
+        self._pool_lock = threading.Lock()
         self.draining = False                   # set when the host asks the process to stop: finish the calls, start no new one
 
     def _make_ports(self) -> Ports:
         return Ports(DBFarmers(self.db, self.lock), SQLiteLedger(self.db_path), StoredWeather(
             self._weather, self.db_path, retry_minutes=(), sleep=lambda s: None),   # one request per place and day: the weather retries are the service's own, later
             MockVoice(), None)
+
+    @contextmanager
+    def _ports_ctx(self, ports: Ports | None = None):
+        """The engine connections for a moment of database work: the ones given, or one borrowed from the shared few (it
+        waits when all are in use) and given back after. Never hold it while waiting for a call."""
+        if ports is not None:
+            yield ports
+            return
+        borrowed = None
+        try:
+            borrowed = self._ports_pool.get_nowait()
+        except queue.Empty:
+            with self._pool_lock:
+                if self._ports_made < self.db_pool:
+                    self._ports_made += 1
+                    borrowed = self._make_ports()
+            if borrowed is None:
+                borrowed = self._ports_pool.get()
+        try:
+            yield borrowed
+        finally:
+            self._ports_pool.put(borrowed)
+
+    def _run_parallel(self, jobs: list, work) -> list:
+        """work(job) for every job at the same time (up to max_parallel at once); the results, in order. work never raises."""
+        if not jobs:
+            return []
+        with ThreadPoolExecutor(max_workers=min(len(jobs), self.max_parallel), thread_name_prefix="call") as pool:
+            return list(pool.map(work, jobs))
+
+    def _warm_weather(self, items: list[tuple[str, date]]) -> None:
+        """One weather request per place and day, made before the calls start together, so a hundred farmers in a few places
+        do not all ask the weather service at once. Never raises."""
+        seen: set = set()
+        try:
+            with self._ports_ctx(None) as p:
+                for fid, day in items:
+                    f = p.farmers.get_context(fid)
+                    if f is None or (f.place_name, f.latitude, f.longitude, day) in seen:
+                        continue
+                    seen.add((f.place_name, f.latitude, f.longitude, day))
+                    try:
+                        p.weather.get_weather(f.place_name, f.latitude, f.longitude, day)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     # -- settings ------------------------------------------------------------------------------------------------
     def _get_setting(self, key: str, default: str = "") -> str:
@@ -571,8 +629,9 @@ class DashboardService:
         # only variables the agent declares (Sarvam returns 422 otherwise); now_text lets it confirm callback days
         return weather_variables(farmer, w, format_now(self._now()))
 
-    def fire_one(self, fid: str, day: date, kind: str = "daily") -> str:
-        prepared = prepare_call(CallRequest(fid, day), self.ports, self.settings)
+    def fire_one(self, fid: str, day: date, kind: str = "daily", ports: Ports | None = None) -> str:
+        with self._ports_ctx(ports) as p:
+            prepared = prepare_call(CallRequest(fid, day), p, self.settings)
         if isinstance(prepared, FarmerDayResult):
             reason = prepared.skip_reason.value if prepared.skip_reason else prepared.result.value
             if reason == "already_called_today":           # keep the earlier real result, just say why nothing new happened
@@ -594,11 +653,12 @@ class DashboardService:
         farmer, w = prepared.farmer, prepared.weather
         self._live_set(fid, day, kind, 1, "calling")
         res, out = self._place(farmer, w)
-        self.ports.ledger.record_attempt(CallAttempt(
-            farmer_id=fid, call_date=day, attempt_no=1, status=res.status, language=farmer.language,
-            message_text=prepared.message, provider_call_id=res.provider_call_id, duration_s=res.duration_s,
-            error=res.error, weather_source=w.source))
-        self.ports.ledger.record_day_result(FarmerDayResult(fid, day, final_result(res.status), 1))
+        with self._ports_ctx(ports) as p:
+            p.ledger.record_attempt(CallAttempt(
+                farmer_id=fid, call_date=day, attempt_no=1, status=res.status, language=farmer.language,
+                message_text=prepared.message, provider_call_id=res.provider_call_id, duration_s=res.duration_s,
+                error=res.error, weather_source=w.source))
+            p.ledger.record_day_result(FarmerDayResult(fid, day, final_result(res.status), 1))
         self._store_outcome(fid, day, farmer, w, 1, res, out)
         return "called"
 
@@ -712,66 +772,80 @@ class DashboardService:
                                       (now.isoformat(timespec="seconds"),)).fetchall()
             if not due:
                 return 0
-            ports = self._make_ports()
             for fid, day, attempt_no, due_at in due:
                 if datetime.fromisoformat(due_at) >= now - timedelta(minutes=GRACE_MINUTES):
                     self._live_set(fid, date.fromisoformat(day), "retry", attempt_no, "queued")
+            jobs = []
             for fid, day, attempt_no, due_at in due:
                 if datetime.fromisoformat(due_at) < now - timedelta(minutes=GRACE_MINUTES):
                     self._retry_update(fid, day, attempt_no, "missed", f"not placed within {GRACE_MINUTES} min")
                     continue
                 self._retry_update(fid, day, attempt_no, "calling", now.isoformat(timespec="seconds"))   # claimed at
+                jobs.append((fid, day, attempt_no))
+            self._warm_weather([(fid, date.fromisoformat(day)) for fid, day, _ in jobs])
+
+            def work(job) -> int:                           # every due retry is placed at the same time
+                fid, day, attempt_no = job
                 try:
-                    outcome = self._retry_one(ports, fid, date.fromisoformat(day), attempt_no)
+                    outcome = self._retry_one(None, fid, date.fromisoformat(day), attempt_no)
                 except Exception as exc:
                     outcome = f"error: {type(exc).__name__}"
                 finally:
                     self._live_clear(fid)
                 self._retry_update(fid, day, attempt_no, "done" if outcome == "placed" else "dropped", "" if outcome == "placed" else outcome)
-                placed += outcome == "placed"
+                return int(outcome == "placed")
+
+            placed = sum(self._run_parallel(jobs, work))
         return placed
 
-    def _retry_one(self, ports: Ports, fid: str, day: date, attempt_no: int) -> str:
-        farmer = ports.farmers.get_context(fid)
-        if farmer is None or not farmer.active or not farmer.consent or not farmer.phone or self._is_paused(fid):
-            return "not callable (consent, active, phone or asked to stop)"
-        w = ports.weather.get_weather(farmer.place_name, farmer.latitude, farmer.longitude, day)
+    def _retry_one(self, ports: Ports | None, fid: str, day: date, attempt_no: int) -> str:
+        with self._ports_ctx(ports) as p:
+            farmer = p.farmers.get_context(fid)
+            if farmer is None or not farmer.active or not farmer.consent or not farmer.phone or self._is_paused(fid):
+                return "not callable (consent, active, phone or asked to stop)"
+            w = p.weather.get_weather(farmer.place_name, farmer.latitude, farmer.longitude, day)
         if w is None:
             return "weather_unavailable"
         self._live_set(fid, day, "retry", attempt_no, "calling")
         res, out = self._place(farmer, w)
-        try:
-            ports.ledger.record_attempt(CallAttempt(
-                farmer_id=fid, call_date=day, attempt_no=attempt_no, status=res.status, language=farmer.language,
-                message_text="(retry)", provider_call_id=res.provider_call_id, duration_s=res.duration_s,
-                error=res.error, weather_source=w.source))
-        except IntegrityError:
-            ports.ledger.db.rollback()          # a failed insert must not keep the database locked
-        ports.ledger.db.execute("UPDATE day_results SET result=?, attempts=? WHERE farmer_id=? AND call_date=?",
+        with self._ports_ctx(ports) as p:
+            try:
+                p.ledger.record_attempt(CallAttempt(
+                    farmer_id=fid, call_date=day, attempt_no=attempt_no, status=res.status, language=farmer.language,
+                    message_text="(retry)", provider_call_id=res.provider_call_id, duration_s=res.duration_s,
+                    error=res.error, weather_source=w.source))
+            except IntegrityError:
+                p.ledger.db.rollback()          # a failed insert must not keep the database locked
+            p.ledger.db.execute("UPDATE day_results SET result=?, attempts=? WHERE farmer_id=? AND call_date=?",
                                 (final_result(res.status).value, attempt_no, fid, day.isoformat()))
-        ports.ledger.db.commit()
+            p.ledger.db.commit()
         self._store_outcome(fid, day, farmer, w, attempt_no, res, out)
         return "placed"
 
     def fire(self, day: date) -> None:
         self.running = True
         try:
-            self.ports = self._make_ports()
             counts: dict[str, int] = {}
-            ids = self.ports.farmers.list_callable_ids(day)
+            with self._ports_ctx(None) as p:
+                ids = p.farmers.list_callable_ids(day)
             for fid in ids:                                 # everyone waiting shows as In Queue from the start
                 self._live_set(fid, day, "daily", 1, "queued")
-            for fid in ids:
+            self._warm_weather([(fid, day) for fid in ids])
+
+            def work(fid: str) -> str | None:               # every farmer is called at the same time
                 if self.draining:                           # stopping: the rest stay In Queue and are reported after the restart
-                    break
+                    return None
                 try:
-                    outcome = self.fire_one(fid, day)
+                    return self.fire_one(fid, day)
                 except Exception as exc:                    # one farmer never stops the others
                     self._save(fid, day, status="error", note=type(exc).__name__, mode=self.dialler.mode)
-                    outcome = "error"
+                    return "error"
                 finally:
-                    self._live_clear(fid)
-                counts[outcome] = counts.get(outcome, 0) + 1
+                    self._live_clear(fid)                   # a farmer who was not started never reaches here (they stay In Queue)
+
+            for outcome in self._run_parallel(ids, work):
+                if outcome is not None:
+                    counts[outcome] = counts.get(outcome, 0) + 1
             self.last_run = {"date": day.isoformat(), "counts": counts, "at": self._now().strftime("%H:%M:%S")}
         finally:
             self.running = False
@@ -856,7 +930,7 @@ class DashboardService:
                     ports = self._make_ports()
                     if kind == "first":
                         self.ports = ports
-                        self.fire_one(fid, day, "manual")
+                        self.fire_one(fid, day, "manual", ports=ports)
                     else:
                         with self.lock:
                             self.db.execute("UPDATE dash_retries SET status='superseded', note='called by hand' "
@@ -998,10 +1072,10 @@ class DashboardService:
                                       "AND due_at<=? ORDER BY due_at", (now.isoformat(timespec="seconds"),)).fetchall()
             if not due:
                 return 0
-            ports = self._make_ports()
             for fid, due_at, source_date in due:
                 if datetime.fromisoformat(due_at) >= now - timedelta(minutes=GRACE_MINUTES):
                     self._live_set(fid, datetime.fromisoformat(due_at).date(), "callback", 1, "queued")
+            jobs = []
             for fid, due_at, source_date in due:
                 if datetime.fromisoformat(due_at) < now - timedelta(minutes=GRACE_MINUTES):
                     self._cb_update(fid, due_at, status="missed",
@@ -1012,21 +1086,30 @@ class DashboardService:
                                        callback_time=datetime.fromisoformat(due_at).strftime("%H:%M"))
                     continue
                 self._cb_update(fid, due_at, status="calling", note=now.isoformat(timespec="seconds"))   # claimed at
+                jobs.append((fid, due_at, source_date))
+            self._warm_weather([(fid, datetime.fromisoformat(due_at).date()) for fid, due_at, _ in jobs])
+
+            def work(job) -> int:                           # every due callback is placed at the same time
+                fid, due_at, source_date = job
                 try:
-                    placed += self._callback_one(ports, fid, due_at, date.fromisoformat(source_date))
+                    return self._callback_one(None, fid, due_at, date.fromisoformat(source_date))
                 except Exception as exc:                    # never retried, never stops the others
                     self._cb_update(fid, due_at, status="error", note=type(exc).__name__)
+                    return 0
                 finally:
                     self._live_clear(fid)
+
+            placed = sum(self._run_parallel(jobs, work))
         return placed
 
-    def _callback_one(self, ports: Ports, fid: str, due_at: str, source_day: date) -> int:
+    def _callback_one(self, ports: Ports | None, fid: str, due_at: str, source_day: date) -> int:
         due_day = datetime.fromisoformat(due_at).date()
-        farmer = ports.farmers.get_context(fid)
-        if farmer is None or not farmer.active or not farmer.consent or not farmer.phone or self._is_paused(fid):
-            self._cb_update(fid, due_at, status="skipped", note="not callable (consent, active, phone or asked to stop)")
-            return 0
-        w = ports.weather.get_weather(farmer.place_name, farmer.latitude, farmer.longitude, due_day)
+        with self._ports_ctx(ports) as p:
+            farmer = p.farmers.get_context(fid)
+            if farmer is None or not farmer.active or not farmer.consent or not farmer.phone or self._is_paused(fid):
+                self._cb_update(fid, due_at, status="skipped", note="not callable (consent, active, phone or asked to stop)")
+                return 0
+            w = p.weather.get_weather(farmer.place_name, farmer.latitude, farmer.longitude, due_day)
         if w is None:
             self._cb_update(fid, due_at, status="skipped", note="weather_unavailable")
             return 0
@@ -1042,9 +1125,10 @@ class DashboardService:
                 out = self.dialler.outputs(res.provider_call_id)
             except Exception:
                 out = {}
-        self._finish_callback(ports, farmer, fid, due_at, source_day, due_day, res, out, w.source,
-                              weather={"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh,
-                                       "rain": w.rain_chance_pct, "humidity": w.humidity_pct, "source": w.source})
+        with self._ports_ctx(ports) as p:
+            self._finish_callback(p, farmer, fid, due_at, source_day, due_day, res, out, w.source,
+                                  weather={"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh,
+                                           "rain": w.rain_chance_pct, "humidity": w.humidity_pct, "source": w.source})
         return 1
 
     def _finish_callback(self, ports: Ports, farmer: FarmerContext, fid: str, due_at: str, source_day: date, due_day: date,
@@ -1076,7 +1160,7 @@ class DashboardService:
             else:
                 self._alert("callback_limit", fid,
                             f"Asked to move the callback again after {MAX_RESCHEDULES} reschedules; no more callbacks.")
-        self._refresh_inbound([fid])
+        self._refresh_inbound([fid], ports=ports)
         # a callback is never retried: the message follows it (the weather if understood, 'we tried to reach you' if not)
         self._message_after_call(fid, due_day, res, out, weather or self._saved_weather(fid, source_day.isoformat()),
                                  more_to_come=bool(out.get("callback_time")) and out.get("stop_calls_requested") != "yes",
@@ -1260,8 +1344,11 @@ class DashboardService:
                     weather = self._saved_weather(fid, day.isoformat())
                     if not has_full_weather(weather):
                         try:
-                            ports = ports or self._make_ports()
-                            w = ports.weather.get_weather(r[3] or r[4], r[5], r[6], day)
+                            if ports is None:
+                                with self._ports_ctx(None) as p:
+                                    w = p.weather.get_weather(r[3] or r[4], r[5], r[6], day)
+                            else:
+                                w = ports.weather.get_weather(r[3] or r[4], r[5], r[6], day)
                         except Exception:
                             w = None
                         weather = ({"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh,

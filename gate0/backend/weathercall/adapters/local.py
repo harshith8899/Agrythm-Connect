@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS day_results(
 
 class SQLiteLedger:
     def __init__(self, path: str = ":memory:"):
-        self.db = connect(path)
+        self.db = connect(path, check_same_thread=False)     # handed between threads by the service's pool, one at a time
         self.db.executescript(_SCHEMA)
 
     def record_attempt(self, a: CallAttempt) -> None:
