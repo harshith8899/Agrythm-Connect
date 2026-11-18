@@ -277,8 +277,9 @@ def test_push_inbound_many_streams_a_cohort_to_the_inbound_deployment_in_chunks_
     url, method, body = op.requests[0]
     assert url.endswith("/scheduling/v1/orgs/o/workspaces/w/deployments/dep-1/cohorts/stream") and method == "POST"
     assert body["name"] == "roster-x" and len(body["users"]) == 1000 and op.requests[1][2]["name"] == "roster-x-2"
-    assert body["users"][0] == {"user_phone_number": "+919876500000", "user_identifier": "F0",
+    assert body["users"][0] == {"user_phone_number": "+919876500000",
                                 "app_variables": {"farmer_name": "n0"}, "app_overrides": {"initial_language_name": "Hindi"}}
+    assert all("user_identifier" not in u for u in body["users"])                # Sarvam refuses it for deployments
 
 
 def test_without_a_deployment_id_there_is_no_inbound_line():
@@ -310,6 +311,6 @@ def test_the_cohort_push_leaves_out_blank_values_shared_numbers_and_numbers_that
     ]
     assert d.push_inbound_many(entries, "roster-x") == ["coh-1"]
     users = op.requests[0][2]["users"]
-    assert [u["user_identifier"] for u in users] == ["F1", "F4"]
+    assert [u["user_phone_number"] for u in users] == ["+919876543210", "+919876543211"]
     assert users[0]["app_variables"] == {"farmer_name": "Ramesh"}           # the blank value is not sent
     assert users[1]["app_variables"] == {}                                   # an unknown number carries no values at all
