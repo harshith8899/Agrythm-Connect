@@ -92,7 +92,7 @@ class SarvamDialler(SarvamAgentTelephony):
             if phone in seen:                               # two farmers on one number: the line can know only one of them
                 continue
             seen.add(phone)
-            users.append({"user_phone_number": phone, "user_identifier": e["fid"],
+            users.append({"user_phone_number": phone,           # no user_identifier: Sarvam does not support it for deployments
                           "app_variables": {k: v for k, v in e["variables"].items() if v != ""},     # no blank values
                           "app_overrides": {"initial_language_name": e["language_name"]}})
         ids = []
