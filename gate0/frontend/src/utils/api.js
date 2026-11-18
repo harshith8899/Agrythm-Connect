@@ -245,6 +245,13 @@ export const dismissAlerts = (id) =>
 /** The emails sent (or not) after calls: one row per farmer, day and kind, with why when one was skipped or failed. */
 /** Sends one sample email to the test address and says what happened: { status: sent | failed | skipped, note }. */
 export const sendTestEmail = () => postJson('/api/mail/test', { headers: { 'Content-Type': 'application/json' }, body: '{}' });
+/** The call's transcript with an English line under each turn: { available, turns: [{ speaker, text, english }], error }. */
+export const getCallTranslation = (callId) => getJson(`${API_BASE}/api/calls/${encodeURIComponent(callId)}/translation`);
+/** Removes one email log row (by its key), or all of them when no key is given. The email is still never sent twice. */
+export const dismissMessages = (key) =>
+  postJson('/api/messages/dismiss', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(key == null ? { all: true } : { key }) });
+/** The incoming line at a glance: { ready, sync: { at, seen, applied, error }, calls: [...] }. */
+export const getIncoming = () => getJson(`${API_BASE}/api/incoming`);
 export const getMessages = () => getJson(`${API_BASE}/api/messages`);
 
 export const getCallbacks = () => getJson(`${API_BASE}/api/callbacks`);

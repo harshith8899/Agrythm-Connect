@@ -92,7 +92,7 @@ class SarvamDialler(SarvamAgentTelephony):
             if phone in seen:                               # two farmers on one number: the line can know only one of them
                 continue
             seen.add(phone)
-            users.append({"user_phone_number": phone, "user_identifier": e["fid"],
+            users.append({"user_phone_number": phone,           # no user_identifier: Sarvam does not support it for deployments
                           "app_variables": {k: v for k, v in e["variables"].items() if v != ""},     # no blank values
                           "app_overrides": {"initial_language_name": e["language_name"]}})
         ids = []
@@ -120,7 +120,8 @@ class SarvamDialler(SarvamAgentTelephony):
 
     def find_inbound_calls(self, start, end, known_ids):
         """Connected calls between start and end that are not ours (not in known_ids): farmers ringing the line. Returns
-        (last 4 digits of the caller, result, when it ended in UTC), oldest first."""
+        (last 4 digits of the caller, result, when it ended in UTC, SHA-256 of the caller's +91 number as Sarvam gives it),
+        oldest first. The hash identifies a caller exactly without handling the number; the last 4 digits are only a fallback."""
         found, offset = [], 0
         while True:
             q = urllib.parse.urlencode({"start_datetime": start.astimezone(timezone.utc).isoformat(timespec="seconds"),
@@ -128,14 +129,17 @@ class SarvamDialler(SarvamAgentTelephony):
                                         "limit": 1000, "offset": offset, "sort_by": "attempted_at"})
             page = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}")
             for item in page.get("items", []):
-                if item.get("attempt_id") in known_ids:
+                # a call to the line has the same attempt_id ("NO_JOB_ID") every time: it is known by its interaction id
+                call_id = (item.get("interaction_id") if item.get("channel_direction") == "inbound"
+                           else item.get("attempt_id") or item.get("interaction_id")) or ""
+                if not call_id or call_id in known_ids:
                     continue
-                result = _result_from(item, item.get("attempt_id") or "")
+                result = _result_from(item, call_id)
                 if result is None or result.status.value != "answered":
                     continue
                 began = datetime.fromisoformat(str(item["attempted_at"]).replace("Z", "")).replace(tzinfo=timezone.utc)
                 last4 = re.sub(r"\D", "", str(item.get("user_contact_masked") or ""))[-4:]
-                found.append((last4, result, began + timedelta(seconds=result.duration_s or 0)))
+                found.append((last4, result, began + timedelta(seconds=result.duration_s or 0), str(item.get("user_contact_hashed") or "")))
             if not page.get("next_page_uri"):
                 return found
             offset += 1000
@@ -155,19 +159,21 @@ class SarvamDialler(SarvamAgentTelephony):
 
     def outputs(self, attempt_id: str) -> dict:
         """The agent's output variables (Sarvam fills them a little after the call ends) and the transcript."""
-        filters = json.dumps([{"field": "attempt_id", "operator": "equals", "value": attempt_id}])
+        incoming = "/" in attempt_id                         # a call to the line is known by its interaction id (YYYYMMDD/...)
+        key = "interaction_id" if incoming else "attempt_id"
+        filters = json.dumps([{"field": key, "operator": "equals", "value": attempt_id}])
         for _ in range(20):                                 # up to a minute, looking every 3 s so the notes show as soon as they are in
             q = urllib.parse.urlencode({
-                "start_datetime": (self._now() - timedelta(hours=1)).isoformat(timespec="seconds"),
+                "start_datetime": (self._now() - timedelta(hours=24 if incoming else 1)).isoformat(timespec="seconds"),
                 "end_datetime": (self._now() + timedelta(minutes=5)).isoformat(timespec="seconds"),
                 "filter_conditions": filters, "limit": 5})
             items = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}").get("items", [])
-            item = next((i for i in items if i.get("attempt_id") == attempt_id), {})
+            item = next((i for i in items if i.get(key) == attempt_id), {})
             got = {k: scrub((item.get("agent_variables") or {}).get(k)) for k in OUTPUT_VARS}
             if got.get("call_summary"):
                 got["transcript"] = self._transcript(item.get("interaction_id"))
                 return got
-            self._sleep(3)
+            self._sleep(self.poll_every(3))
         return {}
 
     def _transcript(self, interaction_id: str | None) -> list[dict]:

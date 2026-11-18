@@ -15,7 +15,7 @@ import {
   Mail,
   X,
 } from 'lucide-react';
-import { getSystemChecks, getAlerts, getMessages, dismissAlerts, sendTestEmail } from '../utils';
+import { getSystemChecks, getAlerts, getMessages, getIncoming, dismissAlerts, dismissMessages, sendTestEmail } from '../utils';
 
 const MESSAGE_LABEL = {
   weather: 'Weather update',
@@ -105,13 +105,15 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
   const [systemLoading, setSystemLoading] = useState(false);
   const [alerts, setAlerts] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [incoming, setIncoming] = useState(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
   const loadSystem = useCallback(async (refresh = false) => {
     setSystemLoading(true);
     try {
-      const [checks, al, msgs] = await Promise.all([getSystemChecks(refresh), getAlerts().catch(() => []), getMessages().catch(() => [])]);
+      const [checks, al, msgs, inc] = await Promise.all([getSystemChecks(refresh), getAlerts().catch(() => []), getMessages().catch(() => []), getIncoming().catch(() => null)]);
+      setIncoming(inc);
       setSystemReport(checks);
       setAlerts(al);
       setMessages(Array.isArray(msgs) ? msgs : []);
@@ -135,6 +137,16 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
       setTestResult({ ok: false, text: err.message });
     } finally {
       setTesting(false);
+    }
+  };
+
+  // remove one email log row, or all of them
+  const handleDismissMessage = async (key) => {
+    setMessages((prev) => (key == null ? [] : prev.filter((m) => m.key !== key)));
+    try {
+      await dismissMessages(key);
+    } catch {
+      loadSystem(false);
     }
   };
 
@@ -290,6 +302,33 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
           </div>
         )}
 
+        {/* The incoming line: when it was last looked at and the latest calls to it */}
+        {incoming && incoming.ready && (
+          <div className="rounded-xl border border-slate-100">
+            <div className="p-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100">
+              <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Incoming line ({(incoming.calls || []).length} recent)</span>
+              <span className="text-[11px] text-slate-500">
+                {incoming.sync && incoming.sync.at
+                  ? `Last checked ${String(incoming.sync.at).replace('T', ' ').slice(0, 19)} · ${incoming.sync.seen} call(s) seen`
+                  : 'Not checked yet'}
+                {incoming.sync && incoming.sync.error ? <span className="ml-2 font-semibold text-rose-700">Problem: {incoming.sync.error}</span> : null}
+              </span>
+            </div>
+            {(incoming.calls || []).length === 0 ? (
+              <p className="p-3 text-xs text-slate-500">No calls to the number yet.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100 text-xs">
+                {incoming.calls.slice(0, 5).map((c, i) => (
+                  <li key={`${c.at}-${i}`} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <span><strong className="text-slate-800">{c.farmer_name}</strong> <span className="text-slate-400 font-mono">{c.number}</span> · {String(c.at).replace('T', ' ').slice(0, 16)} · {c.duration_seconds}s</span>
+                    <span className="text-slate-500">{c.note}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {/* Emails sent after calls */}
         <div className="rounded-xl border border-slate-100">
           <div className="p-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100">
@@ -297,6 +336,14 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
             <span className="flex items-center gap-2">
               {testResult && (
                 <span className={`text-[11px] font-semibold break-words ${testResult.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{testResult.text}</span>
+              )}
+              {messages.length > 0 && (
+                <button
+                  onClick={() => handleDismissMessage(null)}
+                  className="h-8 px-3 rounded-lg inline-flex items-center justify-center whitespace-nowrap text-[11px] font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Clear all
+                </button>
               )}
               <button
                 onClick={handleTestEmail}
@@ -322,6 +369,7 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
                     <th className="px-3 py-2">Email</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Why</th>
+                    <th className="px-3 py-2 w-8"><span className="sr-only">Remove</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -341,6 +389,18 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
                           </span>
                         </td>
                         <td className="px-3 py-2 text-slate-500">{m.note || ''}</td>
+                        <td className="px-3 py-2 text-right">
+                          {m.key && (
+                            <button
+                              onClick={() => handleDismissMessage(m.key)}
+                              title="Remove this row"
+                              aria-label="Remove this row"
+                              className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}

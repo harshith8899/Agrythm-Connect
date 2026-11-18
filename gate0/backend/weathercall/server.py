@@ -169,6 +169,8 @@ def make_handler(
                     calls = service.calls()
                     limit = int(q["limit"][0]) if "limit" in q else None
                     return self._send(200, calls[:limit] if limit else calls)
+                if path.startswith("/api/calls/") and path.endswith("/translation"):
+                    return self._send(200, service.transcript_english(urllib.parse.unquote(path[len("/api/calls/"):-len("/translation")])))
                 if path.startswith("/api/calls/"):
                     call = service.call(urllib.parse.unquote(path[len("/api/calls/"):]))
                     return self._send(200, call) if call else self._send(404, {"error": "Call not found"})
@@ -180,6 +182,8 @@ def make_handler(
                     return self._send(200, service.alerts())
                 if path == "/api/messages":
                     return self._send(200, service.messages())
+                if path == "/api/incoming":
+                    return self._send(200, service.incoming())
                 if path == "/api/inbound":
                     return self._send(200, service.inbound())
                 if path == "/api/orchestrator/status":
@@ -247,6 +251,14 @@ def make_handler(
                     return self._send(202, service.manual_call(fid, mode))
                 if path == "/api/mail/test":            # sends one sample email to the test address and reports what happened
                     return self._send(200, service.send_test_email())
+                if path == "/api/messages/dismiss":      # {"key": "F1|2026-11-16|weather"}, {"keys": [...]} or {"all": true}
+                    fields = json.loads(body or "{}")
+                    if not isinstance(fields, dict):
+                        raise ValueError("expected a JSON object")
+                    if fields.get("all") is True:
+                        return self._send(200, {"removed": service.dismiss_messages(None)})
+                    keys = fields.get("keys") if isinstance(fields.get("keys"), list) else [fields.get("key")]
+                    return self._send(200, {"removed": service.dismiss_messages([k for k in keys if k])})
                 if path == "/api/alerts/dismiss":       # {"id": 5}, {"ids": [5, 6]} or {"all": true}
                     fields = json.loads(body or "{}")
                     if not isinstance(fields, dict):
@@ -313,6 +325,7 @@ def run(port: int | None = None) -> None:
     port = port or int(os.environ.get("PORT", 8000))
     server = ThreadingHTTPServer((host, port), make_handler(service, origins, token=token, admin_user=admin_user, admin_password=admin_password, require_auth=True))
     threading.Thread(target=service.scheduler_loop, daemon=True).start()   # callbacks, and the daily send if switched on
+    threading.Thread(target=service.inbound_loop, daemon=True).start()     # calls to the inbound line, looked at every 10 s
     print(f"Agrythm Connect API on http://{host}:{port}  (database: {'Postgres (Supabase)' if is_postgres(db) else 'SQLite file'}; calls: {service.dialler.mode}; "
           f"weather: {getattr(service._weather, 'label', 'Open-Meteo') if service.real_weather else 'mock'}; daily auto-send: "
           f"{'ON' if service.auto_dispatch_enabled() else 'off'})" + (f"\n  note: {service.note}" if service.note else ""))

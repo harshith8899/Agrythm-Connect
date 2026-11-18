@@ -204,9 +204,9 @@ def test_a_call_row_counts_the_sms_sent_for_the_day_but_not_the_emails(tmp_path)
                  "F1,Ramesh,9876543210,Mandya,Mandya,Karnataka,Hindi,Yes\n")
     s._save("F1", T0.date(), status="answered")
     with s.lock:
-        s.db.execute("INSERT INTO dash_messages VALUES('F1', ?, 'weather', 'email', 'sent', '', ?)", (T0.date().isoformat(), "x"))
-        s.db.execute("INSERT INTO dash_messages VALUES('F1', ?, 'missed', 'sms', 'sent', '', ?)", (T0.date().isoformat(), "x"))
-        s.db.execute("INSERT INTO dash_messages VALUES('F1', ?, 'callback_missed', 'sms', 'failed', '', ?)", (T0.date().isoformat(), "x"))
+        s.db.execute("INSERT INTO dash_messages(farmer_id, call_date, kind, channel, status, note, at) VALUES('F1', ?, 'weather', 'email', 'sent', '', ?)", (T0.date().isoformat(), "x"))
+        s.db.execute("INSERT INTO dash_messages(farmer_id, call_date, kind, channel, status, note, at) VALUES('F1', ?, 'missed', 'sms', 'sent', '', ?)", (T0.date().isoformat(), "x"))
+        s.db.execute("INSERT INTO dash_messages(farmer_id, call_date, kind, channel, status, note, at) VALUES('F1', ?, 'callback_missed', 'sms', 'failed', '', ?)", (T0.date().isoformat(), "x"))
         s.db.commit()
     row = next(c for c in s.calls() if c["farmer_id"] == "F1")
     assert row["messages_sent"] == 1
