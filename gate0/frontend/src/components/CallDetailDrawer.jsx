@@ -45,19 +45,19 @@ const AttemptRowWithHover = ({ attempt, isCurrent, onSelect }) => {
       }`}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
           <CallDirectionBadge direction={attempt.direction} compact />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-mono font-bold text-xs text-slate-900 truncate">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono font-bold text-xs text-slate-900">
                 {attempt.call_id}
               </span>
               <span className="text-[10px] text-slate-500 font-mono">
                 {attempt.created_at ? attempt.created_at.slice(0, 16).replace('T', ' ') : (attempt.call_date || '')}
               </span>
             </div>
-            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500">
-              <span className={`font-semibold ${
+            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500 flex-wrap">
+              <span className={`font-semibold shrink-0 ${
                 attempt.status === 'Completed' || attempt.status === 'Answered'
                   ? 'text-emerald-700'
                   : (attempt.status === 'Retrying' || attempt.status === 'Unanswered' ? 'text-amber-700' : 'text-slate-700')
@@ -66,12 +66,12 @@ const AttemptRowWithHover = ({ attempt, isCurrent, onSelect }) => {
               </span>
               {attempt.disposition && (
                 <>
-                  <span>•</span>
-                  <span className="text-slate-500 truncate max-w-[140px]">{attempt.disposition}</span>
+                  <span className="shrink-0">•</span>
+                  <span className="text-slate-600 font-medium" title={attempt.disposition}>{attempt.disposition}</span>
                 </>
               )}
-              <span>•</span>
-              <span className="font-mono">{durationStr}</span>
+              <span className="shrink-0">•</span>
+              <span className="font-mono shrink-0">{durationStr}</span>
             </div>
           </div>
         </div>

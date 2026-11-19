@@ -491,7 +491,7 @@ export const CallHistoryTable = ({
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-slate-500 font-medium mt-1 truncate max-w-[170px]">
+                    <div className="text-[10px] text-slate-500 font-medium mt-1 truncate max-w-[320px]" title={call.disposition}>
                       {isPastMissedCb ? (
                         <span className="text-rose-700 font-semibold">Callback not placed in time</span>
                       ) : hasCallback ? (
