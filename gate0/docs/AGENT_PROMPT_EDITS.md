@@ -87,7 +87,7 @@ weather again, and that `understood_weather` is still recorded as `yes` on the d
 4. **An unknown or inactive caller.** The agent ends the call after one sentence (already in version 15); the line still answers it. Stopping the answer itself is for Sarvam.
 
 
-## Edits ready for v17 (19 Nov), to apply when the Sarvam connector is back (draft only, then commit, pause, move, resume)
+## Edits ready for v17 (19 Nov), APPLIED 19 Nov: committed as v17, inbound deployment moved to v17 (draft only, then commit, pause, move, resume)
 These replace the 17 Nov silence item 2. The existing script is adjusted, nothing new is written.
 
 1. **Silence (decided 19 Nov).** If the farmer is silent for 7 seconds the agent asks "are you there?"; after 10 more seconds of silence it asks again;
