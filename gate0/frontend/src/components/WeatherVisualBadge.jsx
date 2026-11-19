@@ -8,7 +8,6 @@ import {
   Thermometer,
   AlertTriangle,
   CheckCircle2,
-  Sparkles,
 } from 'lucide-react';
 
 function getWeatherVisualMeta(rain, wind, humidity) {
@@ -102,7 +101,7 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
     );
   }
 
-  const actionableAdvisory = useMemo(() => {
+  const actionableAdvisory = (() => {
     const rawAdvisory = call?.advisory_summary || call?.message_text || '';
     const summaryText = String(call?.summary || '').trim();
     const isPureRawNumbers = /^Temp\s+[0-9.-]+.*\|\s*Wind.*\|\s*Rain/i.test(rawAdvisory.trim());
@@ -133,7 +132,7 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
       return 'High moisture with light precipitation predicted. Advised routine crop scouting for early signs of foliar fungal pathogens and maintaining proper canopy aeration.';
     }
     return 'Favorable meteorological window confirmed. Weather is optimal for standard field intercultural operations, weeding, fertilizer top-dressing, and general crop management.';
-  }, [call, rain, wind, hasRange, tempParts, humidity]);
+  })();
 
   return (
     <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 space-y-4 shadow-2xs">

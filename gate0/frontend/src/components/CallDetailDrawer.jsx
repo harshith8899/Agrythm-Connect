@@ -3,7 +3,6 @@ import {
   X, 
   Phone, 
   PhoneCall,
-  PhoneIncoming,
   Languages,
   MapPin, 
   MessageSquare,
@@ -129,7 +128,7 @@ const AttemptRowWithHover = ({ attempt, isCurrent, onSelect }) => {
   );
 };
 
-export const CallDetailDrawer = ({ call, onClose, onCallBack, allCalls = [], onSelectCall }) => {
+const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onSelectCall }) => {
   const [callingBack, setCallingBack] = useState(false);
   const [callNote, setCallNote] = useState(null);
   const [english, setEnglish] = useState({ show: false, loading: false, turns: null, error: '' });   // the English under each turn
@@ -153,7 +152,6 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack, allCalls = [], onS
     }
   };
 
-  if (!call) return null;
 
   const rawTranscript = call.transcript_preview || call.transcript || '';
 
@@ -629,5 +627,8 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack, allCalls = [], onS
     </>
   );
 };
+
+// the hooks above run only when there is a call: the drawer is closed (null) without them
+export const CallDetailDrawer = (props) => (props.call ? <CallDetailDrawerContent {...props} /> : null);
 
 export default CallDetailDrawer;
