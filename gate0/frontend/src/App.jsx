@@ -195,6 +195,8 @@ function Dashboard({ onLogout, signingIn = false, signIn = null }) {
           call={selectedCall}
           onClose={() => setSelectedCall(null)}
           onCallBack={handleCallBackFarmer}
+          allCalls={callLogs}
+          onSelectCall={setSelectedCall}
         />
       )}
     </div>

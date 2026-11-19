@@ -626,6 +626,7 @@ class DashboardService:
             "note": "", "retry_count": 0, "duration_seconds": 0, "attempts_used": 0, "max_attempts": self.settings.max_attempts,
             "next_attempt_at": None, "scheduled_callback_time": None, "callback_status": None, "callback_requested_text": "",
             "summary": "", "understood_weather": "", "stop_calls_requested": "", "transcript": [], "attempts_log": [],
+            "direction": "outgoing", "has_inbound_callback": False, "is_today": True,
             "call_mode": self.dialler.mode, "attempt_id": ""}
 
     # -- sending the day's calls ---------------------------------------------------------------------------------
@@ -1946,9 +1947,10 @@ class DashboardService:
         label = {"answered": "Answered", "no_answer": "No Answer or Rejected", "busy": "Busy", "failed": "Failed"}
         out: dict[tuple[str, str], list[dict]] = {}
         for fid, day, n, status, dur, err, msg in rows:
+            incoming = (msg or "").strip() in ("(farmer called)", "(farmer called back)")
             out.setdefault((fid, day), []).append({"attempt_number": n, "status": label.get(status, status),
                                                    "duration_seconds": dur or 0, "error_message": err or "",
-                                                   "incoming": msg == "(farmer called)"})
+                                                   "incoming": incoming, "direction": "inbound" if incoming else "outbound"})
         return out
 
     @staticmethod
@@ -2032,7 +2034,8 @@ class DashboardService:
                 "summary": summary or "", "understood_weather": understood or "", "stop_calls_requested": stop or "",
                 "transcript": json.loads(transcript) if transcript else [], "attempts_log": attempts,
                 "call_mode": mode or "", "attempt_id": attempt_id or "", "messages_sent": sms_sent.get((fid, day), 0),
-                "direction": "incoming" if attempts and attempts[-1].get("incoming") else "outgoing"})
+                "direction": "incoming" if attempts and attempts[-1].get("incoming") else "outgoing",
+                "has_inbound_callback": any(a.get("incoming") for a in attempts), "is_today": day == self._now().date().isoformat()})
         out += self._test_rows()
         out += self._incoming_rows()
         live = {lv[0]: lv for lv in self._live_rows()}

@@ -6,9 +6,7 @@ const rupees = (n) => `₹${Number(n || 0).toFixed(2)}`;
 
 const pad2 = (n) => String(n).padStart(2, '0');
 const toDateStr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-
 const getTodayDateStr = () => toDateStr(new Date());
-
 const getPastDateStr = (daysAgo) => {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
@@ -60,7 +58,6 @@ const wrapLabel = (text, maxChars = 13, maxLines = 2) => {
   }
   return lines.length ? lines : [''];
 };
-
 export const SvgDonutCard = ({
   title,
   subtitle,
@@ -76,20 +73,17 @@ export const SvgDonutCard = ({
     return slices.reduce((sum, s) => sum + (Number(s.value) || 0), 0);
   }, [slices]);
 
-  // Dimensions
   const size = 180;
   const cx = size / 2;
   const cy = size / 2;
   const outerR = 76;
   const innerR = 48;
 
-  // Active slice for dynamic center display
   const activeSlice = hoveredId ? slices.find((s) => s.id === hoveredId) : null;
   const labelLines = wrapLabel(activeSlice ? activeSlice.label : centerTitle);
   const valueText = String(activeSlice ? (isCurrency ? rupees(activeSlice.value) : activeSlice.value) : centerValue);
   const valueSize = valueText.length > 10 ? 10 : valueText.length > 8 ? 12 : 14;   // a long number shrinks to stay inside the hole
 
-  // Compute arc segments
   let currentAngle = -Math.PI / 2;
   const arcSegments = slices.map((s) => {
     const val = Number(s.value) || 0;
@@ -125,20 +119,13 @@ export const SvgDonutCard = ({
 
   return (
     <div className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 flex flex-col h-full shadow-2xs hover:shadow-xs transition-shadow">
-      {/* Standardized Header: baseline aligned across all cards */}
       <div className="border-b border-slate-100 pb-2 min-h-[50px] flex flex-col justify-center shrink-0">
         <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider break-words leading-tight">{title}</h4>
         {subtitle && <p className="text-[11px] text-slate-500 break-words leading-snug mt-0.5">{subtitle}</p>}
       </div>
 
-      {/* Donut Graphic: strictly fixed position & dimensions across all cards */}
       <div className="flex items-center justify-center relative shrink-0 h-[196px] my-1">
-        <svg
-          width={size}
-          height={size}
-          viewBox={`0 0 ${size} ${size}`}
-          className="overflow-visible select-none"
-        >
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="overflow-visible select-none">
           {total === 0 ? (
             <circle
               cx={cx}
@@ -208,21 +195,13 @@ export const SvgDonutCard = ({
             {valueText}
           </text>
           {activeSlice && (
-            <text
-              x={cx}
-              y={cy + 26}
-              textAnchor="middle"
-              fill={activeSlice.color}
-              fontSize="10"
-              fontWeight="700"
-            >
+            <text x={cx} y={cy + 26} textAnchor="middle" fill={activeSlice.color} fontSize="10" fontWeight="700">
               {total > 0 ? `${((activeSlice.value / total) * 100).toFixed(1)}%` : '0%'}
             </text>
           )}
         </svg>
       </div>
 
-      {/* Legend Rows: strictly aligned starting divider across all cards */}
       <div className="space-y-1.5 pt-3 border-t border-slate-100 text-xs flex-1 flex flex-col justify-start">
         {slices.map((s) => {
           const isHov = hoveredId === s.id;
@@ -237,10 +216,7 @@ export const SvgDonutCard = ({
               }`}
             >
               <div className="flex items-start gap-2 min-w-0 flex-1">
-                <span
-                  className="w-2.5 h-2.5 rounded-xs shrink-0 mt-1"
-                  style={{ backgroundColor: s.color }}
-                />
+                <span className="w-2.5 h-2.5 rounded-xs shrink-0 mt-1" style={{ backgroundColor: s.color }} />
                 <div className="min-w-0 flex-1 break-words leading-snug">
                   <span className={`font-semibold block text-xs ${isHov ? 'text-slate-900' : 'text-slate-700'}`}>
                     {s.label}
@@ -267,23 +243,20 @@ export const SvgDonutCard = ({
   );
 };
 
-/**
- * Grid of 4 Donut & Pie Breakdown Cards:
- * 1. Spend Split (Voice AI vs. Number Rental)
- * 2. Call Outcomes (Completed, Callbacks, Unanswered/Busy, Needs Attention)
- * 3. Language Mix (Kannada, Hindi, Telugu, English)
- * 4. Duration Tiers (Under 1 min, 1–2 mins, 2–3 mins, Over 3 mins)
- */
 export const DonutAnalyticsGrid = ({
   callLogs = [],
   rate = 3.5,
   messageRate = 0.2,
   embedded = false,
-  initialDayFilter = '14d',
+  initialDayFilter = 'today',
   dayFilter: controlledDayFilter,
   onDayFilterChange,
   customDate: controlledCustomDate,
   onCustomDateChange,
+  authoritativeSpend,
+  authoritativeVoiceSpend,
+  authoritativeBilledMins,
+  authoritativeAttempts,
 }) => {
   const [internalDayFilter, setInternalDayFilter] = useState(initialDayFilter);
   const [internalCustomDate, setInternalCustomDate] = useState('');
@@ -292,28 +265,21 @@ export const DonutAnalyticsGrid = ({
   const customDate = controlledCustomDate !== undefined ? controlledCustomDate : internalCustomDate;
 
   const handlePresetChange = (presetId) => {
-    if (onDayFilterChange) {
-      onDayFilterChange(presetId);
-    } else {
-      setInternalDayFilter(presetId);
-    }
-    if (onCustomDateChange) {
-      onCustomDateChange('');
-    } else {
-      setInternalCustomDate('');
-    }
+    if (onDayFilterChange) onDayFilterChange(presetId);
+    else setInternalDayFilter(presetId);
+
+    if (onCustomDateChange) onCustomDateChange('');
+    else setInternalCustomDate('');
   };
 
   const handleCustomDateChange = (e) => {
     const val = e.target.value;
-    if (onCustomDateChange) {
-      onCustomDateChange(val);
-    } else {
-      setInternalCustomDate(val);
-    }
+    if (onCustomDateChange) onCustomDateChange(val);
+    else setInternalCustomDate(val);
+
     if (!val) {
-      if (onDayFilterChange) onDayFilterChange('14d');
-      else setInternalDayFilter('14d');
+      if (onDayFilterChange) onDayFilterChange('today');
+      else setInternalDayFilter('today');
     } else {
       if (onDayFilterChange) onDayFilterChange('custom');
       else setInternalDayFilter('custom');
@@ -321,7 +287,8 @@ export const DonutAnalyticsGrid = ({
   };
 
   const filteredCalls = useMemo(() => {
-    const valid = (callLogs || []).filter((c) => !c.is_test);
+    // Rule 4: Include test calls
+    const valid = callLogs || [];
     if (dayFilter === 'all') return valid;
 
     const todayStr = getTodayDateStr();
@@ -332,22 +299,11 @@ export const DonutAnalyticsGrid = ({
     return valid.filter((c) => {
       const callDate = getCallDateKey(c);
       if (!callDate) return false;
-
-      if (dayFilter === 'today') {
-        return callDate === todayStr;
-      }
-      if (dayFilter === 'yesterday') {
-        return callDate === yesterdayStr;
-      }
-      if (dayFilter === '7d') {
-        return callDate >= d7Str && callDate <= todayStr;
-      }
-      if (dayFilter === '14d') {
-        return callDate >= d14Str && callDate <= todayStr;
-      }
-      if (dayFilter === 'custom' && customDate) {
-        return callDate === customDate;
-      }
+      if (dayFilter === 'today') return callDate === todayStr;
+      if (dayFilter === 'yesterday') return callDate === yesterdayStr;
+      if (dayFilter === '7d') return callDate >= d7Str && callDate <= todayStr;
+      if (dayFilter === '14d') return callDate >= d14Str && callDate <= todayStr;
+      if (dayFilter === 'custom' && customDate) return callDate === customDate;
       return true;
     });
   }, [callLogs, dayFilter, customDate]);
@@ -366,102 +322,89 @@ export const DonutAnalyticsGrid = ({
     return 'All Recorded Days';
   }, [dayFilter, customDate]);
 
-  const isDailyReport = dayFilter === 'today' || dayFilter === 'yesterday' || (dayFilter === 'custom' && Boolean(customDate));
-  const isMultiDayBillingCycle = dayFilter === '14d' || dayFilter === 'all';
-
   const analytics = useMemo(() => {
-    const totalCallsCount = filteredCalls.length;
-
-    // 1. Cost Split Data (Voice AI usage vs. Advisory Messages vs. Monthly Number Rental base)
+    let totalAttemptsCount = 0;
     let totalBilledMins = 0;
     let totalConnectedSec = 0;
     let connectedCount = 0;
     let totalMessages = 0;
 
     filteredCalls.forEach((c) => {
-      // 1 message sent per farmer outreach IF explicitly recorded in telemetry
       const msgs = Number(c.messages_sent ?? c.sms_count ?? 0);
       totalMessages += msgs;
 
-      const isConn =
-        didFarmerPickUpAndTalk(c) ||
-        ['completed', 'delivered', 'connected', 'answered'].includes(
-          String(c.call_status || c.status || '').toLowerCase()
-        ) ||
-        Number(c.duration_sec || c.duration || 0) > 0;
-      if (isConn) {
-        const sec = Number(c.duration_sec ?? c.duration ?? 0);
-        totalBilledMins += Math.max(1, Math.ceil(sec / 60));
-        totalConnectedSec += sec;
-        connectedCount += 1;
+      const attempts = Array.isArray(c.attempts_log) && c.attempts_log.length > 0 ? c.attempts_log : null;
+      if (attempts) {
+        totalAttemptsCount += attempts.length;
+        attempts.forEach((att) => {
+          const sec = Number(att.duration_seconds ?? att.duration_sec ?? att.duration_s ?? att.duration ?? 0);
+          // Rules 5A & 6A: Bill only when sec > 0, across every attempt
+          if (sec > 0) {
+            totalBilledMins += Math.ceil(sec / 60);
+            totalConnectedSec += sec;
+            connectedCount += 1;
+          }
+        });
+      } else {
+        const retries = Number(c.retry_count || 0);
+        totalAttemptsCount += Math.max(1, retries + 1);
+        const sec = Number(c.duration_sec ?? c.duration_seconds ?? c.duration_s ?? c.duration ?? 0);
+        if (sec > 0) {
+          totalBilledMins += Math.ceil(sec / 60);
+          totalConnectedSec += sec;
+          connectedCount += 1;
+        }
       }
     });
 
-    const voiceAiCost = Math.round(totalBilledMins * rate * 100) / 100;
+    const effectiveBilledMins =
+      authoritativeBilledMins !== undefined && authoritativeBilledMins >= 0
+        ? authoritativeBilledMins
+        : totalBilledMins;
+
+    const voiceAiCost =
+      authoritativeVoiceSpend !== undefined && authoritativeVoiceSpend >= 0
+        ? authoritativeVoiceSpend
+        : Math.round(effectiveBilledMins * rate * 100) / 100;
+
     const messageCost = Math.round(totalMessages * messageRate * 100) / 100;
-    const telephonyNumberRental = 59.00; // Monthly DID Base
 
-    // In daily reports or 7d usage: totalSpend reflects pure call + message usage spend. NEVER add ₹59 to daily reports!
-    // Only in multi-day 14d/all billing windows does totalSpend reflect total combined invoice (Voice AI + Messages + Monthly DID).
-    const operationalSpend = Math.round((voiceAiCost + messageCost) * 100) / 100;
-    const totalSpend = isMultiDayBillingCycle && filteredCalls.length > 0
-      ? Math.round((operationalSpend + telephonyNumberRental) * 100) / 100
-      : operationalSpend;
+    // Rule 9A: Fixed ₹59/mo rental is NEVER added into operational or total spend
+    const totalSpend =
+      authoritativeSpend !== undefined && authoritativeSpend >= 0
+        ? authoritativeSpend
+        : Math.round((voiceAiCost + messageCost) * 100) / 100;
 
-    // Format average duration across connected calls (e.g. "1m 24s")
+    const displayAttempts =
+      authoritativeAttempts !== undefined && authoritativeAttempts > 0
+        ? authoritativeAttempts
+        : (totalAttemptsCount || filteredCalls.length);
+
     const avgSec = connectedCount > 0 ? Math.round(totalConnectedSec / connectedCount) : 0;
     const avgMins = Math.floor(avgSec / 60);
     const avgRemSec = avgSec % 60;
     const avgDurationFormatted = `${avgMins}m ${String(avgRemSec).padStart(2, '0')}s`;
 
-    const costSplitSlices = isMultiDayBillingCycle
-      ? [
-          {
-            id: 'voice',
-            label: 'Sarvam Voice AI',
-            value: voiceAiCost,
-            color: '#1E6F43', // Trust Green
-            secondaryText: `${totalBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
-          },
-          ...(totalMessages > 0
-            ? [
-                {
-                  id: 'messages',
-                  label: 'Advisory Messages',
-                  value: messageCost,
-                  color: '#0284C7', // Sky Blue
-                  secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
-                },
-              ]
-            : []),
-          {
-            id: 'carriage',
-            label: 'Number Rental',
-            value: filteredCalls.length > 0 ? telephonyNumberRental : 0,
-            color: '#0F2444', // Trust Navy
-            secondaryText: 'Monthly DID rental (₹59/mo fixed base)',
-          },
-        ]
-      : [
-          {
-            id: 'voice',
-            label: 'Sarvam Voice AI',
-            value: voiceAiCost,
-            color: '#1E6F43', // Trust Green
-            secondaryText: `${totalBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
-          },
-          ...(totalMessages > 0
-            ? [
-                {
-                  id: 'messages',
-                  label: 'Advisory Messages',
-                  value: messageCost,
-                  color: '#0284C7', // Sky Blue
-                  secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
-                },
-              ]
-            : []),
-        ];
+    const costSplitSlices = [
+      {
+        id: 'voice',
+        label: 'Sarvam Voice AI',
+        value: voiceAiCost,
+        color: '#1E6F43',
+        secondaryText: `${effectiveBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
+      },
+      ...(totalMessages > 0
+        ? [
+            {
+              id: 'messages',
+              label: 'Advisory Messages',
+              value: messageCost,
+              color: '#0284C7',
+              secondaryText: `${totalMessages} sent (₹${Number(messageRate).toFixed(2)}/msg)`,
+            },
+          ]
+        : []),
+    ];
 
     // 2. Call Outcomes Data
     let completed = 0;
@@ -470,172 +413,141 @@ export const DonutAnalyticsGrid = ({
     let failed = 0;
 
     filteredCalls.forEach((c) => {
-      const raw = String(c.call_status || c.status || '').toLowerCase();
-      if (raw.includes('callback') || c.callback_time) {
-        callbacks += 1;
-      } else if (
-        didFarmerPickUpAndTalk(c) ||
-        raw.includes('completed') ||
-        raw.includes('delivered') ||
-        raw.includes('answered')
-      ) {
-        completed += 1;
-      } else if (
-        raw.includes('fail') ||
-        raw.includes('declined') ||
-        raw.includes('rejected') ||
-        raw.includes('error')
-      ) {
-        failed += 1;
+      const attempts = Array.isArray(c.attempts_log) && c.attempts_log.length > 0 ? c.attempts_log : null;
+      if (attempts) {
+        attempts.forEach((att, idx) => {
+          const raw = String(att.status || '').toLowerCase();
+          const isLastAttempt = idx === attempts.length - 1;
+          if (isLastAttempt && (String(c.status || '').toLowerCase().includes('callback') || c.callback_time)) {
+            callbacks += 1;
+          } else if (
+            raw.includes('completed') ||
+            raw.includes('delivered') ||
+            raw.includes('answered') ||
+            Number(att.duration_seconds || 0) > 0
+          ) {
+            completed += 1;
+          } else if (raw.includes('fail') || raw.includes('declined') || raw.includes('rejected') || raw.includes('error')) {
+            failed += 1;
+          } else {
+            unanswered += 1;
+          }
+        });
       } else {
-        unanswered += 1;
+        const raw = String(c.call_status || c.status || '').toLowerCase();
+        if (raw.includes('callback') || c.callback_time) {
+          callbacks += 1;
+        } else if (
+          didFarmerPickUpAndTalk(c) ||
+          raw.includes('completed') ||
+          raw.includes('delivered') ||
+          raw.includes('answered')
+        ) {
+          completed += 1;
+        } else if (
+          raw.includes('fail') ||
+          raw.includes('declined') ||
+          raw.includes('rejected') ||
+          raw.includes('error')
+        ) {
+          failed += 1;
+        } else {
+          unanswered += 1;
+        }
       }
     });
 
+    const loggedTotal = completed + callbacks + unanswered + failed;
+    if (displayAttempts > loggedTotal) {
+      unanswered += displayAttempts - loggedTotal;
+    }
+
     const outcomeSlices = [
-      {
-        id: 'completed',
-        label: 'Completed & Understood',
-        value: completed,
-        color: '#1E6F43',
-        secondaryText: 'Weather advisory delivered',
-      },
-      {
-        id: 'callbacks',
-        label: 'Callback Scheduled',
-        value: callbacks,
-        color: '#3B82F6',
-        secondaryText: 'Requested callback later',
-      },
-      {
-        id: 'unanswered',
-        label: 'Unanswered / Busy',
-        value: unanswered,
-        color: '#F59E0B',
-        secondaryText: 'Ringing or line busy',
-      },
-      {
-        id: 'failed',
-        label: 'Needs Attention',
-        value: failed,
-        color: '#EF4444',
-        secondaryText: 'Line dropped or rejected',
-      },
+      { id: 'completed', label: 'Completed & Answered', value: completed, color: '#1E6F43', secondaryText: 'Weather advisory delivered' },
+      { id: 'callbacks', label: 'Callback Scheduled', value: callbacks, color: '#3B82F6', secondaryText: 'Requested callback later' },
+      { id: 'unanswered', label: 'Unanswered / Busy', value: unanswered, color: '#F59E0B', secondaryText: 'Ringing or line busy' },
+      { id: 'failed', label: 'Needs Attention', value: failed, color: '#EF4444', secondaryText: 'Line dropped or rejected' },
     ];
 
-    // 3. Language Breakdown
+    // 3. Language Breakdown (sums all attempts per call)
     const langCounts = { Kannada: 0, Hindi: 0, Telugu: 0, English: 0 };
     const langSpend = { Kannada: 0, Hindi: 0, Telugu: 0, English: 0 };
 
     filteredCalls.forEach((c) => {
       const rawLang = c.language || c.Farmer_Language || c.calling_language || c.Language || 'Kannada';
       const norm = normalizeLanguage(rawLang);
-      langCounts[norm] = (langCounts[norm] || 0) + 1;
+      const attempts = Array.isArray(c.attempts_log) && c.attempts_log.length > 0 ? c.attempts_log : null;
 
-      const sec = Number(c.duration_sec ?? c.duration ?? 0);
-      const answered = didFarmerPickUpAndTalk(c) || sec > 0
-        || ['completed', 'delivered', 'connected', 'answered'].includes(String(c.call_status || c.status || '').toLowerCase());
-      const mins = answered ? Math.max(1, Math.ceil(sec / 60)) : 0;
-      const cost = answered ? Math.round(mins * rate * 100) / 100 : 0;
-      langSpend[norm] = Math.round(((langSpend[norm] || 0) + cost) * 100) / 100;
+      if (attempts) {
+        langCounts[norm] = (langCounts[norm] || 0) + attempts.length;
+        let callMins = 0;
+        attempts.forEach((att) => {
+          const sec = Number(att.duration_seconds ?? att.duration_sec ?? att.duration_s ?? att.duration ?? 0);
+          if (sec > 0) callMins += Math.ceil(sec / 60);
+        });
+        const cost = Math.round(callMins * rate * 100) / 100;
+        langSpend[norm] = Math.round(((langSpend[norm] || 0) + cost) * 100) / 100;
+      } else {
+        langCounts[norm] = (langCounts[norm] || 0) + 1;
+        const sec = Number(c.duration_sec ?? c.duration_seconds ?? c.duration_s ?? c.duration ?? 0);
+        const mins = sec > 0 ? Math.ceil(sec / 60) : 0;
+        const cost = Math.round(mins * rate * 100) / 100;
+        langSpend[norm] = Math.round(((langSpend[norm] || 0) + cost) * 100) / 100;
+      }
     });
 
     const languageSlices = [
-      {
-        id: 'kannada',
-        label: 'Kannada',
-        value: langCounts.Kannada,
-        color: '#0F2444',
-        secondaryText: `₹${(langSpend.Kannada || 0).toFixed(2)} estimated`,
-      },
-      {
-        id: 'hindi',
-        label: 'Hindi',
-        value: langCounts.Hindi,
-        color: '#0284C7',
-        secondaryText: `₹${(langSpend.Hindi || 0).toFixed(2)} estimated`,
-      },
-      {
-        id: 'telugu',
-        label: 'Telugu',
-        value: langCounts.Telugu,
-        color: '#10B981',
-        secondaryText: `₹${(langSpend.Telugu || 0).toFixed(2)} estimated`,
-      },
-      {
-        id: 'english',
-        label: 'English',
-        value: langCounts.English,
-        color: '#8B5CF6',
-        secondaryText: `₹${(langSpend.English || 0).toFixed(2)} estimated`,
-      },
+      { id: 'kannada', label: 'Kannada', value: langCounts.Kannada, color: '#0F2444', secondaryText: `₹${(langSpend.Kannada || 0).toFixed(2)} estimated` },
+      { id: 'hindi', label: 'Hindi', value: langCounts.Hindi, color: '#0284C7', secondaryText: `₹${(langSpend.Hindi || 0).toFixed(2)} estimated` },
+      { id: 'telugu', label: 'Telugu', value: langCounts.Telugu, color: '#10B981', secondaryText: `₹${(langSpend.Telugu || 0).toFixed(2)} estimated` },
+      { id: 'english', label: 'English', value: langCounts.English, color: '#8B5CF6', secondaryText: `₹${(langSpend.English || 0).toFixed(2)} estimated` },
     ];
 
-    // 4. Call Duration Tiers
+    // 4. Call Duration Tiers (across all connected attempts)
     let tierShort = 0;
     let tierStandard = 0;
     let tierExtended = 0;
     let tierDeep = 0;
 
-    filteredCalls.forEach((c) => {
-      const sec = Number(c.duration_sec ?? c.duration ?? 0);
+    const bucketDuration = (sec) => {
       if (sec <= 0) return;
       if (sec < 60) tierShort += 1;
       else if (sec < 120) tierStandard += 1;
       else if (sec < 180) tierExtended += 1;
       else tierDeep += 1;
+    };
+
+    filteredCalls.forEach((c) => {
+      const attempts = Array.isArray(c.attempts_log) && c.attempts_log.length > 0 ? c.attempts_log : null;
+      if (attempts) {
+        attempts.forEach((att) => bucketDuration(Number(att.duration_seconds ?? att.duration_sec ?? att.duration_s ?? att.duration ?? 0)));
+      } else {
+        bucketDuration(Number(c.duration_sec ?? c.duration_seconds ?? c.duration_s ?? c.duration ?? 0));
+      }
     });
 
     const durationSlices = [
-      {
-        id: 'short',
-        label: 'Under 1 min',
-        value: tierShort,
-        color: '#06B6D4',
-        secondaryText: 'Quick weather delivery',
-      },
-      {
-        id: 'standard',
-        label: '1 – 2 mins',
-        value: tierStandard,
-        color: '#1E6F43',
-        secondaryText: 'Full forecast confirmation',
-      },
-      {
-        id: 'extended',
-        label: '2 – 3 mins',
-        value: tierExtended,
-        color: '#F59E0B',
-        secondaryText: 'Forecast + Q&A dialogue',
-      },
-      {
-        id: 'deep',
-        label: 'Over 3 mins',
-        value: tierDeep,
-        color: '#6366F1',
-        secondaryText: 'Extended advisory consultation',
-      },
+      { id: 'short', label: 'Under 1 min', value: tierShort, color: '#06B6D4', secondaryText: 'Quick weather delivery' },
+      { id: 'standard', label: '1 – 2 mins', value: tierStandard, color: '#1E6F43', secondaryText: 'Full forecast confirmation' },
+      { id: 'extended', label: '2 – 3 mins', value: tierExtended, color: '#F59E0B', secondaryText: 'Forecast + Q&A dialogue' },
+      { id: 'deep', label: 'Over 3 mins', value: tierDeep, color: '#6366F1', secondaryText: 'Extended advisory consultation' },
     ];
 
     return {
-      totalCallsCount,
+      displayAttempts,
       totalSpend,
       voiceAiCost,
       messageCost,
       totalMessages,
-      operationalSpend,
-      telephonyNumberRental,
-      isDailyReport,
-      isMultiDayBillingCycle,
       avgDurationFormatted,
       costSplitSlices,
       outcomeSlices,
       languageSlices,
       durationSlices,
       connectedCount,
-      totalBilledMins,
+      totalBilledMins: effectiveBilledMins,
     };
-  }, [filteredCalls, rate, messageRate, isDailyReport, isMultiDayBillingCycle]);
+  }, [filteredCalls, rate, messageRate, authoritativeSpend, authoritativeVoiceSpend, authoritativeBilledMins, authoritativeAttempts]);
 
   const containerClass = embedded
     ? 'space-y-4'
@@ -643,14 +555,13 @@ export const DonutAnalyticsGrid = ({
 
   return (
     <div className={containerClass}>
-      {/* Day / Timeframe Filter Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-200/70 rounded-xl">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <Calendar className="w-4 h-4 text-trust-green shrink-0" />
           <span className="text-xs font-bold text-slate-800">Filter:</span>
           <span className="text-xs text-slate-600 font-medium">{timeframeLabel}</span>
           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-white text-slate-700 border border-slate-200/80 shadow-2xs">
-            {filteredCalls.length} {filteredCalls.length === 1 ? 'call' : 'calls'}
+            {analytics.displayAttempts} {analytics.displayAttempts === 1 ? 'attempt' : 'attempts'}
           </span>
         </div>
 
@@ -666,7 +577,6 @@ export const DonutAnalyticsGrid = ({
             </button>
           ))}
 
-          {/* Custom Date Input */}
           <div className="flex items-center gap-1 pl-1">
             <input
               type="date"
@@ -695,21 +605,12 @@ export const DonutAnalyticsGrid = ({
         </div>
       )}
 
-      {/* 4 Standardized Donut Cards: strictly aligned pie chart center positions and baselines */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
         <SvgDonutCard
           title="Spend Split"
-          subtitle={
-            analytics.totalMessages > 0
-              ? analytics.isMultiDayBillingCycle
-                ? 'Voice AI vs. messages vs. number rental'
-                : 'Voice AI calls vs. advisory messages'
-              : analytics.isMultiDayBillingCycle
-              ? 'Voice AI usage vs. number rental'
-              : 'Sarvam Voice AI call usage'
-          }
+          subtitle={analytics.totalMessages > 0 ? 'Voice AI calls vs. advisory messages' : 'Sarvam Voice AI call usage'}
           slices={analytics.costSplitSlices}
-          centerTitle={analytics.isMultiDayBillingCycle ? 'Total Spend' : 'Daily Spend'}
+          centerTitle="Usage Spend"
           centerValue={rupees(analytics.totalSpend)}
           isCurrency={true}
           footer={
@@ -728,27 +629,20 @@ export const DonutAnalyticsGrid = ({
                   {analytics.connectedCount} calls ({analytics.totalBilledMins} mins)
                 </span>
               </div>
-              {!analytics.isMultiDayBillingCycle ? (
-                <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-blue-50/70 border border-blue-200/60 text-[11px]">
-                  <span className="text-trust-navy font-semibold">Separate Monthly Base:</span>
-                  <span className="font-bold font-mono text-trust-navy shrink-0 whitespace-nowrap">₹59.00/mo (Fixed DID)</span>
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-slate-100/60 border border-slate-200/50 text-[11px]">
-                  <span className="text-slate-500 font-medium">Fixed Monthly DID:</span>
-                  <span className="font-bold font-mono text-slate-800 shrink-0 whitespace-nowrap">₹59.00/mo</span>
-                </div>
-              )}
+              <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-blue-50/70 border border-blue-200/60 text-[11px]">
+                <span className="text-trust-navy font-semibold">Separate Monthly Base:</span>
+                <span className="font-bold font-mono text-trust-navy shrink-0 whitespace-nowrap">₹59.00/mo (Fixed DID)</span>
+              </div>
             </div>
           }
         />
 
         <SvgDonutCard
           title="Call Outcomes"
-          subtitle="Farmer engagement & delivery ratios"
+          subtitle="Attempt engagement & delivery ratios"
           slices={analytics.outcomeSlices}
           centerTitle="Attempts"
-          centerValue={String(analytics.totalCallsCount)}
+          centerValue={String(analytics.displayAttempts)}
         />
 
         <SvgDonutCard

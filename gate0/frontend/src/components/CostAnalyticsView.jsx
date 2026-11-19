@@ -15,27 +15,74 @@ function getCallDateKey(call) {
   const str = String(raw).trim();
   if (!str) return '';
   const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) {
-    return `${m[1]}-${m[2]}-${m[3]}`;
-  }
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   const m2 = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
-  if (m2) {
-    const dd = m2[1].padStart(2, '0');
-    const mm = m2[2].padStart(2, '0');
-    const yyyy = m2[3];
-    return `${yyyy}-${mm}-${dd}`;
-  }
+  if (m2) return `${m2[3]}-${m2[2].padStart(2, '0')}-${m2[1].padStart(2, '0')}`;
   const parsed = new Date(str);
-  if (!isNaN(parsed.getTime())) {
-    return localDateKey(parsed);
-  }
+  if (!isNaN(parsed.getTime())) return localDateKey(parsed);
   return '';
+}
+
+function getFarmerIdentifier(call) {
+  if (!call) return '';
+  return String(
+    call.farmer_id ||
+    call.phone_number ||
+    call.phone ||
+    call.farmer_name ||
+    call.Farmer_Name ||
+    call.name ||
+    call.call_id ||
+    ''
+  ).trim();
+}
+
+/**
+ * Helper to compute exact attempt count, connected status, and billed minutes (Rules 5A & 6A)
+ * - Sums all attempts in attempts_log when available
+ * - Uses Math.ceil(sec / 60) ONLY when sec > 0 (0s calls = 0 billed minutes)
+ */
+function getCallAttemptMetrics(call) {
+  if (!call) return { attemptCount: 0, billedMins: 0, isConnected: false };
+  const attempts = Array.isArray(call.attempts_log) && call.attempts_log.length > 0 ? call.attempts_log : null;
+  if (attempts) {
+    let billedMins = 0;
+    let anyConnected = false;
+    attempts.forEach((att) => {
+      const sec = Number(att.duration_seconds ?? att.duration_sec ?? att.duration_s ?? att.duration ?? 0);
+      if (sec > 0) {
+        billedMins += Math.ceil(sec / 60);
+        anyConnected = true;
+      } else if (['answered', 'completed', 'delivered', 'connected', 'weather delivered'].includes(String(att.status || '').toLowerCase())) {
+        anyConnected = true;
+      }
+    });
+    return {
+      attemptCount: attempts.length,
+      billedMins,
+      isConnected: anyConnected || didFarmerPickUpAndTalk(call),
+    };
+  }
+
+  const sec = Number(call.duration_sec ?? call.duration_seconds ?? call.duration_s ?? call.duration ?? 0);
+  const isConnected =
+    didFarmerPickUpAndTalk(call) ||
+    ['completed', 'delivered', 'connected', 'answered', 'weather delivered'].includes(
+      String(call.call_status || call.status || call.disposition || '').toLowerCase()
+    ) ||
+    sec > 0;
+
+  return {
+    attemptCount: Math.max(1, Number(call.retry_count || 0) + 1),
+    billedMins: sec > 0 ? Math.ceil(sec / 60) : 0,
+    isConnected,
+  };
 }
 
 function generateSimulatedUsage(callLogs = [], rate = 3.5, messageRate = 0.2) {
   const dayMap = {};
-
   const today = new Date();
+
   for (let i = 13; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
@@ -52,14 +99,15 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5, messageRate = 0.2) {
       amount: 0,
       targetedSet: new Set(),
       reachedSet: new Set(),
+      farmerAttemptsMap: new Map(),
       farmers_targeted: 0,
       farmers_reached: 0,
       retries: 0,
     };
   }
 
+  // Include test calls (Rule 4)
   (callLogs || []).forEach((call) => {
-    if (call.is_test) return;
     const dateKey = getCallDateKey(call);
     if (!dateKey) return;
 
@@ -76,6 +124,7 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5, messageRate = 0.2) {
         amount: 0,
         targetedSet: new Set(),
         reachedSet: new Set(),
+        farmerAttemptsMap: new Map(),
         farmers_targeted: 0,
         farmers_reached: 0,
         retries: 0,
@@ -83,45 +132,43 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5, messageRate = 0.2) {
     }
 
     const day = dayMap[dateKey];
-    day.total_attempts += 1;
-    day.calls += 1;
+    const { attemptCount, billedMins, isConnected } = getCallAttemptMetrics(call);
 
-    // 1 advisory SMS / WhatsApp message sent per call outreach IF explicitly recorded in telemetry
+    day.total_attempts += attemptCount;
+    day.calls += attemptCount;
+    day.billed_minutes += billedMins;
+
     const msgs = Number(call.messages_sent ?? call.sms_count ?? 0);
     day.messages_sent += msgs;
 
-    const farmerId = String(call.farmer_id || call.phone || call.Farmer_Name || call.name || '').trim();
-    if (farmerId) {
-      day.targetedSet.add(farmerId);
-    }
-
-    const isConnected =
-      didFarmerPickUpAndTalk(call) ||
-      ['completed', 'delivered', 'connected', 'answered'].includes(
-        String(call.call_status || call.status || '').toLowerCase()
-      ) ||
-      Number(call.duration_sec || call.duration || 0) > 0;
+    const farmerId = getFarmerIdentifier(call) || `call-${day.total_attempts}`;
+    day.targetedSet.add(farmerId);
+    day.farmerAttemptsMap.set(farmerId, (day.farmerAttemptsMap.get(farmerId) || 0) + attemptCount);
 
     if (isConnected) {
       day.connected += 1;
-      if (farmerId) {
-        day.reachedSet.add(farmerId);
-      }
-      const sec = Number(call.duration_sec ?? call.duration ?? 0);
-      const mins = Math.max(1, Math.ceil(sec / 60));
-      day.billed_minutes += mins;
+      day.reachedSet.add(farmerId);
     }
   });
 
   Object.values(dayMap).forEach((day) => {
-    day.farmers_targeted = day.targetedSet.size || day.calls;
-    day.farmers_reached = day.reachedSet.size || day.connected;
-    day.retries = Math.max(0, day.total_attempts - day.farmers_targeted);
+    day.farmers_targeted = day.targetedSet.size > 0 ? day.targetedSet.size : (day.calls > 0 ? 1 : 0);
+    day.farmers_reached = Math.min(day.reachedSet.size, day.farmers_targeted);
+
+    // Rule 7: Same-day retries counted per farmer on that specific day
+    let dayRetries = 0;
+    day.farmerAttemptsMap.forEach((cnt) => {
+      if (cnt > 1) dayRetries += cnt - 1;
+    });
+    day.retries = dayRetries;
+
     day.voice_amount = Math.round(day.billed_minutes * rate * 100) / 100;
     day.message_amount = Math.round(day.messages_sent * messageRate * 100) / 100;
     day.amount = Math.round((day.voice_amount + day.message_amount) * 100) / 100;
+
     delete day.targetedSet;
     delete day.reachedSet;
+    delete day.farmerAttemptsMap;
   });
 
   const sortedDescending = Object.values(dayMap).sort((a, b) => b.date.localeCompare(a.date));
@@ -146,12 +193,37 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5, messageRate = 0.2) {
   weekStart.setDate(weekStart.getDate() - 6);
   const weekStartKey = localDateKey(weekStart);
   const weekCalls = days.filter((d) => d.date >= weekStartKey);
+
+  const weekLogs = (callLogs || []).filter((c) => {
+    const k = getCallDateKey(c);
+    return k && k >= weekStartKey && k <= todayStr;
+  });
+  const weekTargetedSet = new Set(weekLogs.map(getFarmerIdentifier).filter(Boolean));
+  const weekReachedSet = new Set(
+    weekLogs.filter((c) => getCallAttemptMetrics(c).isConnected).map(getFarmerIdentifier).filter(Boolean)
+  );
+
+  const windowLogs = (callLogs || []).filter((c) => {
+    const k = getCallDateKey(c);
+    const d14 = new Date(today);
+    d14.setDate(d14.getDate() - 13);
+    return k && k >= localDateKey(d14) && k <= todayStr;
+  });
+  const windowTargetedSet = new Set(windowLogs.map(getFarmerIdentifier).filter(Boolean));
+  const windowReachedSet = new Set(
+    windowLogs.filter((c) => getCallAttemptMetrics(c).isConnected).map(getFarmerIdentifier).filter(Boolean)
+  );
+
+  const weekTotalAttempts = weekCalls.reduce((s, d) => s + (d.total_attempts || d.calls), 0);
+  const weekTargeted = weekTargetedSet.size || (weekTotalAttempts > 0 ? 1 : 0);
+  const weekReached = Math.min(weekReachedSet.size, weekTargeted);
+
   const weekTotals = {
     calls: weekCalls.reduce((s, d) => s + d.calls, 0),
-    total_attempts: weekCalls.reduce((s, d) => s + (d.total_attempts || d.calls), 0),
+    total_attempts: weekTotalAttempts,
     connected: weekCalls.reduce((s, d) => s + d.connected, 0),
-    farmers_targeted: weekCalls.reduce((s, d) => s + (d.farmers_targeted || 0), 0),
-    farmers_reached: weekCalls.reduce((s, d) => s + (d.farmers_reached || 0), 0),
+    farmers_targeted: weekTargeted,
+    farmers_reached: weekReached,
     retries: weekCalls.reduce((s, d) => s + (d.retries || 0), 0),
     billed_minutes: weekCalls.reduce((s, d) => s + d.billed_minutes, 0),
     voice_amount: Math.round(weekCalls.reduce((s, d) => s + (d.voice_amount || 0), 0) * 100) / 100,
@@ -160,12 +232,16 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5, messageRate = 0.2) {
     amount: Math.round(weekCalls.reduce((s, d) => s + d.amount, 0) * 100) / 100,
   };
 
+  const windowTotalAttempts = days.reduce((s, d) => s + (d.total_attempts || d.calls), 0);
+  const windowTargeted = windowTargetedSet.size || (windowTotalAttempts > 0 ? 1 : 0);
+  const windowReached = Math.min(windowReachedSet.size, windowTargeted);
+
   const windowTotals = {
     calls: days.reduce((s, d) => s + d.calls, 0),
-    total_attempts: days.reduce((s, d) => s + (d.total_attempts || d.calls), 0),
+    total_attempts: windowTotalAttempts,
     connected: days.reduce((s, d) => s + d.connected, 0),
-    farmers_targeted: days.reduce((s, d) => s + (d.farmers_targeted || 0), 0),
-    farmers_reached: days.reduce((s, d) => s + (d.farmers_reached || 0), 0),
+    farmers_targeted: windowTargeted,
+    farmers_reached: windowReached,
     retries: days.reduce((s, d) => s + (d.retries || 0), 0),
     billed_minutes: days.reduce((s, d) => s + d.billed_minutes, 0),
     voice_amount: Math.round(days.reduce((s, d) => s + (d.voice_amount || 0), 0) * 100) / 100,
@@ -221,27 +297,111 @@ export const InteractiveUsageChart = ({
   messageRate = 0.2,
   isSimulated = false,
   callLogs = [],
-  timeframe = '14d',
+  timeframe = 'today',
   onTimeframeChange,
   customDate = '',
   onCustomDateChange,
+  authoritativeStats = null,
 }) => {
-  // Primary view switcher: Breakdown | Intraday Activity | Daily Trends | Daily Table
-  const [chartView, setChartView] = useState('breakdown'); // 'breakdown' | 'realtime' | 'daily' | 'table'
-  const [dailyMetric, setDailyMetric] = useState('reach'); // 'reach' (Unique Farmer Reach) | 'spend'
+  const [chartView, setChartView] = useState('breakdown');
+  const [dailyMetric, setDailyMetric] = useState('reach');
   const [hoveredIdx, setHoveredIdx] = useState(null);
+
+  const callsByDate = useMemo(() => {
+    const map = new Map();
+    (callLogs || []).forEach((c) => {
+      const k = getCallDateKey(c);
+      if (!k) return;
+      if (!map.has(k)) {
+        map.set(k, {
+          targeted: new Set(),
+          reached: new Set(),
+          farmerAttempts: new Map(),
+          totalCalls: 0,
+          billedMinutes: 0,
+          messagesSent: 0,
+        });
+      }
+      const entry = map.get(k);
+      const { attemptCount, billedMins, isConnected } = getCallAttemptMetrics(c);
+      entry.totalCalls += attemptCount;
+      entry.billedMinutes += billedMins;
+      entry.messagesSent += Number(c.messages_sent ?? c.sms_count ?? 0);
+
+      const fid = getFarmerIdentifier(c) || `call-${entry.totalCalls}`;
+      entry.targeted.add(fid);
+      entry.farmerAttempts.set(fid, (entry.farmerAttempts.get(fid) || 0) + attemptCount);
+
+      if (isConnected) {
+        entry.reached.add(fid);
+      }
+    });
+    return map;
+  }, [callLogs]);
 
   const chronologicalDays = useMemo(() => {
     if (!days || !days.length) return [];
-    return [...days].sort((a, b) => a.date.localeCompare(b.date));
-  }, [days]);
+    return [...days]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((d) => {
+        const logData = callsByDate.get(d.date);
+        let targeted = d.farmers_targeted;
+        let reached = d.farmers_reached;
+        let retries = d.retries;
+
+        if (logData && logData.targeted.size > 0) {
+          targeted = logData.targeted.size;
+          reached = logData.reached.size;
+          let dayRetries = 0;
+          logData.farmerAttempts.forEach((cnt) => {
+            if (cnt > 1) dayRetries += cnt - 1;
+          });
+          retries = dayRetries;
+        } else if (targeted === undefined || targeted === null) {
+          targeted = d.calls > 0 ? 1 : 0;
+          reached = d.connected > 0 ? Math.min(d.connected, targeted) : 0;
+          retries = Math.max(0, (d.total_attempts || d.calls || 0) - targeted);
+        }
+
+        reached = Math.min(Number(reached || 0), Number(targeted || 0));
+        const totalAttempts = d.total_attempts || d.calls || (logData ? logData.totalCalls : 0);
+        const msgs = Number(d.messages_sent ?? (logData ? logData.messagesSent : 0));
+        const billedMinutes = d.billed_minutes !== undefined && d.billed_minutes > 0
+          ? d.billed_minutes
+          : (logData ? logData.billedMinutes : (d.billed_minutes || 0));
+
+        const voiceSpend = d.voice_amount !== undefined && d.voice_amount > 0
+          ? d.voice_amount
+          : Math.round(billedMinutes * rate * 100) / 100;
+        const smsSpend = d.message_amount !== undefined ? d.message_amount : Math.round(msgs * messageRate * 100) / 100;
+        const totalAmount = !isSimulated && d.amount !== undefined && d.amount > 0
+          ? Math.round((d.amount + (d.message_amount === undefined ? smsSpend : 0)) * 100) / 100
+          : Math.round((voiceSpend + smsSpend) * 100) / 100;
+
+        return {
+          ...d,
+          total_attempts: totalAttempts,
+          billed_minutes: billedMinutes,
+          farmers_targeted: targeted,
+          farmers_reached: reached,
+          retries: retries ?? 0,
+          messages_sent: msgs,
+          voice_amount: voiceSpend,
+          message_amount: smsSpend,
+          amount: totalAmount,
+        };
+      });
+  }, [days, callsByDate, rate, messageRate, isSimulated]);
 
   const hasTableMessages = useMemo(() => {
     return chronologicalDays.some((d) => Number(d.messages_sent || 0) > 0);
   }, [chronologicalDays]);
 
-  const n = chronologicalDays.length;
+  const tableDays = useMemo(() => {
+    return [...chronologicalDays].reverse();
+  }, [chronologicalDays]);
 
+  const n = chronologicalDays.length;
   const svgWidth = 660;
   const svgHeight = 220;
   const padLeft = 40;
@@ -252,7 +412,7 @@ export const InteractiveUsageChart = ({
   const chartH = svgHeight - padTop - padBottom;
 
   const maxFarmers = useMemo(() => {
-    return Math.max(...chronologicalDays.map((d) => d.farmers_targeted || d.calls || 0), 4);
+    return Math.max(...chronologicalDays.map((d) => d.farmers_targeted ?? (d.calls > 0 ? 1 : 0)), 4);
   }, [chronologicalDays]);
   const yMaxFarmers = Math.ceil(maxFarmers * 1.15);
 
@@ -282,12 +442,10 @@ export const InteractiveUsageChart = ({
       : '';
 
   const linePath = costPoints.length > 0 ? `M ${costPoints.map((p) => `${p.x} ${p.y}`).join(' L ')}` : '';
-
   const hoveredDay = hoveredIdx !== null ? chronologicalDays[hoveredIdx] : null;
 
   return (
     <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xs">
-      {/* Top Header & Single Primary View Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div className="flex flex-wrap items-center gap-2">
           {chartView === 'realtime' && (
@@ -308,7 +466,7 @@ export const InteractiveUsageChart = ({
               : 'Daily Telemetry Table'}
           </h3>
           {chartView !== 'realtime' && chartView !== 'breakdown' && (
-            <span className="text-[11px] font-medium text-slate-400">(last {n} days with calls)</span>
+            <span className="text-[11px] font-medium text-slate-400">(last {n} days)</span>
           )}
           {isSimulated && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
@@ -317,7 +475,6 @@ export const InteractiveUsageChart = ({
           )}
         </div>
 
-        {/* Primary View Switcher */}
         <div className="inline-flex flex-wrap p-1 rounded-xl bg-slate-100 border border-slate-200/60 self-start sm:self-auto gap-0.5">
           <button
             type="button"
@@ -369,7 +526,6 @@ export const InteractiveUsageChart = ({
         </div>
       </div>
 
-      {/* View 1: Cost & Call Breakdown (4 Standardized Donut Cards) */}
       {chartView === 'breakdown' && (
         <DonutAnalyticsGrid
           callLogs={callLogs}
@@ -380,10 +536,13 @@ export const InteractiveUsageChart = ({
           onDayFilterChange={onTimeframeChange}
           customDate={customDate}
           onCustomDateChange={onCustomDateChange}
+          authoritativeSpend={authoritativeStats?.operationalSpend}
+          authoritativeVoiceSpend={authoritativeStats?.voiceSpend}
+          authoritativeBilledMins={authoritativeStats?.totalBilledMins}
+          authoritativeAttempts={authoritativeStats?.dialAttempts}
         />
       )}
 
-      {/* View 2: Intraday Activity Curve */}
       {chartView === 'realtime' && (
         <RealTimeCostChart
           callLogs={callLogs}
@@ -394,7 +553,6 @@ export const InteractiveUsageChart = ({
         />
       )}
 
-      {/* View 3: 14-Day Daily Telemetry Table */}
       {chartView === 'table' && (
         <div className="overflow-x-auto">
           {n === 0 ? (
@@ -409,7 +567,7 @@ export const InteractiveUsageChart = ({
                   <th className="py-2.5 pr-4">Farmers Targeted</th>
                   <th className="py-2.5 pr-4">Farmers Reached</th>
                   <th className="py-2.5 pr-4">Farmer Reach %</th>
-                  <th className="py-2.5 pr-4">Dial Attempts (Retries)</th>
+                  <th className="py-2.5 pr-4">Dial Attempts (Same-Day Retries)</th>
                   {hasTableMessages && <th className="py-2.5 pr-4">Messages Sent</th>}
                   <th className="py-2.5 pr-4">Billed Minutes</th>
                   <th className="py-2.5 pr-4">Voice AI Spend</th>
@@ -418,13 +576,13 @@ export const InteractiveUsageChart = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {chronologicalDays.map((day) => {
-                  const targeted = day.farmers_targeted || day.calls;
-                  const reached = day.farmers_reached || day.connected;
+                {tableDays.map((day) => {
+                  const targeted = day.farmers_targeted ?? (day.calls > 0 ? 1 : 0);
+                  const reached = Math.min(day.farmers_reached ?? 0, targeted);
                   const reachPct = targeted > 0 ? Math.round((reached / targeted) * 100) : 0;
                   const msgs = Number(day.messages_sent || 0);
-                  const voiceSpend = day.voice_amount !== undefined ? day.voice_amount : Math.round(day.billed_minutes * rate * 100) / 100;
-                  const smsSpend = day.message_amount !== undefined ? day.message_amount : Math.round(msgs * messageRate * 100) / 100;
+                  const voiceSpend = day.voice_amount;
+                  const smsSpend = day.message_amount;
                   return (
                     <tr key={day.date} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-2.5 pr-4 font-medium text-slate-700">{formatDayLabel(day.date)}</td>
@@ -459,7 +617,6 @@ export const InteractiveUsageChart = ({
         </div>
       )}
 
-      {/* View 4: Unified 14-Day Daily Trends Chart */}
       {chartView === 'daily' && (
         <>
           {n === 0 ? (
@@ -468,11 +625,10 @@ export const InteractiveUsageChart = ({
             </div>
           ) : (
             <div className="space-y-2.5">
-              {/* Secondary Metric Filter: Farmer Reach vs. Spend */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <span className="text-[11px] text-slate-500 font-medium">
                   {dailyMetric === 'reach'
-                    ? 'Unique farmer coverage vs. reached rate (retries to same farmer do not penalize reach %)'
+                    ? 'Unique farmer coverage vs. reached rate (same-day retries do not penalize reach %)'
                     : 'Chronological AI spend and daily average burn'}
                 </span>
                 <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100 border border-slate-200/60 text-[11px] self-start sm:self-auto">
@@ -501,9 +657,7 @@ export const InteractiveUsageChart = ({
                 </div>
               </div>
 
-              {/* Responsive SVG Chart Area */}
               <div className="relative w-full">
-                {/* Floating Tooltip */}
                 {hoveredDay && (
                   <div
                     className="absolute top-1 z-20 pointer-events-none"
@@ -528,7 +682,9 @@ export const InteractiveUsageChart = ({
                             <span className="w-2.5 h-2.5 rounded-xs bg-trust-navy inline-block border border-slate-500" />
                             Farmers Targeted:
                           </span>
-                          <span className="font-bold text-white">{hoveredDay.farmers_targeted || hoveredDay.calls} farmers</span>
+                          <span className="font-bold text-white">
+                            {hoveredDay.farmers_targeted ?? 0} {hoveredDay.farmers_targeted === 1 ? 'farmer' : 'farmers'}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="flex items-center gap-1.5 text-slate-300">
@@ -536,19 +692,19 @@ export const InteractiveUsageChart = ({
                             Farmers Reached:
                           </span>
                           <span className="font-bold text-emerald-400">
-                            {hoveredDay.farmers_reached || hoveredDay.connected}
+                            {hoveredDay.farmers_reached ?? 0}
                             {' '}
-                            ({(hoveredDay.farmers_targeted || hoveredDay.calls) > 0
-                              ? `${Math.round(((hoveredDay.farmers_reached || hoveredDay.connected) / (hoveredDay.farmers_targeted || hoveredDay.calls)) * 100)}%`
+                            ({(hoveredDay.farmers_targeted || 0) > 0
+                              ? `${Math.round(((hoveredDay.farmers_reached ?? 0) / hoveredDay.farmers_targeted) * 100)}%`
                               : '0%'})
                           </span>
                         </div>
                         <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[10px] text-slate-400">
                           <span>
-                            Dial Attempts: {hoveredDay.total_attempts || hoveredDay.calls}
+                            Dial Attempts: {hoveredDay.total_attempts || hoveredDay.calls || 0}
                             {(hoveredDay.retries || 0) > 0 && ` (${hoveredDay.retries} retries)`}
                           </span>
-                          <span>Billed: {hoveredDay.billed_minutes}m</span>
+                          <span>Billed: {hoveredDay.billed_minutes || 0}m</span>
                         </div>
                         {Number(hoveredDay.messages_sent || 0) > 0 && (
                           <div className="flex items-center justify-between text-[10px] text-sky-400">
@@ -563,7 +719,6 @@ export const InteractiveUsageChart = ({
                   </div>
                 )}
 
-                {/* SVG Visual Canvas */}
                 <svg
                   viewBox={`0 0 ${svgWidth} ${svgHeight}`}
                   className="w-full h-auto overflow-visible select-none"
@@ -576,58 +731,30 @@ export const InteractiveUsageChart = ({
                     </linearGradient>
                   </defs>
 
-                  {/* Horizontal Guide Lines */}
                   {[0, 0.5, 1].map((pct) => {
                     const yVal = padTop + chartH * (1 - pct);
                     const farmerLabel = Math.round(yMaxFarmers * pct);
                     const costLabel = Math.round(yMaxAmount * pct);
-
                     return (
                       <g key={`grid-line-${pct}`}>
-                        <line
-                          x1={padLeft}
-                          y1={yVal}
-                          x2={padLeft + chartW}
-                          y2={yVal}
-                          stroke="#F1F5F9"
-                          strokeWidth="1"
-                        />
-                        {/* Left Y-axis Label */}
-                        <text
-                          x={padLeft - 8}
-                          y={yVal + 3}
-                          textAnchor="end"
-                          fill="#94A3B8"
-                          fontSize="9"
-                          fontWeight="500"
-                        >
+                        <line x1={padLeft} y1={yVal} x2={padLeft + chartW} y2={yVal} stroke="#F1F5F9" strokeWidth="1" />
+                        <text x={padLeft - 8} y={yVal + 3} textAnchor="end" fill="#94A3B8" fontSize="9" fontWeight="500">
                           {dailyMetric === 'spend' ? `₹${costLabel}` : farmerLabel}
                         </text>
                       </g>
                     );
                   })}
 
-                  {/* X Axis Baseline */}
-                  <line
-                    x1={padLeft}
-                    y1={padTop + chartH}
-                    x2={padLeft + chartW}
-                    y2={padTop + chartH}
-                    stroke="#CBD5E1"
-                    strokeWidth="1"
-                  />
+                  <line x1={padLeft} y1={padTop + chartH} x2={padLeft + chartW} y2={padTop + chartH} stroke="#CBD5E1" strokeWidth="1" />
 
-                  {/* Grouped Bars for Farmer Reach */}
                   {dailyMetric === 'reach' && (
                     <>
                       {chronologicalDays.map((d, i) => {
                         const xSlot = padLeft + i * slotW;
                         const xCenter = xSlot + slotW / 2;
                         const barW = Math.max(3, Math.min(13, (slotW - 8) / 2));
-
-                        const targetedCount = d.farmers_targeted || d.calls || 0;
-                        const reachedCount = d.farmers_reached || d.connected || 0;
-
+                        const targetedCount = d.farmers_targeted ?? (d.calls > 0 ? 1 : 0);
+                        const reachedCount = Math.min(d.farmers_reached ?? 0, targetedCount);
                         const totalH = targetedCount > 0 ? Math.max(3, (targetedCount / yMaxFarmers) * chartH) : 0;
                         const connH = reachedCount > 0 ? Math.max(3, (reachedCount / yMaxFarmers) * chartH) : 0;
                         const yTotal = padTop + chartH - totalH;
@@ -637,35 +764,13 @@ export const InteractiveUsageChart = ({
                         return (
                           <g key={`bar-${d.date}`}>
                             {isHovered && (
-                              <rect
-                                x={xSlot + 2}
-                                y={padTop}
-                                width={slotW - 4}
-                                height={chartH}
-                                fill="#0F2444"
-                                opacity="0.04"
-                                rx="4"
-                              />
+                              <rect x={xSlot + 2} y={padTop} width={slotW - 4} height={chartH} fill="#0F2444" opacity="0.04" rx="4" />
                             )}
                             {totalH > 0 && (
-                              <rect
-                                x={xCenter - barW - 1}
-                                y={yTotal}
-                                width={barW}
-                                height={totalH}
-                                fill={isHovered ? '#0B1B33' : '#0F2444'}
-                                rx="2"
-                              />
+                              <rect x={xCenter - barW - 1} y={yTotal} width={barW} height={totalH} fill={isHovered ? '#0B1B33' : '#0F2444'} rx="2" />
                             )}
                             {connH > 0 && (
-                              <rect
-                                x={xCenter + 1}
-                                y={yConn}
-                                width={barW}
-                                height={connH}
-                                fill={isHovered ? '#165734' : '#1E6F43'}
-                                rx="2"
-                              />
+                              <rect x={xCenter + 1} y={yConn} width={barW} height={connH} fill={isHovered ? '#165734' : '#1E6F43'} rx="2" />
                             )}
                           </g>
                         );
@@ -673,19 +778,11 @@ export const InteractiveUsageChart = ({
                     </>
                   )}
 
-                  {/* Area Gradient & Spend Curve */}
                   {dailyMetric === 'spend' && (
                     <>
                       {areaPath && <path d={areaPath} fill="url(#costGradientMerged)" />}
                       {linePath && (
-                        <path
-                          d={linePath}
-                          fill="none"
-                          stroke="#1E6F43"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
+                        <path d={linePath} fill="none" stroke="#1E6F43" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                       )}
                       {costPoints.map((p) => {
                         const isHovered = hoveredIdx === p.i;
@@ -703,23 +800,8 @@ export const InteractiveUsageChart = ({
                       })}
                       {avgAmount > 0 && (
                         <g>
-                          <line
-                            x1={padLeft}
-                            y1={avgY}
-                            x2={padLeft + chartW}
-                            y2={avgY}
-                            stroke="#94A3B8"
-                            strokeWidth="1.2"
-                            strokeDasharray="4 4"
-                          />
-                          <text
-                            x={padLeft + chartW}
-                            y={Math.max(padTop + 10, avgY - 5)}
-                            textAnchor="end"
-                            fill="#64748B"
-                            fontSize="9"
-                            fontWeight="600"
-                          >
+                          <line x1={padLeft} y1={avgY} x2={padLeft + chartW} y2={avgY} stroke="#94A3B8" strokeWidth="1.2" strokeDasharray="4 4" />
+                          <text x={padLeft + chartW} y={Math.max(padTop + 10, avgY - 5)} textAnchor="end" fill="#64748B" fontSize="9" fontWeight="600">
                             Avg: {rupees(avgAmount)}/day
                           </text>
                         </g>
@@ -727,12 +809,10 @@ export const InteractiveUsageChart = ({
                     </>
                   )}
 
-                  {/* X Axis Date Labels */}
                   {chronologicalDays.map((d, i) => {
                     const xSlot = padLeft + i * slotW;
                     const xCenter = xSlot + slotW / 2;
                     const isHovered = hoveredIdx === i;
-
                     return (
                       <text
                         key={`lbl-${d.date}`}
@@ -742,14 +822,12 @@ export const InteractiveUsageChart = ({
                         fill={isHovered ? '#0F2444' : '#64748B'}
                         fontWeight={isHovered ? '700' : '500'}
                         fontSize="9"
-                        className="transition-colors duration-150"
                       >
                         {formatDayLabel(d.date)}
                       </text>
                     );
                   })}
 
-                  {/* Interactive Hit Rectangles */}
                   {chronologicalDays.map((d, i) => {
                     const xSlot = padLeft + i * slotW;
                     return (
@@ -770,7 +848,6 @@ export const InteractiveUsageChart = ({
                 </svg>
               </div>
 
-              {/* Chart Legend */}
               <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 pt-2 border-t border-slate-100">
                 {dailyMetric === 'reach' ? (
                   <div className="flex items-center gap-4">
@@ -807,12 +884,6 @@ export const InteractiveUsageChart = ({
   );
 };
 
-/**
- * Clean Cost Analytics View:
- * 1. 3 Top Summary Cards (Today, Last 7 Days, Last 14 Days)
- * 2. Efficiency & Rate Configurator Bar (Answer Rate, Cost/Connected Call, Number Rental, and Rate input)
- * 3. Unified Chart Hub with Single Primary View Switcher
- */
 export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => {
   const [usage, setUsage] = useState(null);
   const [error, setError] = useState('');
@@ -828,7 +899,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
   const [rateMessage, setRateMessage] = useState(null);
   const [balanceInput, setBalanceInput] = useState('');
   const [balanceMessage, setBalanceMessage] = useState(null);
-  const [selectedTimeframe, setSelectedTimeframe] = useState('14d'); // 'today' | 'yesterday' | '7d' | '14d' | 'custom'
+  const [selectedTimeframe, setSelectedTimeframe] = useState('today');
   const [customDate, setCustomDate] = useState('');
 
   const load = useCallback(async (refresh = false) => {
@@ -881,18 +952,80 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
   };
 
   const activeUsage = useMemo(() => {
-    if (usage && usage.configured) return { ...usage, isSimulated: false };
-    if (!usage && !error) return null;
     const rate = Number(rateInput) || (usage && usage.rate) || 3.5;
     const smsRate = Number(smsRateInput) || 0.20;
-    return generateSimulatedUsage(callLogs, rate, smsRate);
+    const sim = generateSimulatedUsage(callLogs, rate, smsRate);
+
+    if (usage && usage.configured) {
+      // Rule 8C: Hybrid merge — Sarvam authoritative voice usage + local SMS telemetry
+      const mergePeriod = (backendObj, simObj) => {
+        const b = backendObj || {};
+        const voiceAmt = b.amount !== undefined ? b.amount : simObj.voice_amount;
+        const msgCount = simObj.messages_sent || 0;
+        const msgAmt = Math.round(msgCount * smsRate * 100) / 100;
+
+        const calls = b.calls ?? simObj.calls;
+        const billedMins = b.billed_minutes ?? simObj.billed_minutes;
+
+        // Ground farmer reach in distinct unique farmers:
+        const targeted = simObj.farmers_targeted > 0
+          ? simObj.farmers_targeted
+          : (b.farmers_targeted || (calls > 0 ? 1 : 0));
+        const reached = Math.min(
+          simObj.farmers_reached !== undefined ? simObj.farmers_reached : (b.farmers_reached || 0),
+          targeted
+        );
+
+        return {
+          ...simObj,
+          ...b,
+          calls,
+          total_attempts: calls,
+          billed_minutes: billedMins,
+          voice_amount: voiceAmt,
+          messages_sent: msgCount,
+          message_amount: msgAmt,
+          amount: Math.round((voiceAmt + msgAmt) * 100) / 100,
+          farmers_targeted: targeted,
+          farmers_reached: reached,
+          retries: Math.max(0, calls - targeted),
+        };
+      };
+
+      const simDayByDate = new Map((sim.days || []).map((d) => [d.date, d]));
+      const mergedDays = (usage.days || []).map((bd) => {
+        const sd = simDayByDate.get(bd.date) || {
+          calls: 0,
+          total_attempts: 0,
+          billed_minutes: 0,
+          voice_amount: 0,
+          messages_sent: 0,
+          message_amount: 0,
+          farmers_targeted: 0,
+          farmers_reached: 0,
+          retries: 0,
+        };
+        return mergePeriod(bd, sd);
+      });
+
+      return {
+        ...usage,
+        isSimulated: false,
+        today: mergePeriod(usage.today, sim.today),
+        week: mergePeriod(usage.week, sim.week),
+        window: mergePeriod(usage.window, sim.window),
+        days: mergedDays.length > 0 ? mergedDays : sim.days,
+      };
+    }
+
+    if (!usage && !error) return null;
+    return sim;
   }, [usage, error, callLogs, rateInput, smsRateInput]);
 
   const hasAnyMessages = useMemo(() => {
     return (callLogs || []).some((c) => Number(c.messages_sent ?? c.sms_count ?? 0) > 0);
   }, [callLogs]);
 
-  // Dynamic Telemetry filtered strictly according to user selection (Today, Yesterday, 7d, 14d, or Custom Date)
   const dynamicTimeframeStats = useMemo(() => {
     const today = new Date();
     const todayStr = localDateKey(today);
@@ -906,7 +1039,8 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
     d14.setDate(d14.getDate() - 13);
     const d14Str = localDateKey(d14);
 
-    const validCalls = (callLogs || []).filter((c) => !c.is_test);
+    // Rule 4: Include test calls
+    const validCalls = callLogs || [];
 
     const periodCalls = validCalls.filter((c) => {
       const callDate = getCallDateKey(c);
@@ -921,61 +1055,65 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
 
     const targetedSet = new Set();
     const reachedSet = new Set();
+    const farmerDayAttempts = new Map();
+    let localDialAttempts = 0;
     let localBilledMins = 0;
     let totalMessages = 0;
-    let retryCount = 0;
 
     periodCalls.forEach((c) => {
-      const farmerId = String(c.farmer_id || c.phone || c.Farmer_Name || c.name || '').trim();
-      if (farmerId) targetedSet.add(farmerId);
+      const dateKey = getCallDateKey(c);
+      const farmerId = getFarmerIdentifier(c) || `call-${targetedSet.size + 1}`;
+      targetedSet.add(farmerId);
 
-      const msgs = Number(c.messages_sent ?? c.sms_count ?? 0);
-      totalMessages += msgs;
+      const { attemptCount, billedMins, isConnected } = getCallAttemptMetrics(c);
+      localDialAttempts += attemptCount;
+      localBilledMins += billedMins;
 
-      if (Number(c.retry_count || c.attempt_number || 1) > 1) {
-        retryCount += 1;
-      }
+      const dayFarmerKey = `${dateKey}::${farmerId}`;
+      farmerDayAttempts.set(dayFarmerKey, (farmerDayAttempts.get(dayFarmerKey) || 0) + attemptCount);
 
-      const isConnected =
-        didFarmerPickUpAndTalk(c) ||
-        ['completed', 'delivered', 'connected', 'answered'].includes(
-          String(c.call_status || c.status || '').toLowerCase()
-        ) ||
-        Number(c.duration_sec || c.duration || 0) > 0;
+      totalMessages += Number(c.messages_sent ?? c.sms_count ?? 0);
 
       if (isConnected) {
-        if (farmerId) reachedSet.add(farmerId);
-        const sec = Number(c.duration_sec ?? c.duration ?? 0);
-        localBilledMins += Math.max(1, Math.ceil(sec / 60));
+        reachedSet.add(farmerId);
       }
     });
 
-    // Check if real backend usage telemetry is available and configured
+    // Rule 7: Count retries per farmer per day
+    let sameDayRetries = 0;
+    farmerDayAttempts.forEach((cnt) => {
+      if (cnt > 1) sameDayRetries += cnt - 1;
+    });
+
     const isConfiguredBackend = Boolean(usage && usage.configured);
     let backendPeriodData = null;
 
-    if (isConfiguredBackend) {
-      if (selectedTimeframe === 'today') {
-        backendPeriodData = usage.today;
-      } else if (selectedTimeframe === 'yesterday') {
-        backendPeriodData = (usage.days || []).find((d) => d.date === yesterdayStr);
-      } else if (selectedTimeframe === '7d') {
-        backendPeriodData = usage.week;
-      } else if (selectedTimeframe === '14d') {
-        backendPeriodData = usage.window;
-      } else if (selectedTimeframe === 'custom' && customDate) {
-        backendPeriodData = (usage.days || []).find((d) => d.date === customDate);
-      }
+    if (isConfiguredBackend && activeUsage) {
+      if (selectedTimeframe === 'today') backendPeriodData = activeUsage.today;
+      else if (selectedTimeframe === 'yesterday') backendPeriodData = (activeUsage.days || []).find((d) => d.date === yesterdayStr);
+      else if (selectedTimeframe === '7d') backendPeriodData = activeUsage.week;
+      else if (selectedTimeframe === '14d') backendPeriodData = activeUsage.window;
+      else if (selectedTimeframe === 'custom' && customDate) backendPeriodData = (activeUsage.days || []).find((d) => d.date === customDate);
     }
 
     const voiceRate = Number(rateInput || (usage && usage.rate) || 3.5);
     const smsRate = Number(smsRateInput || 0.2);
 
-    const dialAttempts = backendPeriodData ? (backendPeriodData.calls ?? periodCalls.length) : periodCalls.length;
-    const reachedCount = backendPeriodData ? (backendPeriodData.connected ?? reachedSet.size) : reachedSet.size;
-    const targetedCount = targetedSet.size || dialAttempts;
+    const dialAttempts = backendPeriodData ? (backendPeriodData.calls ?? localDialAttempts) : localDialAttempts;
+    let targetedCount = targetedSet.size;
+    let reachedCount = reachedSet.size;
+
+    if (backendPeriodData && backendPeriodData.farmers_targeted) {
+      targetedCount = backendPeriodData.farmers_targeted;
+      reachedCount = Math.min(backendPeriodData.farmers_reached ?? 0, targetedCount);
+    } else {
+      if (targetedCount === 0 && dialAttempts > 0) {
+        targetedCount = 1;
+      }
+      reachedCount = Math.min(reachedCount, targetedCount);
+    }
+
     const reachPct = targetedCount > 0 ? (reachedCount / targetedCount) * 100 : 0;
-    const retries = retryCount || Math.max(0, dialAttempts - targetedCount);
 
     const totalBilledMins = backendPeriodData ? (backendPeriodData.billed_minutes ?? localBilledMins) : localBilledMins;
     const voiceSpend = backendPeriodData && backendPeriodData.amount !== undefined
@@ -983,8 +1121,6 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
       : Math.round(totalBilledMins * voiceRate * 100) / 100;
     const messageSpend = Math.round(totalMessages * smsRate * 100) / 100;
     const operationalSpend = Math.round((voiceSpend + messageSpend) * 100) / 100;
-
-    const costPerReachedFarmer = reachedCount > 0 ? operationalSpend / reachedCount : 0;
 
     let timeframeLabel = 'Last 14 Days';
     if (selectedTimeframe === 'today') timeframeLabel = 'Today';
@@ -999,13 +1135,12 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
       reachedCount,
       reachPct,
       dialAttempts,
-      retries,
+      retries: sameDayRetries,
       totalBilledMins,
       totalMessages,
       voiceSpend,
       messageSpend,
       operationalSpend,
-      costPerReachedFarmer,
       timeframeLabel,
     };
   }, [callLogs, selectedTimeframe, customDate, rateInput, smsRateInput, usage]);
@@ -1014,7 +1149,6 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
 
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
         <div>
           <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Cost Analytics</span>
@@ -1103,15 +1237,10 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
 
       {activeUsage && activeUsage.window && (
         <>
-          {/* 1. Top 3 Summary Cards (Interactive Period Switchers) */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* Today */}
             <button
               type="button"
-              onClick={() => {
-                setSelectedTimeframe('today');
-                setCustomDate('');
-              }}
+              onClick={() => { setSelectedTimeframe('today'); setCustomDate(''); }}
               className={`text-left rounded-2xl p-4 sm:p-5 transition-all cursor-pointer flex flex-col justify-between ${
                 selectedTimeframe === 'today' && !customDate
                   ? 'bg-emerald-50/30 border-2 border-trust-green ring-2 ring-trust-green/20 shadow-xs'
@@ -1128,17 +1257,13 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
               </div>
               <div className="text-2xl font-bold text-slate-900 mt-1">{rupees(activeUsage.today?.amount)}</div>
               <div className="text-[11px] text-slate-500 mt-2.5 pt-2 border-t border-slate-100 break-words leading-relaxed">
-                {activeUsage.today?.billed_minutes || 0}m voice ({rupees(activeUsage.today?.voice_amount ?? activeUsage.today?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.today?.messages_sent || 0) > 0 ? ` · ${activeUsage.today.messages_sent} SMS (${rupees(activeUsage.today?.message_amount || 0)})` : ''} · {activeUsage.today?.farmers_reached || activeUsage.today?.connected || 0} of {activeUsage.today?.farmers_targeted || activeUsage.today?.calls || 0} farmers reached
+                {activeUsage.today?.billed_minutes || 0}m voice ({rupees(activeUsage.today?.voice_amount ?? activeUsage.today?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.today?.messages_sent || 0) > 0 ? ` · ${activeUsage.today.messages_sent} SMS (${rupees(activeUsage.today?.message_amount || 0)})` : ''} · {activeUsage.today?.farmers_reached ?? 0} of {activeUsage.today?.farmers_targeted ?? (activeUsage.today?.calls ? 1 : 0)} farmers reached
               </div>
             </button>
 
-            {/* Last 7 Days */}
             <button
               type="button"
-              onClick={() => {
-                setSelectedTimeframe('7d');
-                setCustomDate('');
-              }}
+              onClick={() => { setSelectedTimeframe('7d'); setCustomDate(''); }}
               className={`text-left rounded-2xl p-4 sm:p-5 transition-all cursor-pointer flex flex-col justify-between ${
                 selectedTimeframe === '7d' && !customDate
                   ? 'bg-slate-50/70 border-2 border-trust-navy ring-2 ring-trust-navy/15 shadow-xs'
@@ -1155,17 +1280,13 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
               </div>
               <div className="text-2xl font-bold text-slate-900 mt-1">{rupees(activeUsage.week?.amount)}</div>
               <div className="text-[11px] text-slate-500 mt-2.5 pt-2 border-t border-slate-100 break-words leading-relaxed">
-                {activeUsage.week?.billed_minutes || 0}m voice ({rupees(activeUsage.week?.voice_amount ?? activeUsage.week?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.week?.messages_sent || 0) > 0 ? ` · ${activeUsage.week.messages_sent} SMS (${rupees(activeUsage.week?.message_amount || 0)})` : ''} · {activeUsage.week?.farmers_reached || activeUsage.week?.connected || 0} of {activeUsage.week?.farmers_targeted || activeUsage.week?.calls || 0} farmers reached
+                {activeUsage.week?.billed_minutes || 0}m voice ({rupees(activeUsage.week?.voice_amount ?? activeUsage.week?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.week?.messages_sent || 0) > 0 ? ` · ${activeUsage.week.messages_sent} SMS (${rupees(activeUsage.week?.message_amount || 0)})` : ''} · {activeUsage.week?.farmers_reached ?? 0} of {activeUsage.week?.farmers_targeted ?? (activeUsage.week?.calls ? 1 : 0)} farmers reached
               </div>
             </button>
 
-            {/* Last 14 Days */}
             <button
               type="button"
-              onClick={() => {
-                setSelectedTimeframe('14d');
-                setCustomDate('');
-              }}
+              onClick={() => { setSelectedTimeframe('14d'); setCustomDate(''); }}
               className={`text-left rounded-2xl p-4 sm:p-5 transition-all cursor-pointer flex flex-col justify-between ${
                 selectedTimeframe === '14d' && !customDate
                   ? 'bg-slate-50/70 border-2 border-trust-navy ring-2 ring-trust-navy/15 shadow-xs'
@@ -1182,24 +1303,22 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
               </div>
               <div className="text-2xl font-bold text-trust-green mt-1">{rupees(activeUsage.window?.amount)}</div>
               <div className="text-[11px] text-slate-500 mt-2.5 pt-2 border-t border-slate-100 break-words leading-relaxed">
-                {activeUsage.window?.billed_minutes || 0}m voice ({rupees(activeUsage.window?.voice_amount ?? activeUsage.window?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.window?.messages_sent || 0) > 0 ? ` · ${activeUsage.window.messages_sent} SMS (${rupees(activeUsage.window?.message_amount || 0)})` : ''} · {activeUsage.window?.farmers_reached || activeUsage.window?.connected || 0} of {activeUsage.window?.farmers_targeted || activeUsage.window?.calls || 0} farmers reached
+                {activeUsage.window?.billed_minutes || 0}m voice ({rupees(activeUsage.window?.voice_amount ?? activeUsage.window?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.window?.messages_sent || 0) > 0 ? ` · ${activeUsage.window.messages_sent} SMS (${rupees(activeUsage.window?.message_amount || 0)})` : ''} · {activeUsage.window?.farmers_reached ?? 0} of {activeUsage.window?.farmers_targeted ?? (activeUsage.window?.calls ? 1 : 0)} farmers reached
               </div>
             </button>
           </div>
 
-          {/* 2. Combined Cost Efficiency & Rate Configurator Bar (Dynamic by Timeframe) */}
           <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-2xs">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-              {/* Key Dynamic Efficiency Telemetry */}
               <div className="flex flex-wrap items-center gap-3 sm:gap-5 text-xs text-slate-600">
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-800 font-bold border border-slate-200/80 shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full bg-trust-green shrink-0" />
                   <span>{dynamicTimeframeStats.timeframeLabel}</span>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Farmer Reach:</span>
-                  <span className="font-bold text-slate-900 text-sm">{dynamicTimeframeStats.reachPct.toFixed(1)}%</span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Farmer Reach:</span>
+                  <span className="font-bold text-slate-900 text-xs font-mono tabular-nums">{dynamicTimeframeStats.reachPct.toFixed(1)}%</span>
                   <span className="text-slate-400 text-[11px]">
                     ({dynamicTimeframeStats.reachedCount} of {dynamicTimeframeStats.targetedCount} unique farmers)
                   </span>
@@ -1207,27 +1326,20 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
 
                 <div className="h-4 w-px bg-slate-200 hidden sm:block" />
 
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cost / Reached Farmer:</span>
-                  <span className="font-bold text-trust-green text-sm">{rupees(dynamicTimeframeStats.costPerReachedFarmer)}</span>
-                </div>
-
-                <div className="h-4 w-px bg-slate-200 hidden sm:block" />
-
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Dial Attempts:</span>
-                  <span className="font-bold text-trust-navy text-sm">{dynamicTimeframeStats.dialAttempts}</span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Dial Attempts:</span>
+                  <span className="font-bold text-trust-navy text-xs font-mono tabular-nums">{dynamicTimeframeStats.dialAttempts}</span>
                   {dynamicTimeframeStats.retries > 0 && (
-                    <span className="text-slate-400 text-[11px]">({dynamicTimeframeStats.retries} retries)</span>
+                    <span className="text-slate-400 text-[11px]">({dynamicTimeframeStats.retries} same-day retries)</span>
                   )}
                 </div>
 
                 {dynamicTimeframeStats.totalMessages > 0 && (
                   <>
                     <div className="h-4 w-px bg-slate-200 hidden sm:block" />
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Messages Sent:</span>
-                      <span className="font-bold text-sky-700 text-sm">{dynamicTimeframeStats.totalMessages}</span>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Messages Sent:</span>
+                      <span className="font-bold text-sky-700 text-xs font-mono tabular-nums">{dynamicTimeframeStats.totalMessages}</span>
                       <span className="text-slate-400 text-[11px]">
                         ({rupees(dynamicTimeframeStats.messageSpend)})
                       </span>
@@ -1237,14 +1349,13 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
 
                 <div className="h-4 w-px bg-slate-200 hidden sm:block" />
 
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Number Rental:</span>
-                  <span className="font-bold text-trust-navy text-sm">₹59.00/mo</span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Number Rental:</span>
+                  <span className="font-bold text-trust-navy text-xs font-mono tabular-nums">₹59.00/mo</span>
                   <span className="text-slate-400 text-[11px]">(Fixed DID · separate monthly base)</span>
                 </div>
               </div>
 
-              {/* Clean Rate Editor (Voice AI, and SMS only when messages exist) */}
               <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-3 py-2 rounded-xl text-xs shrink-0 self-start lg:self-auto">
                 <div className="flex items-center gap-1.5">
                   <label htmlFor="rate" className="font-semibold text-slate-700 whitespace-nowrap">
@@ -1300,7 +1411,6 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
             </div>
           </div>
 
-          {/* 3. Interactive Charts Hub (Default: Cost & Call Breakdown) */}
           {noCalls ? (
             <div className="p-8 text-center text-xs text-slate-500 bg-white rounded-2xl border border-slate-200/80 shadow-2xs">
               No calls recorded in the last {activeUsage.window_days || 14} days.
@@ -1316,6 +1426,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
               onTimeframeChange={setSelectedTimeframe}
               customDate={customDate}
               onCustomDateChange={setCustomDate}
+              authoritativeStats={dynamicTimeframeStats}
             />
           )}
         </>

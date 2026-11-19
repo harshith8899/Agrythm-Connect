@@ -1216,13 +1216,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                   </span>
                 )}
                 {(farmer.primary_language || farmer.preferred_language) && (
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                      normalizeLanguage(farmer.primary_language || farmer.preferred_language) === 'English'
-                        ? 'bg-blue-50 text-blue-700 border-blue-200'
-                        : 'bg-amber-50 text-amber-700 border-amber-200'
-                    }`}
-                  >
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
                     {normalizeLanguage(farmer.primary_language || farmer.preferred_language)}
                   </span>
                 )}
