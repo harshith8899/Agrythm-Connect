@@ -72,6 +72,9 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
     if (['No Answer or Rejected', 'Busy'].includes(lastAttempt.status)) {
       return { title: 'Not picked up or rejected', text: `The phone network reports a rejected call and an unpicked call the same way, so each counts as a missed attempt (${attemptText}). ${when}` };
     }
+    if (lastAttempt.status === 'Answered' && call.understood_weather === 'no_response') {
+      return { title: 'Farmer stayed silent', text: `The farmer picked up but did not say anything, so the agent ended the call (${attemptText}). ${when}` };
+    }
     if (lastAttempt.status === 'Answered') {
       return { title: 'Picked up, not confirmed', text: `The farmer answered but did not confirm they understood the weather (${attemptText}). ${when}` };
     }
