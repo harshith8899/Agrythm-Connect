@@ -227,6 +227,12 @@ class DashboardService:
             self.db.execute("ALTER TABLE dash_messages ADD COLUMN hidden INT DEFAULT 0")
         if "email" not in table_columns(self.db, "dash_farmers"):               # databases made before email messages
             self.db.execute("ALTER TABLE dash_farmers ADD COLUMN email TEXT DEFAULT ''")
+        # clean up any outbound calls mistakenly recorded in dash_incoming
+        try:
+            self.db.execute("DELETE FROM dash_incoming WHERE attempt_id IN (SELECT attempt_id FROM dash_results WHERE attempt_id IS NOT NULL AND attempt_id <> '') OR attempt_id IN (SELECT attempt_id FROM dash_tests WHERE attempt_id IS NOT NULL AND attempt_id <> '')")
+            self.db.commit()
+        except OperationalError:
+            pass
         self.settings = Settings.from_env()
         self.dialler, self.note = (dialler, note) if dialler else make_dialler(env)
         self.mailer = mailer or make_mailer(env)
@@ -404,7 +410,7 @@ class DashboardService:
             rows = _read_rows(p)
         headers = [_key(h) for h in rows[0]]
         col = {f: next((headers.index(a) for a in al if a in headers), None) for f, al in _ALIASES.items()}
-        extra: dict[str, tuple[str, str, str]] = {}
+        extra: dict[str, tuple[str, str, str, str]] = {}
         for row in rows[1:]:
             get = lambda f: str(row[col[f]]).strip() if col[f] is not None and col[f] < len(row) and row[col[f]] is not None else ""  # noqa: E731
             if get("farmer_id"):
@@ -1451,10 +1457,18 @@ class DashboardService:
                 self.db.commit()
                 rows = self.db.execute("SELECT farmer_id, context FROM dash_inbound WHERE status='waiting' AND call_date=? "
                                        "AND context NOT IN ('unregistered','stopped')", (day.isoformat(),)).fetchall()
-                known = {r[0] for r in self.db.execute("SELECT provider_call_id FROM attempts WHERE call_date=?",
-                                                       (day.isoformat(),)).fetchall()}
-                known |= {r[0] for r in self.db.execute("SELECT attempt_id FROM dash_incoming WHERE call_date=?",
-                                                        (day.isoformat(),)).fetchall()}
+                known = set()
+                for query, params in [
+                    ("SELECT provider_call_id FROM attempts WHERE call_date=?", (day.isoformat(),)),
+                    ("SELECT attempt_id FROM dash_results WHERE call_date=?", (day.isoformat(),)),
+                    ("SELECT attempt_id FROM dash_tests WHERE at LIKE ?", (f"{day.isoformat()}%",)),
+                    ("SELECT attempt_id FROM dash_callbacks WHERE source_date=? OR due_at LIKE ?", (day.isoformat(), f"{day.isoformat()}%")),
+                    ("SELECT attempt_id FROM dash_incoming WHERE call_date=?", (day.isoformat(),)),
+                ]:
+                    try:
+                        known |= {r[0] for r in self.db.execute(query, params).fetchall() if r[0]}
+                    except OperationalError:
+                        pass
                 everyone = self.db.execute("SELECT farmer_id, phone, consent, active FROM dash_farmers").fetchall()
             ports = self._make_ports()
             waiting_by_key: dict[str, list[tuple[str, str]]] = {}
@@ -1520,7 +1534,10 @@ class DashboardService:
         with self.lock:
             rows = self.db.execute("SELECT i.attempt_id, i.call_date, i.at, i.last4, i.farmer_id, i.duration_s, i.outcome, i.note, "
                                    "f.name, f.village, f.district FROM dash_incoming i LEFT JOIN dash_farmers f "
-                                   "ON f.farmer_id=i.farmer_id WHERE i.outcome<>'answered' ORDER BY i.at DESC LIMIT 200").fetchall()
+                                   "ON f.farmer_id=i.farmer_id WHERE i.outcome<>'answered' "
+                                   "AND i.attempt_id NOT IN (SELECT attempt_id FROM dash_results WHERE attempt_id IS NOT NULL AND attempt_id <> '') "
+                                   "AND i.attempt_id NOT IN (SELECT attempt_id FROM dash_tests WHERE attempt_id IS NOT NULL AND attempt_id <> '') "
+                                   "ORDER BY i.at DESC LIMIT 200").fetchall()
         out = []
         for attempt_id, call_date, at, last4, fid, dur, outcome, note, name, village, district in rows:
             title = {"not_registered": "Incoming call: not a registered farmer (inactive or no consent)",
@@ -1593,7 +1610,10 @@ class DashboardService:
             sync = {}
         with self.lock:
             rows = self.db.execute("SELECT i.at, i.last4, i.farmer_id, f.name, i.duration_s, i.outcome, i.note FROM dash_incoming i "
-                                   "LEFT JOIN dash_farmers f ON f.farmer_id=i.farmer_id ORDER BY i.at DESC LIMIT ?", (limit,)).fetchall()
+                                   "LEFT JOIN dash_farmers f ON f.farmer_id=i.farmer_id "
+                                   "WHERE i.attempt_id NOT IN (SELECT attempt_id FROM dash_results WHERE attempt_id IS NOT NULL AND attempt_id <> '') "
+                                   "AND i.attempt_id NOT IN (SELECT attempt_id FROM dash_tests WHERE attempt_id IS NOT NULL AND attempt_id <> '') "
+                                   "ORDER BY i.at DESC LIMIT ?", (limit,)).fetchall()
         return {"ready": self._inbound_ready(), "sync": sync,
                 "calls": [{"at": r[0], "number": "******" + r[1], "farmer_id": r[2] or "", "farmer_name": r[3] or "Unknown number",
                            "duration_seconds": r[4] or 0, "outcome": r[5], "note": r[6]} for r in rows]}

@@ -152,6 +152,35 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
     }
   };
 
+  // Reset English state when selected call changes
+  React.useEffect(() => {
+    setEnglish({ show: false, loading: false, turns: null, error: '' });
+  }, [call?.call_id]);
+
+  // Automatically fetch neural translation from backend when user selects "Translate to English"
+  React.useEffect(() => {
+    if (transcriptMode === 'translated' && !english.turns && !english.loading && call?.call_id) {
+      setEnglish((e) => ({ ...e, loading: true, error: '' }));
+      getCallTranslation(call.call_id)
+        .then((r) => {
+          setEnglish((e) => ({
+            ...e,
+            loading: false,
+            turns: r?.turns || [],
+            error: r?.error || ''
+          }));
+        })
+        .catch((err) => {
+          setEnglish((e) => ({
+            ...e,
+            loading: false,
+            turns: null,
+            error: err.message || 'Could not translate'
+          }));
+        });
+    }
+  }, [transcriptMode, call?.call_id]);
+
 
   const rawTranscript = call.transcript_preview || call.transcript || '';
 
@@ -526,14 +555,14 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
                 <button
                   type="button"
                   onClick={() => setTranscriptMode('translated')}
-                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
                     transcriptMode === 'translated'
                       ? 'bg-white text-trust-navy shadow-xs font-bold'
                       : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  <Languages className="w-3 h-3 text-trust-green" />
-                  Translate to English
+                  <Languages className={`w-3 h-3 text-trust-green ${english.loading && transcriptMode === 'translated' ? 'animate-spin' : ''}`} />
+                  {english.loading && transcriptMode === 'translated' ? 'Translating...' : 'Translate to English'}
                 </button>
                 <button
                   type="button"
@@ -548,6 +577,13 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
                 </button>
               </div>
             </div>
+
+            {transcriptMode === 'translated' && english.error && (
+              <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+                <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>{english.error} Displaying high-fidelity instant client translation.</span>
+              </div>
+            )}
 
             {transcriptItems.length > 0 ? (
               <div className="space-y-3 pt-1">
@@ -567,7 +603,9 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
                     );
                   }
 
-                  const renderedText = formatTranscriptText(text, transcriptMode);
+                  const isTranslatedMode = transcriptMode === 'translated';
+                  const backendEnglish = isTranslatedMode && english.turns && english.turns[idx] && english.turns[idx].english;
+                  const renderedText = backendEnglish || formatTranscriptText(text, transcriptMode);
 
                   return (
                     <div key={idx} className={`flex gap-2.5 ${isAgent ? 'items-start' : 'items-start flex-row-reverse'}`}>
@@ -598,7 +636,7 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
                         >
                           {renderedText}
                         </p>
-                        {english.show && english.turns && (english.turns[idx]?.english || '') !== '' && (
+                        {english.show && !isTranslatedMode && english.turns && (english.turns[idx]?.english || '') !== '' && (
                           <p className="mt-1.5 pt-1.5 border-t border-slate-200/70 text-[12px] leading-relaxed text-slate-500 italic whitespace-pre-line break-words">
                             {english.turns[idx].english}
                           </p>
@@ -613,7 +651,9 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
                 className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-800 leading-7 whitespace-pre-line" 
                 style={{ fontFamily: transcriptMode === 'original' ? INDIC_FONTS : undefined }}
               >
-                {formatTranscriptText(rawTranscript, transcriptMode)}
+                {transcriptMode === 'translated' && english.turns && english.turns[0]?.english
+                  ? english.turns.map(t => `${t.speaker ? t.speaker + ': ' : ''}${t.english}`).join('\n')
+                  : formatTranscriptText(rawTranscript, transcriptMode)}
               </div>
             ) : (
               <div className="p-6 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 text-slate-400 text-xs">

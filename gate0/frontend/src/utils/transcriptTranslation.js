@@ -47,6 +47,8 @@ const INDIC_NAME_MAP = {
   'गीता': 'Geeta',
 
   // Telugu
+  'గిరి': 'Giri',
+  'గిరి గారు': 'Giri',
   'ఆనంద్': 'Anand',
   'ఆనంద్ గారు': 'Anand',
   'సురేష్': 'Suresh',
@@ -64,6 +66,13 @@ function resolveIndicName(raw) {
     .replace(/\s*(?:ಅವರೇ|जी|గారు|avare|ji|jee|gaaru)\s*$/i, '')
     .trim();
   if (INDIC_NAME_MAP[stripped]) return INDIC_NAME_MAP[stripped];
+  // If Indic script remains, dynamically transliterate into clean Latin script
+  if (hasIndicScript(stripped)) {
+    const transliterated = transliterateIndicCharacters(stripped);
+    if (transliterated) {
+      return transliterated.charAt(0).toUpperCase() + transliterated.slice(1);
+    }
+  }
   // If in Latin already
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
@@ -240,16 +249,26 @@ const PHRASE_PATTERNS = [
   },
 
   // 14. TELUGU: Weather greeting
-  // "నమస్కారం ఆనంద్ గారు, అగ్రిథమ్ కనెక్ట్ నుండి నేటి వాతావరణ సమాచారం."
+  // "నమస్కారం గిరి గారు, అగ్రిథమ్ కనెక్ట్ నుండి నేటి వాతావరణ సమాచారం."
   {
-    regex: /(?:నమస్కారం|నమస్తే)\s+([^,\s]+)\s+గారు[,.]*\s*అగ్రిథమ్ కనెక్ట్ నుండి నేటి వాతావరణ సమాచారం[।.]*/i,
+    regex: /(?:నమస్కారం|నమస్తే)\s+([^,\s]+)\s*(?:గారు)?[,.]*\s*(?:ఇది|ఈ ಕರೆ)?\s*(?:అగ్రిథమ్|అగ్రీధమ్)?\s*(?:కనెక్ట్)?(?:[\s\u200c]*నుండి)?\s*(?:నేటి|ఈ రోజు|ఇందటి)?\s*వాతావరణ\s*సమాచారం[।.]*/i,
     romanized: (m) => `Namaskaram ${resolveIndicName(m[1])} gaaru, Agrythm Connect nundi neti vatavarana samacharam.`,
     translated: (m) => `Hello ${resolveIndicName(m[1])}, this is today's weather information from Agrythm Connect.`
   },
   {
-    regex: /(?:namaskaaram|namastee?)\s+([^,\s]+)\s+gaaru[,.]*\s*(?:agrythm|agritham)\s*(?:connect|kanekt)?\s*numdi neeti va+ta+varan sama+cha+ram[।.]*/i,
+    regex: /^(?:నమస్కారం|నమస్తే)\s+([^,\s]+)\s*(?:గారు)?[.!,]*$/i,
+    romanized: (m) => `Namaskaram ${resolveIndicName(m[1])} gaaru.`,
+    translated: (m) => `Hello ${resolveIndicName(m[1])}.`
+  },
+  {
+    regex: /(?:namaskaaram|namastee?)\s+([^,\s]+)\s*(?:gaaru)?[,.]*\s*(?:agrythm|agritham)?\s*(?:connect|kanekt)?\s*numdi neeti va+ta+varan sama+cha+ram[।.]*/i,
     romanized: (m) => `Namaskaram ${m[1].trim()} gaaru, Agrythm Connect nundi neti vatavarana samacharam.`,
     translated: (m) => `Hello ${m[1].trim()}, this is today's weather information from Agrythm Connect.`
+  },
+  {
+    regex: /^(?:namaskaaram|namastee?)\s+([^,\s]+)\s*(?:gaaru)?[.!,]*$/i,
+    romanized: (m) => `Namaskaram ${m[1].trim()} gaaru.`,
+    translated: (m) => `Hello ${m[1].trim()}.`
   },
 
   // 15. TELUGU: Rain inquiry
@@ -265,12 +284,22 @@ const PHRASE_PATTERNS = [
     translated: () => "Hello, is there a chance of rain today?"
   },
 
-  // 16. TELUGU: Weather details
+  // 16. TELUGU: Weather details (combined or individual)
   // "ఈ రోజు గరిష్ట ఉష్ణోగ్రత 33 డిగ్రీలు ఉంటుంది. సాయంత్రం వేళల్లో ఉరుములతో కూడిన జల్లులు పడే అవకాశం 40% ఉంది."
   {
-    regex: /ఈ రోజు గరిష్ట ఉష్ణోగ్రత\s*([0-9.]+)\s*డిగ్రీలు ఉంటుంది[।.]*\s*సాయంత్రం వేళల్లో ఉరుములతో కూడిన జల్లులు పడే అవకాశం\s*([0-9.]+)%\s*ఉంది[।.]*/i,
+    regex: /(?:ఈ రోజు\s*)?గరిష్ట\s*ఉష్ణోగ్రత\s*([0-9.]+)\s*డిగ్రీలు(?: ఉంటుంది)?[।.]*\s*సాయంత్రం వేళల్లో ఉరుములతో కూడిన జల్లులు పడే అవకాశం\s*([0-9.]+)%\s*ఉంది[।.]*/i,
     romanized: (m) => `Ee roju garishta ushnograta ${m[1]} degreelu untundi. Sayantram velallo urumulato kudina jallulu pade avakasam ${m[2]}% undi.`,
     translated: (m) => `Today the maximum temperature will be ${m[1]}°C. There is a ${m[2]}% chance of thundershowers in the evening.`
+  },
+  {
+    regex: /(?:ఈ రోజు\s*)?గరిష్ట\s*ఉష్ణోగ్రత\s*([0-9.]+)\s*డిగ్రీలు(?: ఉంటుంది)?[।.]*/i,
+    romanized: (m) => `Ee roju garishta ushnograta ${m[1]} degreelu untundi.`,
+    translated: (m) => `Today the maximum temperature will be ${m[1]}°C.`
+  },
+  {
+    regex: /(?:సాయంత్రం వేళల్లో\s*)?ఉరుములతో కూడిన జల్లులు పడే అవకాశం\s*([0-9.]+)%\s*ఉంది[।.]*/i,
+    romanized: (m) => `Sayantram velallo urumulato kudina jallulu pade avakasam ${m[1]}% undi.`,
+    translated: (m) => `There is a ${m[1]}% chance of thundershowers in the evening.`
   },
   {
     regex: /ee ro+ju garisht[a-z]* ushno+grat\s*([0-9.]+)\s*digreelu um?tumdi[।.]*\s*sa+yamtram ve+lalloo urumulatoo koodin jallulu pade+ avaka+sham\s*([0-9.]+)%\s*um?di[।.]*/i,
@@ -292,14 +321,19 @@ const PHRASE_PATTERNS = [
   },
 
   // 18. TELUGU: Sign-off
-  // "ధన్యవాదాలు ఆనంద్ గారు."
+  // "ధన్యవాదాలు గిరి గారు."
   {
-    regex: /(?:ధన్యవాదాలు|ಧನ್ಯವಾదాలు)\s+([^,\s]+)\s+గారు[।.]*/i,
+    regex: /(?:ధన్యవాదాలు|ಧನ್ಯವಾದಗಳು|ಧನ್ಯವಾದ|ధన్యవాదం)\s+([^,\s]+)\s*(?:గారు)?[.!,]*/i,
     romanized: (m) => `Dhanyavadalu ${resolveIndicName(m[1])} gaaru.`,
     translated: (m) => `Thank you ${resolveIndicName(m[1])}.`
   },
   {
-    regex: /dhanyava+da+lu\s+([^,\s]+)\s+gaaru[।.]*/i,
+    regex: /^(?:ధన్యవాదాలు|ಧನ್ಯವಾದಗಳು|ಧನ್ಯವಾದ|ధన్యవాదం)[.!,]*$/i,
+    romanized: () => "Dhanyavadalu.",
+    translated: () => "Thank you."
+  },
+  {
+    regex: /dhanyava+da+lu\s+([^,\s]+)\s*(?:gaaru)?[.!,]*/i,
     romanized: (m) => `Dhanyavadalu ${m[1].trim()} gaaru.`,
     translated: (m) => `Thank you ${m[1].trim()}.`
   },
@@ -330,29 +364,34 @@ const PHRASE_PATTERNS = [
 ];
 
 // Fallback dictionary for individual words and phrases when translating to pure English
+const makeWordRegex = (words) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${words})(?![\\p{L}\\p{N}])`, 'gui');
+
 const VOCABULARY_TRANSLATIONS = [
   // Courtesies & Responses
-  { pattern: /\b(ತುಂಬಾ ಧನ್ಯವಾದಗಳು|ಧನ್ಯವಾದಗಳು|ಧನ್ಯವಾದ|ಧನ್ಯವಾదాలు|ధన్యవాదాలు|dhanyavadagalu|dhanyavada|dhanyavaad|dhanyavaada|dhanyavadalu|dhanyavaadaalu)\b/gi, replacement: "Thank you" },
-  { pattern: /\b(ಶುಭ ದಿನ|shubh din|shubha dina)\b/gi, replacement: "Have a good day" },
-  { pattern: /\b(ನಮಸ್ಕಾರ|ನಮಸ್ತೆ|नमस्ते|नमस्कार|నమస్కారం|నమస్తే|namaskara|namaste|namaskar|namaskaram)\b/gi, replacement: "Hello" },
-  { pattern: /\b(ಖಂಡಿತ|khandita|samajh gaya)\b/gi, replacement: "Certainly" },
-  { pattern: /\b(ಸರಿ|ಹಾಗಾದ್ರೆ|ठीक है|ಅలాగే|sari|theek hai|alage)\b/gi, replacement: "Alright" },
-  { pattern: /\b(ಹೌದು|हाँ|haudu|haan|ha)\b/gi, replacement: "Yes" },
-  { pattern: /\b(ಇಲ್ಲ|नहीं|illa|nahi|nahin)\b/gi, replacement: "No" },
+  { pattern: makeWordRegex("ತುಂಬಾ ಧನ್ಯವಾದಗಳು|ಧನ್ಯವಾದಗಳು|ಧನ್ಯವಾದ|ಧನ್ಯವಾಧಗಳು|ಧನ್ಯವಾಧ|ಧನ್ಯವಾದాలు|ధన్యవాదాలు|dhanyavadagalu|dhanyavada|dhanyavaad|dhanyavaada|dhanyavadalu|dhanyavaadaalu"), replacement: "Thank you" },
+  { pattern: makeWordRegex("ಶುಭ ದಿನ|shubh din|shubha dina"), replacement: "Have a good day" },
+  { pattern: makeWordRegex("ನಮಸ್ಕಾರ|ನಮಸ್ತೆ|नमस्ते|नमस्कार|నమస్కారం|నమస్తే|namaskara|namaste|namaskar|namaskaram"), replacement: "Hello" },
+  { pattern: makeWordRegex("ಖಂಡಿತ|khandita|samajh gaya"), replacement: "Certainly" },
+  { pattern: makeWordRegex("ಸರಿ|ಹಾಗಾದ್ರೆ|ठीक है|ಅಲಾగే|అలాగే|sari|theek hai|alage"), replacement: "Alright" },
+  { pattern: makeWordRegex("ಹೌದು|हाँ|haudu|haan|ha"), replacement: "Yes" },
+  { pattern: makeWordRegex("ಇಲ್ಲ|नहीं|illa|nahi|nahin"), replacement: "No" },
 
   // Weather & Farming Terms
-  { pattern: /\b(ಮಳೆ|ವರ್ಷ|ಬಾರಿಶ್|ವರ್ಷಂ|male|barish|varsham)\b/gi, replacement: "rain" },
-  { pattern: /\b(ತಾಪಮಾನ|ತಾಪಮಾನ್|ಉಷ್ಣೋಗ್ರತ|tapman|tapamana|ushnograta)\b/gi, replacement: "temperature" },
-  { pattern: /\b(ಗಾಳಿಯ ವೇಗ|ಹವಾ ಕಿ ಗತಿ|ಗಾಲಿ ವೇಗಂ|galiya vega|hawa ki gati|gaali vegam)\b/gi, replacement: "wind speed" },
-  { pattern: /\b(ತೇವಾಂಶ|ನಮೀ|ತೇಮ|tevamsha|nami|tema)\b/gi, replacement: "humidity" },
-  { pattern: /\b(ಹವಾಮಾನ|ಮೌಸಮ್|ವಾತಾವರಣ|havamana|mausam|vatavaranam)\b/gi, replacement: "weather" },
-  { pattern: /\b(ಇಂದು|ಆಜ್|ಈ ರೋಜು|indu|aaj|ee roju)\b/gi, replacement: "today" },
-  { pattern: /\b(ನಾಳೆ|ಕಲ್|ರೇಪು|naale|kal|repu)\b/gi, replacement: "tomorrow" },
-  { pattern: /\b(ಸಂಜೆ|ಶಾಮ್|ಸಾಯಂತ್ರಂ|sanje|shaam|sayantram)\b/gi, replacement: "evening" },
-  { pattern: /\b(ಮಧ್ಯಾಹ್ನ|ದೋಪಹರ್|madhyahna|dopahar)\b/gi, replacement: "afternoon" },
-  { pattern: /\b(ಬೆಳಿಗ್ಗೆ|ಸುಬಹ್|ಉದಯಂ|beligge|subah|udayam)\b/gi, replacement: "morning" },
-  { pattern: /\b(ಕೀಟನಾಶಕ|ಕೀಟನಾಶಕ್|ಪುರುಗುಲ ಮಂದು|keetanashaka|keetnashak)\b/gi, replacement: "pesticide" },
-  { pattern: /\b(ಕೃಷಿ|ಖೇತ್|ಹೊಲ|ಪೊಲಂ|krishi|khet|hola|polam)\b/gi, replacement: "farm" }
+  { pattern: makeWordRegex("ಮಳೆ|ವರ್ಷ|ಬಾರಿಶ್|ವರ್ಷಂ|male|barish|varsham"), replacement: "rain" },
+  { pattern: makeWordRegex("ತಾಪಮಾನ|ತಾಪಮಾನ್|ಉಷ್ಣೋಗ್ರತ|ఉష్ణోగ్రత|tapman|tapamana|ushnograta"), replacement: "temperature" },
+  { pattern: makeWordRegex("ಗಾಳಿಯ ವೇಗ|ಹವಾ ಕಿ ಗತಿ|ಗಾಲಿ ವೇಗಂ|గాలి వేగం|galiya vega|hawa ki gati|gaali vegam"), replacement: "wind speed" },
+  { pattern: makeWordRegex("ತೇವಾಂಶ|ನಮೀ|ತೇಮ|తేమ|tevamsha|nami|tema"), replacement: "humidity" },
+  { pattern: makeWordRegex("ಹವಾಮಾನ|ಮೌಸಮ್|ವಾತಾವರಣ|వాతావరణం|వాతావరణ|havamana|mausam|vatavaranam"), replacement: "weather" },
+  { pattern: makeWordRegex("ಇಂದು|ಆಜ್|ಈ ರೋಜು|ఈరోజు|indu|aaj|ee roju|eroju"), replacement: "today" },
+  { pattern: makeWordRegex("ನಾಳೆ|ಕಲ್|ರೇಪು|రేపు|naale|kal|repu"), replacement: "tomorrow" },
+  { pattern: makeWordRegex("ಸಂಜೆ|ಶಾಮ್|ಸಾಯಂತ್ರಂ|సాయంత్రం|sanje|shaam|sayantram"), replacement: "evening" },
+  { pattern: makeWordRegex("ಮಧ್ಯಾಹ್ನ|ದೋಪಹರ್|మధ్యాహ్నం|madhyahna|dopahar"), replacement: "afternoon" },
+  { pattern: makeWordRegex("ಬೆಳಿಗ್ಗೆ|ಸುಬಹ್|ಉದಯಂ|ఉదయం|beligge|subah|udayam"), replacement: "morning" },
+  { pattern: makeWordRegex("ಕೀಟನಾಶಕ|ಕೀಟನಾಶಕ್|ಪುರುಗುల మందు|పురుగుల మందు|keetanashaka|keetnashak"), replacement: "pesticide" },
+  { pattern: makeWordRegex("ಕೃಷಿ|ಖೇತ್|ಹೊಲ|ಪೊಲಂ|పొలం|krishi|khet|hola|polam"), replacement: "farm" },
+  { pattern: makeWordRegex("నీటి పారుదల|నీటిపారుదల"), replacement: "irrigation" },
+  { pattern: makeWordRegex("ఏర్పాట్లు|ఏర్పాటు"), replacement: "arrangements" },
+  { pattern: makeWordRegex("చేసుకుంటాను"), replacement: "I will make" }
 ];
 
 /**
@@ -556,15 +595,9 @@ export function getTranslatedTranscript(text) {
     translatedText = translatedText.replace(entry.pattern, entry.replacement);
   }
 
-  // If any Indic script remains after vocabulary replacement, synthesize a clean English sentence
+  // If any Indic script remains after vocabulary replacement, transliterate the remaining Indic words
   if (hasIndicScript(translatedText)) {
-    if (/ತಾಪಮಾನ|ಮಳೆ|मौसम|बारिश|వర్షం|उष्णోగ్రత/i.test(trimmed)) {
-      return "Daily agricultural weather briefing delivered to farmer.";
-    }
-    if (/ಕರೆ|ಕಾಲ್|कॉल|ఫోన్|मंडी|ಮಾರುಕಟ್ಟೆ|ಸಂತ/i.test(trimmed)) {
-      return "Farmer requested callback; reschedule noted.";
-    }
-    return "Agricultural weather communication recorded.";
+    return transliterateIndicCharacters(translatedText);
   }
 
   return translatedText;

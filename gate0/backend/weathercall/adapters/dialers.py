@@ -129,8 +129,12 @@ class SarvamDialler(SarvamAgentTelephony):
                                         "limit": 1000, "offset": offset, "sort_by": "attempted_at"})
             page = self._request(f"{BASE}/analytics/v1/{self.org}/{self.ws}/{self.app}/attempts?{q}")
             for item in page.get("items", []):
+                # Only incoming calls to the line should be returned; ignore outbound calls placed to farmers
+                direction = (item.get("channel_direction") or "").lower().strip()
+                if direction and direction != "inbound":
+                    continue
                 # a call to the line has the same attempt_id ("NO_JOB_ID") every time: it is known by its interaction id
-                call_id = (item.get("interaction_id") if item.get("channel_direction") == "inbound"
+                call_id = (item.get("interaction_id") if direction == "inbound"
                            else item.get("attempt_id") or item.get("interaction_id")) or ""
                 if not call_id or call_id in known_ids:
                     continue

@@ -197,9 +197,8 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
         </div>
 
         {/* 2. Wind Speed Card */}
-        <div className={`p-3 rounded-xl border min-w-0 overflow-hidden flex flex-col justify-between ${
-          wind >= 25 ? 'bg-amber-50/70 border-amber-200' : 'bg-slate-50/80 border-slate-200/80'
-        }`}>
+        <div className={`p-3 rounded-xl border min-w-0 overflow-hidden flex flex-col justify-between ${wind >= 25 ? 'bg-amber-50/70 border-amber-200' : 'bg-slate-50/80 border-slate-200/80'
+          }`}>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider min-w-0">
               <Wind className="w-3.5 h-3.5 text-teal-600 shrink-0" />
@@ -209,9 +208,8 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
               <span className="font-mono font-bold text-sm sm:text-base text-slate-900 tabular-nums truncate">
                 {call.weather_windspeed != null ? `${wind} km/h` : 'N/A'}
               </span>
-              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${
-                wind >= 25 ? 'bg-amber-100 text-amber-800' : 'bg-slate-200/70 text-slate-700'
-              }`}>
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${wind >= 25 ? 'bg-amber-100 text-amber-800' : 'bg-slate-200/70 text-slate-700'
+                }`}>
                 {wind >= 25 ? 'Gusty' : (wind >= 15 ? 'Moderate' : 'Calm')}
               </span>
             </div>
@@ -231,9 +229,8 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
         </div>
 
         {/* 3. Rain Chance Card */}
-        <div className={`p-3 rounded-xl border min-w-0 overflow-hidden flex flex-col justify-between ${
-          rain >= 50 ? 'bg-sky-50/80 border-sky-200' : 'bg-slate-50/80 border-slate-200/80'
-        }`}>
+        <div className={`p-3 rounded-xl border min-w-0 overflow-hidden flex flex-col justify-between ${rain >= 50 ? 'bg-sky-50/80 border-sky-200' : 'bg-slate-50/80 border-slate-200/80'
+          }`}>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider min-w-0">
               <CloudRain className="w-3.5 h-3.5 text-sky-600 shrink-0" />
@@ -243,9 +240,8 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
               <span className="font-mono font-bold text-sm sm:text-base text-slate-900 tabular-nums truncate">
                 {call.weather_rainfall != null ? `${rain}%` : 'N/A'}
               </span>
-              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${
-                rain >= 50 ? 'bg-sky-100 text-sky-800' : 'bg-slate-200/70 text-slate-700'
-              }`}>
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${rain >= 50 ? 'bg-sky-100 text-sky-800' : 'bg-slate-200/70 text-slate-700'
+                }`}>
                 {rain >= 50 ? 'High Risk' : (rain >= 20 ? 'Moderate' : 'Low')}
               </span>
             </div>
@@ -254,9 +250,8 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
           <div className="mt-2.5 space-y-1">
             <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  rain >= 50 ? 'bg-sky-500' : (rain >= 20 ? 'bg-sky-400' : 'bg-slate-400')
-                }`}
+                className={`h-full rounded-full transition-all duration-300 ${rain >= 50 ? 'bg-sky-500' : (rain >= 20 ? 'bg-sky-400' : 'bg-slate-400')
+                  }`}
                 style={{ width: `${Math.min(100, Math.max(5, rain))}%` }}
               />
             </div>
@@ -278,9 +273,8 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
               <span className="font-mono font-bold text-sm sm:text-base text-slate-900 tabular-nums truncate">
                 {call.weather_humidity != null ? `${humidity}%` : 'N/A'}
               </span>
-              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${
-                humidity >= 75 ? 'bg-blue-100 text-blue-800' : 'bg-slate-200/70 text-slate-700'
-              }`}>
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${humidity >= 75 ? 'bg-blue-100 text-blue-800' : 'bg-slate-200/70 text-slate-700'
+                }`}>
                 {humidity >= 75 ? 'Elevated' : (humidity >= 50 ? 'Balanced' : 'Low')}
               </span>
             </div>
@@ -289,9 +283,8 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
           <div className="mt-2.5 space-y-1">
             <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  humidity >= 75 ? 'bg-blue-600' : 'bg-blue-400'
-                }`}
+                className={`h-full rounded-full transition-all duration-300 ${humidity >= 75 ? 'bg-blue-600' : 'bg-blue-400'
+                  }`}
                 style={{ width: `${Math.min(100, Math.max(5, humidity))}%` }}
               />
             </div>
@@ -361,11 +354,10 @@ export const DashboardWeatherPulse = ({ callLogs = [] }) => {
       {pulse.hasWeather && (
         <div className="lg:col-span-8 bg-white border border-slate-200/80 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-2xs h-full">
           <div className="flex items-center gap-3">
-            <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${
-              pulse.rainAlerts > 0
+            <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${pulse.rainAlerts > 0
                 ? 'bg-sky-50 text-sky-600 border-sky-200'
                 : 'bg-amber-50 text-amber-600 border-amber-200'
-            }`}>
+              }`}>
               {pulse.rainAlerts > 0 ? <CloudRain className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
             </div>
             <div>
