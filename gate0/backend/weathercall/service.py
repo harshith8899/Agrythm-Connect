@@ -696,6 +696,13 @@ class DashboardService:
         if weather is None:
             weather = ({"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
                         "humidity": w.humidity_pct, "source": w.source} if w is not None else {})
+        turns = out.get("transcript") or []
+        if (res.status is AttemptStatus.ANSWERED and not out.get("understood_weather") and turns
+                and any(m.get("speaker") == "Agent" for m in turns)
+                and not any(m.get("speaker") == "Farmer" and (m.get("text") or "").strip() for m in turns)):
+            out["understood_weather"] = "no_response"           # the farmer never spoke and the agent ended the call itself
+            if not out.get("call_summary"):
+                out["call_summary"] = "The farmer stayed silent and did not say anything."
         transcript = [{"speaker": m["speaker"], "text": scrub(m["text"])} for m in out.pop("transcript", None) or []]
         if out.get("call_summary"):
             out["call_summary"] = scrub(out["call_summary"])            # free text: phone-like numbers masked
