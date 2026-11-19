@@ -76,14 +76,14 @@ function getCallHour(call) {
 }
 
 function computeHourlyTelemetry(callLogs = [], rate = 3.5, messageRate = 0.2) {
-  const validCalls = (callLogs || []).filter((c) => !c.is_test);
+  // Rule 4: Include test calls
+  const validCalls = callLogs || [];
 
   const todayStr = localDateKey(new Date());
   let targetCalls = validCalls.filter((c) => getCallDateKey(c) === todayStr);
   let isToday = true;
   let targetDateLabel = 'Today';
 
-  // If 0 calls today, fallback to the latest active call date in the dataset
   if (targetCalls.length === 0 && validCalls.length > 0) {
     const sorted = [...validCalls].sort((a, b) => {
       const da = getCallDateKey(a);
@@ -96,7 +96,6 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5, messageRate = 0.2) {
     targetDateLabel = latestDate ? formatFullDate(latestDate) : 'Latest Active Run';
   }
 
-  // Active agricultural advisory calling window: 06:00 to 21:00 (6 AM to 9 PM)
   const startHour = 6;
   const endHour = 21;
   const hours = [];
@@ -106,31 +105,41 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5, messageRate = 0.2) {
   let peakSpend = 0;
 
   for (let h = startHour; h <= endHour; h++) {
-    const hourCalls = targetCalls.filter((c) => {
-      const callH = getCallHour(c);
-      return callH === h;
+    const hourCalls = targetCalls.filter((c) => getCallHour(c) === h);
+
+    let hourAttempts = 0;
+    let hourConnected = 0;
+    let billedMinutes = 0;
+    let pulses = 0;
+
+    hourCalls.forEach((c) => {
+      const attempts = Array.isArray(c.attempts_log) && c.attempts_log.length > 0 ? c.attempts_log : null;
+      if (attempts) {
+        hourAttempts += attempts.length;
+        attempts.forEach((att) => {
+          const sec = Number(att.duration_seconds ?? att.duration_sec ?? att.duration_s ?? att.duration ?? 0);
+          if (sec > 0) {
+            hourConnected += 1;
+            billedMinutes += Math.ceil(sec / 60);
+            pulses += pulsesFor(sec);
+          }
+        });
+      } else {
+        hourAttempts += Math.max(1, Number(c.retry_count || 0) + 1);
+        const sec = Number(c.duration_sec ?? c.duration_seconds ?? c.duration_s ?? c.duration ?? 0);
+        if (sec > 0) {
+          hourConnected += 1;
+          billedMinutes += Math.ceil(sec / 60);
+          pulses += pulsesFor(sec);
+        }
+      }
     });
-
-    const connected = hourCalls.filter(
-      (c) =>
-        didFarmerPickUpAndTalk(c) ||
-        ['completed', 'delivered', 'connected', 'answered'].includes(
-          String(c.call_status || c.status || '').toLowerCase()
-        ) ||
-        Number(c.duration_sec || c.duration || 0) > 0
-    );
-
-    const billedMinutes = connected.reduce((sum, c) => {
-      const sec = Number(c.duration_sec ?? c.duration ?? 0);
-      return sum + Math.max(1, Math.ceil(sec / 60));
-    }, 0);
 
     const messages = hourCalls.reduce((sum, c) => sum + Number(c.messages_sent ?? c.sms_count ?? 0), 0);
     const voiceSpend = Math.round(billedMinutes * rate * 100) / 100;
     const messageSpend = Math.round(messages * messageRate * 100) / 100;
     const spend = Math.round((voiceSpend + messageSpend) * 100) / 100;
 
-    const pulses = connected.reduce((sum, c) => sum + pulsesFor(c.duration_sec ?? c.duration), 0);
     runningCumulative = Math.round((runningCumulative + spend) * 100) / 100;
 
     if (spend > peakSpend) {
@@ -146,8 +155,8 @@ function computeHourlyTelemetry(callLogs = [], rate = 3.5, messageRate = 0.2) {
       hour: h,
       label,
       timeRange: `${displayH}:00 ${ampm} – ${displayH}:59 ${ampm}`,
-      calls: hourCalls.length,
-      connected: connected.length,
+      calls: hourAttempts,
+      connected: hourConnected,
       messages,
       billedMinutes,
       pulses,

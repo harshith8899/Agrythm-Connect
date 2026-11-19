@@ -210,12 +210,13 @@ export const isCallOnDate = (timestamp, targetDateStr) => {
 export const didFarmerPickUpAndTalk = (call) => {
   if (!call) return false;
 
-  const rawStatus = String(call.call_status || '').trim().toLowerCase();
+  const rawStatus = String(call.call_status || call.status || call.disposition || '').trim().toLowerCase();
 
   // Known statuses indicating the farmer was not reached / did not pick up
   const notReachedKeywords = [
     'no answer',
     'not answered',
+    'no_answer',
     'missed',
     'failed',
     'busy',
@@ -232,8 +233,9 @@ export const didFarmerPickUpAndTalk = (call) => {
     return false;
   }
 
-  // Parse duration
-  const durationSec = parseInt(call.duration_sec, 10);
+  // Parse duration checking all property name variants
+  const rawDur = call.duration_seconds ?? call.duration_sec ?? call.duration_s ?? call.duration;
+  const durationSec = rawDur != null ? parseInt(rawDur, 10) : NaN;
 
   // If duration is explicitly 0 seconds, they did not talk
   if (!isNaN(durationSec) && durationSec === 0) {
@@ -245,7 +247,7 @@ export const didFarmerPickUpAndTalk = (call) => {
     return true;
   }
 
-  // If duration column is missing or unpopulated, check for successful delivery/engagement statuses
+  // Check for successful delivery/engagement statuses
   const positiveStatuses = [
     'delivered',
     'completed',
@@ -253,16 +255,19 @@ export const didFarmerPickUpAndTalk = (call) => {
     'answered',
     'connected',
     'success',
+    'weather delivered',
   ];
 
-  if (positiveStatuses.some(status => rawStatus.includes(status))) {
+  if (positiveStatuses.some(status => rawStatus.includes(status)) || String(call.understood_weather || '').toLowerCase() === 'yes') {
     return true;
   }
 
   // If transcript preview or advisory summary exists with conversation content
   if (
     (call.transcript_preview && String(call.transcript_preview).trim().length > 10) ||
-    (call.advisory_summary && String(call.advisory_summary).trim().length > 10)
+    (call.advisory_summary && String(call.advisory_summary).trim().length > 10) ||
+    (call.call_summary && String(call.call_summary).trim().length > 10) ||
+    (call.summary && String(call.summary).trim().length > 10)
   ) {
     return true;
   }

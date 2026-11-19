@@ -84,14 +84,20 @@ def test_usage_counts_calls_and_billed_minutes_from_sarvams_records(tmp_path):
     u = system(tmp_path, FakeUsage(attempts)).usage()
     # agent minutes are started 60-second minutes (45 s -> 1, 61 s -> 2); telephony pulses are started 30-second pulses
     # at Rs 0.20 (45 s -> 2, 61 s -> 3, 125 s -> 5, 30 s -> 1)
-    assert u["today"] == {"calls": 4, "connected": 2, "billed_minutes": 3, "amount": 10.5,
+    assert u["today"] == {"calls": 4, "connected": 2, "billed_minutes": 3, "voice_amount": 10.5, "amount": 10.5,
+                          "messages_sent": 0, "message_amount": 0.0,
+                          "farmers_targeted": 1, "farmers_reached": 1, "retries": 3,
                           "telephony_pulses": 5, "telephony_amount": 1.0}
-    assert u["week"] == {"calls": 5, "connected": 3, "billed_minutes": 6, "amount": 21.0,
+    assert u["week"] == {"calls": 5, "connected": 3, "billed_minutes": 6, "voice_amount": 21.0, "amount": 21.0,
+                         "messages_sent": 0, "message_amount": 0.0,
+                         "farmers_targeted": 1, "farmers_reached": 1, "retries": 4,
                          "telephony_pulses": 10, "telephony_amount": 2.0}
-    assert u["window"] == {"calls": 6, "connected": 4, "billed_minutes": 7, "amount": 24.5,
+    assert u["window"] == {"calls": 6, "connected": 4, "billed_minutes": 7, "voice_amount": 24.5, "amount": 24.5,
+                           "messages_sent": 0, "message_amount": 0.0,
+                           "farmers_targeted": 1, "farmers_reached": 1, "retries": 5,
                            "telephony_pulses": 11, "telephony_amount": 2.2}
     assert u["rate"] == 3.5 and u["currency"] == "INR"                                          # Sarvam pay-as-you-go
-    assert set(u["today"]) == {"calls", "connected", "billed_minutes", "amount", "telephony_pulses", "telephony_amount"}  # an estimate; there is still no balance
+    assert "balance" not in u["today"]  # an estimate; there is still no balance
 
 
 def test_daily_breakdown_is_by_india_date(tmp_path):

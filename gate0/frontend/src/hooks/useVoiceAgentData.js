@@ -201,13 +201,15 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
         }
       }
 
-      const durationSec = call.duration_seconds != null ? call.duration_seconds : (call.duration_sec || 0);
+      const durationSec = call.duration_seconds != null ? call.duration_seconds : (call.duration_sec != null ? call.duration_sec : (call.duration_s != null ? call.duration_s : (call.duration || 0)));
 
       // Advisory summary
-      const advisorySummary = call.advisory_summary || 
-        (call.weather_temp != null
-          ? `Temp ${call.weather_temp}°C | Wind ${call.weather_windspeed} km/h | Rain ${call.weather_rainfall}% | Humidity ${call.weather_humidity}%`
-          : weatherFallback.advisory_summary);
+      const advisorySummary = call.advisory_summary || weatherFallback.advisory_summary;
+
+      const isInbound =
+        String(call.direction || '').toLowerCase() === 'inbound' ||
+        Boolean(call.has_inbound_callback) ||
+        (Array.isArray(call.attempts_log) && call.attempts_log.some((a) => a.direction === 'inbound'));
 
       return {
         ...call,
@@ -216,8 +218,8 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
         time: callTime,
         call_timestamp: call.created_at || call.call_date || 'Just now',
         displayDateTime: call.created_at 
-          ? `${call.created_at.slice(0, 10)} ${call.created_at.slice(11, 16)} (${attemptDisplay})`
-          : (call.call_date ? `${call.call_date} (${attemptDisplay})` : 'Recent'),
+          ? `${call.created_at.slice(0, 10)} ${call.created_at.slice(11, 16)}`
+          : (call.call_date ? `${call.call_date}` : 'Recent'),
         farmer_name: call.farmer_name || farmer.farmer_name || (call.farmer_id ? `Farmer ${call.farmer_id}` : 'Unassigned'),
         phone_number: call.phone_number || farmer.phone_number || farmer.phone || 'N/A',
         primary_language: normalizeLanguage(call.language || farmer.preferred_language || farmer.primary_language),
@@ -225,6 +227,10 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
         village: farmer.village || (call.location ? call.location.split(',')[0]?.trim() : 'N/A'),
         location: call.location || `${farmer.village || ''}, ${farmer.district || ''}`.trim(),
         
+        // Direction: Inbound vs Outbound
+        direction: isInbound ? 'inbound' : 'outbound',
+        has_inbound_callback: Boolean(call.has_inbound_callback || isInbound),
+
         // 4 Meteorological parameters
         weather_temp: call.weather_temp,
         weather_windspeed: call.weather_windspeed,
@@ -350,24 +356,15 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
     });
   }, [enrichedCallLogs, searchQuery, districtFilter, languageFilter, statusFilter, dateFilter, customDate]);
 
-  // Summary cards: breakdown of call metrics for the date picked in the filter bar (all dates when none is picked),
-  // respecting active search, district, and language filters.
+  // Summary cards: unique farmer counts for the active scope (including test calls, excluding Skipped & live calls)
   const summaryMetrics = useMemo(() => {
     const inScope = (c) => {
-      // Date filter
       if (dateFilter !== 'all' && customDate) {
         const raw = getCallDate(c);
         if (!raw || !isCallOnDate(raw, customDate)) return false;
       }
-      // District filter
-      if (districtFilter !== 'all' && c.district !== districtFilter) {
-        return false;
-      }
-      // Language filter
-      if (languageFilter !== 'all' && c.primary_language !== languageFilter) {
-        return false;
-      }
-      // Search query
+      if (districtFilter !== 'all' && c.district !== districtFilter) return false;
+      if (languageFilter !== 'all' && c.primary_language !== languageFilter) return false;
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
         const matchesName = String(c.farmer_name || '').toLowerCase().includes(query);
@@ -384,7 +381,8 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
       return true;
     };
 
-    const scoped = enrichedCallLogs.filter((c) => !c.is_test && inScope(c));
+    // Rule 4: Include test calls alongside regular calls
+    const scoped = enrichedCallLogs.filter((c) => inScope(c));
     const waiting = (c) => c.status === 'In Call' || c.status === 'In Queue' || c.status === 'Calling';
     const called = scoped.filter((c) => c.status !== 'Skipped' && !waiting(c));
 
@@ -418,10 +416,36 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
         c.understood_weather === 'declined'
       );
 
-    const targetedFarmers = new Set();
+    // Rule 1A: Classify each unique farmer into a single highest-priority bucket
+    const farmerBuckets = new Map();
+    const priority = { completed: 4, callback: 3, unanswered: 2, attention: 1 };
+
     called.forEach((c) => {
-      const fid = String(c.farmer_id || c.phone_number || c.phone || '').trim();
-      if (fid) targetedFarmers.add(fid);
+      const fid = String(c.farmer_id || c.phone_number || c.phone || c.farmer_name || c.call_id || '').trim();
+      if (!fid) return;
+
+      let bucket = 'attention';
+      if (isCompleted(c)) bucket = 'completed';
+      else if (isCallback(c)) bucket = 'callback';
+      else if (isUnanswered(c)) bucket = 'unanswered';
+      else if (isNeedsAttention(c)) bucket = 'attention';
+
+      const existing = farmerBuckets.get(fid);
+      if (!existing || priority[bucket] > priority[existing]) {
+        farmerBuckets.set(fid, bucket);
+      }
+    });
+
+    let completedCount = 0;
+    let callbacksScheduled = 0;
+    let retryingCount = 0;
+    let needsAttentionCount = 0;
+
+    farmerBuckets.forEach((bucket) => {
+      if (bucket === 'completed') completedCount += 1;
+      else if (bucket === 'callback') callbacksScheduled += 1;
+      else if (bucket === 'unanswered') retryingCount += 1;
+      else needsAttentionCount += 1;
     });
 
     const scopeLabel =
@@ -436,11 +460,11 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
     return {
       scopeLabel,
       totalCalls: called.length,
-      uniqueFarmersCount: targetedFarmers.size,
-      completedCount: called.filter(isCompleted).length,
-      callbacksScheduled: scoped.filter(isCallback).length,
-      retryingCount: called.filter(isUnanswered).length,
-      needsAttentionCount: called.filter(isNeedsAttention).length,
+      uniqueFarmersCount: farmerBuckets.size,
+      completedCount,
+      callbacksScheduled,
+      retryingCount,
+      needsAttentionCount,
       declinedCount: called.filter((c) => c.status === 'Declined').length,
       skippedCount: scoped.filter((c) => c.status === 'Skipped').length,
       inProgressCount: scoped.filter(waiting).length,

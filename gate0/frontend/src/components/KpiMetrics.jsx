@@ -15,7 +15,7 @@ export const KpiMetrics = ({
   setStatusFilter,
 }) => {
   const called = metrics.totalCalls || 0;
-  const uniqueFarmers = metrics.uniqueFarmersCount || called;
+  const uniqueFarmers = metrics.uniqueFarmersCount ?? called;
   const completed = metrics.completedCount || 0;
   const callbacks = metrics.callbacksScheduled || 0;
   const unanswered = metrics.retryingCount || 0;
@@ -23,7 +23,7 @@ export const KpiMetrics = ({
   const skipped = metrics.skippedCount || 0;
   const inProgress = metrics.inProgressCount || 0;
   const scope = metrics.scopeLabel || 'All dates';
-  const completionPct = called > 0 ? `${Math.round((completed / called) * 100)}%` : '0%';
+  const completionPct = uniqueFarmers > 0 ? `${Math.round((completed / uniqueFarmers) * 100)}%` : '0%';
 
   const isAllActive = !statusFilter || statusFilter === 'all';
   const isCompletedActive = ['completed', 'callback done'].includes(String(statusFilter).toLowerCase());
@@ -37,7 +37,6 @@ export const KpiMetrics = ({
       setStatusFilter('all');
       return;
     }
-    // Toggle off if already selected
     if (String(statusFilter).toLowerCase() === String(targetStatus).toLowerCase()) {
       setStatusFilter('all');
     } else {
@@ -71,18 +70,18 @@ export const KpiMetrics = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3.5 items-stretch">
         <OverviewCard
           loading={loading}
-          title={scope === 'All dates' ? "Total Calls" : "Farmers Called"}
-          value={called}
+          title="Farmers Called"
+          value={uniqueFarmers}
           subtitle={
-            uniqueFarmers && uniqueFarmers !== called
-              ? `${uniqueFarmers} unique farmers (${called} calls)`
-              : "Farmers with at least one call"
+            called !== uniqueFarmers
+              ? `${called} total call records (incl. test)`
+              : "Unique farmers with at least one call"
           }
           icon={PhoneCall}
-          badge={called > 0 ? (isAllActive ? scope : 'All Calls') : 'None yet'}
+          badge={uniqueFarmers > 0 ? (isAllActive ? scope : 'All Calls') : 'None yet'}
           badgeColor={isAllActive ? 'bg-slate-100 text-slate-800 border-slate-300' : undefined}
           active={isAllActive}
           onClick={() => handleCardClick('all')}
@@ -91,9 +90,9 @@ export const KpiMetrics = ({
           loading={loading}
           title="Completed"
           value={completed}
-          subtitle={`${completionPct} of calls delivered weather`}
+          subtitle={`${completionPct} of farmers delivered weather`}
           icon={CheckCircle2}
-          badge={isCompletedActive ? 'Active' : (called > 0 ? completionPct : 'Pending')}
+          badge={isCompletedActive ? 'Active' : (uniqueFarmers > 0 ? completionPct : 'Pending')}
           badgeColor={isCompletedActive ? 'bg-trust-navy text-white border-trust-navy' : 'bg-emerald-50 text-trust-green border-emerald-200'}
           active={isCompletedActive}
           onClick={() => handleCardClick('Completed')}
@@ -102,7 +101,7 @@ export const KpiMetrics = ({
           loading={loading}
           title="Callbacks Pending"
           value={callbacks}
-          subtitle="Farmers who asked to be called later"
+          subtitle="Unique farmers waiting for callback"
           icon={Clock}
           badge={isCallbackActive ? 'Active' : (callbacks > 0 ? `${callbacks} Waiting` : 'None')}
           badgeColor={isCallbackActive ? 'bg-trust-navy text-white border-trust-navy' : 'bg-amber-50 text-amber-700 border-amber-200'}
@@ -113,7 +112,7 @@ export const KpiMetrics = ({
           loading={loading}
           title="Unanswered"
           value={unanswered}
-          subtitle="Not picked up, busy, or scheduled for retry"
+          subtitle="Not picked up, busy, or retrying"
           icon={RefreshCw}
           badge={isUnansweredActive ? 'Active' : (unanswered > 0 ? `${unanswered} Retrying` : 'Clear')}
           badgeColor={isUnansweredActive ? 'bg-trust-navy text-white border-trust-navy' : 'bg-slate-100 text-slate-700 border-slate-200'}
@@ -124,7 +123,7 @@ export const KpiMetrics = ({
           loading={loading}
           title="Needs Attention"
           value={needsAttention}
-          subtitle="Failed calls, or the farmer did not confirm"
+          subtitle="Failed, declined, or not confirmed"
           icon={ShieldAlert}
           badge={isNeedsAttentionActive ? 'Active' : (needsAttention > 0 ? `${needsAttention} To check` : 'All clear')}
           badgeColor={isNeedsAttentionActive ? 'bg-trust-navy text-white border-trust-navy' : (needsAttention > 0 ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-trust-green border-emerald-200')}

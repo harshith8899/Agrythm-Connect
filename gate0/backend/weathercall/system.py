@@ -145,6 +145,46 @@ class SystemChecks:
                 "billed_minutes": minutes, "amount": round(minutes * rate, 2),
                 "telephony_pulses": pulses, "telephony_amount": round(pulses * TELEPHONY_PULSE_RATE, 2)}
 
+    def _messages_count(self) -> dict[str, int]:
+        try:
+            with self.service.lock:
+                rows = self.service.db.execute(
+                    "SELECT call_date, COUNT(*) FROM dash_messages WHERE status = 'sent' GROUP BY call_date"
+                ).fetchall()
+            return {r[0]: r[1] for r in rows}
+        except Exception:
+            return {}
+
+    def _farmer_reach_sets(self) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+        """Returns per-date sets of unique farmer IDs targeted and reached across results and test calls."""
+        day_targeted: dict[str, set[str]] = {}
+        day_reached: dict[str, set[str]] = {}
+        try:
+            with self.service.lock:
+                rows = self.service.db.execute(
+                    "SELECT call_date, farmer_id, status, duration_s, understood_weather FROM dash_results"
+                ).fetchall()
+                test_rows = self.service.db.execute(
+                    "SELECT substr(at, 1, 10), farmer_id, status, duration_s, '' FROM dash_tests"
+                ).fetchall()
+
+            for day_str, fid, status, dur, understood in rows + test_rows:
+                if not day_str or not fid:
+                    continue
+                fid = str(fid).strip()
+                day_targeted.setdefault(day_str, set()).add(fid)
+                raw_st = str(status or "").strip().lower()
+                is_connected = (
+                    raw_st in ("answered", "completed", "delivered", "connected", "weather delivered")
+                    or str(understood or "").strip().lower() == "yes"
+                    or (dur is not None and float(dur or 0) > 0)
+                )
+                if is_connected:
+                    day_reached.setdefault(day_str, set()).add(fid)
+        except Exception:
+            pass
+        return day_targeted, day_reached
+
     def usage(self, refresh: bool = False) -> dict:
         rate = self.rate()
         out = {"configured": self.usage_reader is not None, "error": "", "exhausted": False, "today": None, "week": None,
@@ -164,10 +204,49 @@ class SystemChecks:
         by_day: dict[str, list[dict]] = {}
         for a in rows:
             by_day.setdefault(_when(a).astimezone(IST).date().isoformat(), []).append(a)
-        out["today"] = self._totals(by_day.get(today.isoformat(), []), rate)
-        out["week"] = self._totals([a for a in rows if _when(a) >= now - timedelta(days=7)], rate)
-        out["window"] = self._totals(rows, rate)
-        out["days"] = [{"date": d, **self._totals(by_day[d], rate)} for d in sorted(by_day, reverse=True)[:14]]
+        msgs_by_day = self._messages_count()
+        day_targeted_sets, day_reached_sets = self._farmer_reach_sets()
+
+        def enrich_totals(t_dict, day_str=None, day_list=None):
+            if not t_dict:
+                return t_dict
+            if day_str:
+                m_count = msgs_by_day.get(day_str, 0)
+                targeted_set = day_targeted_sets.get(day_str, set())
+                reached_set = day_reached_sets.get(day_str, set())
+            elif day_list:
+                m_count = sum(msgs_by_day.get(d, 0) for d in day_list)
+                targeted_set = set().union(*(day_targeted_sets.get(d, set()) for d in day_list))
+                reached_set = set().union(*(day_reached_sets.get(d, set()) for d in day_list))
+            else:
+                m_count = sum(msgs_by_day.values())
+                targeted_set = set().union(*day_targeted_sets.values()) if day_targeted_sets else set()
+                reached_set = set().union(*day_reached_sets.values()) if day_reached_sets else set()
+
+            m_amount = round(m_count * 0.20, 2)
+            v_amount = t_dict.get("voice_amount", t_dict.get("amount", 0))
+            t_dict["messages_sent"] = m_count
+            t_dict["message_amount"] = m_amount
+            t_dict["voice_amount"] = v_amount
+            t_dict["amount"] = round(v_amount + m_amount, 2)
+
+            t_targeted = len(targeted_set)
+            t_reached = len(reached_set)
+
+            if t_targeted == 0 and t_dict.get("calls", 0) > 0:
+                t_targeted = 1
+                t_reached = min(t_dict.get("connected", 0), 1)
+
+            t_dict["farmers_targeted"] = t_targeted
+            t_dict["farmers_reached"] = min(t_reached, t_targeted)
+            t_dict["retries"] = max(0, t_dict.get("calls", 0) - t_targeted)
+            return t_dict
+
+        week_days = [(self._now().astimezone(IST).date() - timedelta(days=i)).isoformat() for i in range(7)]
+        out["today"] = enrich_totals(self._totals(by_day.get(today.isoformat(), []), rate), day_str=today.isoformat())
+        out["week"] = enrich_totals(self._totals([a for a in rows if _when(a) >= now - timedelta(days=7)], rate), day_list=week_days)
+        out["window"] = enrich_totals(self._totals(rows, rate))
+        out["days"] = [{"date": d, **enrich_totals(self._totals(by_day[d], rate), day_str=d)} for d in sorted(by_day, reverse=True)[:14]]
         out["exhausted"] = any(a.get("failure_reason") and _EXHAUSTED.search(a["failure_reason"])
                                and _when(a) >= now - timedelta(days=7) for a in rows)
         return out
