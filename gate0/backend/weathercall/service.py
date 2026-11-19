@@ -1959,9 +1959,6 @@ class DashboardService:
             return "Retrying", "Retry scheduled"
         if status == "answered" and asked_for_callback and not has_callback:
             return "Callback Requested", "Callback requested (not booked)"
-            return "Retrying", "Retry scheduled"
-        if status == "answered" and asked_for_callback and not has_callback:
-            return "Callback Requested", "Callback requested (not booked)"
         if status == "answered":
             if understood == "declined":
                 return "Declined", "Not needed today"
