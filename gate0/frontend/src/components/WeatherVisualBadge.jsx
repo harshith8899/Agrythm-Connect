@@ -102,39 +102,6 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
     );
   }
 
-  const actionableAdvisory = useMemo(() => {
-    const rawAdvisory = call?.advisory_summary || call?.message_text || '';
-    const summaryText = String(call?.summary || '').trim();
-    const isPureRawNumbers = /^Temp\s+[0-9.-]+.*\|\s*Wind.*\|\s*Rain/i.test(rawAdvisory.trim());
-    const isGenericWeatherListing = /Grounded forecast:.*precipitation risk/i.test(rawAdvisory);
-    const isDuplicateOfSummary = rawAdvisory.trim() === summaryText;
-
-    if (rawAdvisory && !isPureRawNumbers && !isGenericWeatherListing && !isDuplicateOfSummary) {
-      const parts = rawAdvisory.split('. ');
-      if (parts.length > 1 && parts.some(p => /spray|harvest|delay|rain|wind|irrigation|favorable/i.test(p))) {
-        return parts.filter(p => !/^(Temp|Wind|Precipitation|Humidity):/i.test(p.trim())).join('. ').trim();
-      }
-      if (parts.some(p => /spray|harvest|delay|rain|wind|irrigation|favorable/i.test(rawAdvisory))) {
-        return rawAdvisory;
-      }
-    }
-
-    // Dynamic agronomic recommendation grounded in the 4 meteorological metrics
-    if (rain >= 50) {
-      return 'Significant rainfall expected today. Voice agent advised farmer to postpone chemical spraying, synthetic fertilizer application, and harvesting to prevent wash-off. Ensure field drainage channels are kept clear.';
-    }
-    if (wind >= 25) {
-      return 'Elevated wind speeds detected. Advised delaying pesticide sprays on tall crops to eliminate wind drift risk, and checking boundary shelter netting.';
-    }
-    if (hasRange && tempParts[1] >= 33) {
-      return 'Elevated daytime temperatures expected. Advised scheduling field irrigation in early morning or evening hours to conserve soil moisture and prevent thermal crop stress.';
-    }
-    if (humidity >= 75 && rain >= 25) {
-      return 'High moisture with light precipitation predicted. Advised routine crop scouting for early signs of foliar fungal pathogens and maintaining proper canopy aeration.';
-    }
-    return 'Favorable meteorological window confirmed. Weather is optimal for standard field intercultural operations, weeding, fertilizer top-dressing, and general crop management.';
-  }, [call, rain, wind, hasRange, tempParts, humidity]);
-
   return (
     <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 space-y-4 shadow-2xs">
       {/* Header: Grounded Source & High-Level Agronomic Impact (No Duplicate Temperature) */}
@@ -334,22 +301,6 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Actionable Agronomic Guidance (Meaningful advice, not duplicate numbers) */}
-      <div className="p-3.5 rounded-xl bg-slate-50/90 border border-slate-200/80 text-xs text-slate-700 leading-relaxed space-y-1">
-        <div className="flex items-center justify-between">
-          <strong className="text-trust-navy flex items-center gap-1.5 text-[11px] uppercase tracking-wider">
-            <span className="w-1.5 h-1.5 rounded-full bg-trust-green" />
-            Agronomic Field Guidance Spoken to Farmer:
-          </strong>
-          <span className="text-[10px] font-semibold text-slate-400 font-mono">
-            Voice Advisory
-          </span>
-        </div>
-        <p className="text-xs text-slate-700 leading-relaxed font-normal">
-          {actionableAdvisory}
-        </p>
       </div>
     </div>
   );
