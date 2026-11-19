@@ -1311,7 +1311,8 @@ class DashboardService:
         hhmm = lambda due: datetime.fromisoformat(due).strftime("%H:%M")      # noqa: E731
         pending = [c for c in cbs if c[1] == "pending"]
         if understood == "yes" or any((c[2] or "") == "yes" for c in cbs):
-            return "completed", "We already gave this farmer today's weather and they said they understood it."
+            return "completed", ("We already gave this farmer today's weather and they said they understood it, so there is no new "
+                                 "update until tomorrow: do not give the weather again, even if they ask.")
         if pending:
             t = hhmm(pending[0][0])
             return f"callback {t}", (f"The farmer asked us to call back at {t} (24-hour time) and is calling before that; "
@@ -1519,6 +1520,14 @@ class DashboardService:
             return 0
         out = self._outputs(res)
         weather = self._saved_weather(fid, day.isoformat())
+        if not has_full_weather(weather):                   # rang before today's own call: the weather is not saved yet, and the email needs it
+            try:
+                w = ports.weather.get_weather(farmer.place_name, farmer.latitude, farmer.longitude, day)
+            except Exception:
+                w = None
+            if w is not None:
+                weather = {"temp_min": w.temp_min_c, "temp_max": w.temp_max_c, "wind": w.wind_kmh, "rain": w.rain_chance_pct,
+                           "humidity": w.humidity_pct, "source": w.source}
         for n in range(1, 10):                              # a free attempt number for that day
             try:
                 ports.ledger.record_attempt(CallAttempt(
