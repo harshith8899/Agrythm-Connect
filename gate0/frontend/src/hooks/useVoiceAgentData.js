@@ -436,17 +436,23 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
       }
     });
 
-    let completedCount = 0;
+    let completedFarmersCount = 0;
     let callbacksScheduled = 0;
     let retryingCount = 0;
     let needsAttentionCount = 0;
 
     farmerBuckets.forEach((bucket) => {
-      if (bucket === 'completed') completedCount += 1;
+      if (bucket === 'completed') completedFarmersCount += 1;
       else if (bucket === 'callback') callbacksScheduled += 1;
       else if (bucket === 'unanswered') retryingCount += 1;
       else needsAttentionCount += 1;
     });
+
+    // Total calls by category
+    const completedCallsCount = called.filter(isCompleted).length;
+    const callbacksCallsCount = called.filter(isCallback).length;
+    const unansweredCallsCount = called.filter(isUnanswered).length;
+    const needsAttentionCallsCount = called.filter(isNeedsAttention).length;
 
     const scopeLabel =
       dateFilter === 'today'
@@ -461,10 +467,15 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
       scopeLabel,
       totalCalls: called.length,
       uniqueFarmersCount: farmerBuckets.size,
-      completedCount,
+      completedCount: completedCallsCount,
+      completedCallsCount,
+      completedFarmersCount,
       callbacksScheduled,
+      callbacksCallsCount,
       retryingCount,
+      unansweredCallsCount,
       needsAttentionCount,
+      needsAttentionCallsCount,
       declinedCount: called.filter((c) => c.status === 'Declined').length,
       skippedCount: scoped.filter((c) => c.status === 'Skipped').length,
       inProgressCount: scoped.filter(waiting).length,

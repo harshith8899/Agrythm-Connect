@@ -16,14 +16,16 @@ export const KpiMetrics = ({
 }) => {
   const called = metrics.totalCalls || 0;
   const uniqueFarmers = metrics.uniqueFarmersCount ?? called;
-  const completed = metrics.completedCount || 0;
+  const completed = metrics.completedCallsCount ?? metrics.completedCount ?? 0;
+  const completedFarmers = metrics.completedFarmersCount ?? (completed > 0 && uniqueFarmers > 0 ? uniqueFarmers : 0);
   const callbacks = metrics.callbacksScheduled || 0;
   const unanswered = metrics.retryingCount || 0;
   const needsAttention = metrics.needsAttentionCount || 0;
   const skipped = metrics.skippedCount || 0;
   const inProgress = metrics.inProgressCount || 0;
   const scope = metrics.scopeLabel || 'All dates';
-  const completionPct = uniqueFarmers > 0 ? `${Math.round((completed / uniqueFarmers) * 100)}%` : '0%';
+  const farmerReachPct = uniqueFarmers > 0 ? `${Math.round((completedFarmers / uniqueFarmers) * 100)}%` : '0%';
+  const callCompletionPct = called > 0 ? `${Math.round((completed / called) * 100)}%` : '0%';
 
   const isAllActive = !statusFilter || statusFilter === 'all';
   const isCompletedActive = ['completed', 'callback done'].includes(String(statusFilter).toLowerCase());
@@ -90,9 +92,9 @@ export const KpiMetrics = ({
           loading={loading}
           title="Completed"
           value={completed}
-          subtitle={`${completionPct} of farmers delivered weather`}
+          subtitle={`${farmerReachPct} of farmers delivered weather`}
           icon={CheckCircle2}
-          badge={isCompletedActive ? 'Active' : (uniqueFarmers > 0 ? completionPct : 'Pending')}
+          badge={isCompletedActive ? 'Active' : (called > 0 ? callCompletionPct : 'Pending')}
           badgeColor={isCompletedActive ? 'bg-trust-navy text-white border-trust-navy' : 'bg-emerald-50 text-trust-green border-emerald-200'}
           active={isCompletedActive}
           onClick={() => handleCardClick('Completed')}

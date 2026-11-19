@@ -85,7 +85,14 @@ export const OverviewCard = ({
       {(subtitle || trend) && (
         <div className="mt-3 pt-2 border-t border-slate-100 text-xs text-slate-500 flex items-start gap-1.5 min-w-0">
           {trend && <span className="font-semibold text-trust-green shrink-0">{trend}</span>}
-          {subtitle && <span className="truncate leading-snug">{subtitle}</span>}
+          {subtitle && (
+            <span
+              className="text-[11px] text-slate-500 leading-snug break-words"
+              title={typeof subtitle === 'string' ? subtitle : undefined}
+            >
+              {subtitle}
+            </span>
+          )}
         </div>
       )}
     </div>
