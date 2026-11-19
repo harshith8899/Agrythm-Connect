@@ -55,6 +55,7 @@ NETWORK_RETRY_MIN = 5
 MAX_RESCHEDULES = 2       # a farmer may move a callback at most twice (team, 5 Nov)
 ALREADY_NOTE = "Send skipped: already called today (one call per farmer per day)"
 DAILY_RUN_TIME = dtime(9, 0)
+INBOUND_RETRY_S = 300                              # a failed push to the inbound line is tried again after this many seconds
 RETRY_GAPS_MIN = (30, 60)        # client rule: 30 min before attempt 2, then 1 hour before attempt 3 (3 attempts)
 FAILURE_RETRY_GAPS_MIN = (30,)   # a provider or number failure is retried once, then shown to the team
 
@@ -1409,10 +1410,26 @@ class DashboardService:
 
     def _daily_inbound_roster(self) -> None:
         """Once a day, the full list again (the day's states start fresh)."""
-        today = self._now().date().isoformat()
-        if self._inbound_ready() and self._get_setting("inbound_roster_date") != today:
-            self._refresh_inbound(force=True)
-            self._set_setting("inbound_roster_date", today)
+        now = self._now()
+        today = now.date().isoformat()
+        if not self._inbound_ready():
+            return
+        last = self._get_setting("inbound_roster_try")
+        if last:
+            try:
+                if (now - datetime.fromisoformat(last)).total_seconds() < INBOUND_RETRY_S:
+                    return                                  # tried a moment ago: no hammering Sarvam while it refuses
+            except ValueError:
+                pass
+        with self.lock:
+            failed = self.db.execute("SELECT 1 FROM dash_inbound WHERE call_date=? AND status='failed' LIMIT 1", (today,)).fetchone()
+        if self._get_setting("inbound_roster_date") != today or failed:
+            self._set_setting("inbound_roster_try", now.isoformat(timespec="seconds"))
+            self._refresh_inbound(force=True)               # a failed push is tried again, not left for tomorrow
+            with self.lock:
+                failed = self.db.execute("SELECT 1 FROM dash_inbound WHERE call_date=? AND status='failed' LIMIT 1", (today,)).fetchone()
+            if not failed:
+                self._set_setting("inbound_roster_date", today)
 
     def sync_inbound(self, now: datetime | None = None) -> int:
         """Brings in the calls made to the inbound line. Each is logged (dash_incoming) so the dashboard shows every incoming

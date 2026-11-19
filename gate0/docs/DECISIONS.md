@@ -78,6 +78,7 @@
 | 18 Nov 2026 | A successful incoming call (team): the weather email is sent (the weather is fetched when the farmer rings before the daily call) and the line is told that the farmer already has today's weather, so a second call the same day gets a polite goodbye and no new result or email. |
 | 19 Nov 2026 | Agent version 17 (team): silence rule 'are you there' at 7 s, again after 10 s, then a polite goodbye and the call ends (it counts as not reached, so the retry rules apply); a farmer already served today is told the next update is tomorrow and is not given the weather again. `SARVAM_APP_VERSION=17` and the inbound deployment are on it. |
 | 19 Nov 2026 | After the first silence test (team): a call where the farmer says nothing and the agent ends it is recorded as 'no response' with the summary 'The farmer stayed silent and did not say anything.' (before: 'Picked up, not confirmed'); it is still retried by the normal rules. The two silence questions are 'Are you there in the call?' and 'Are you still there in the call?' (agent draft v18). Sarvam has no setting to refuse a caller before the line answers, so unknown numbers are still answered and ended with one polite sentence. |
+| 19 Nov 2026 | A failed push of farmer details to the inbound line (Sarvam answered 422 at 05:05 and 15:21) used to be left until the next day, so incoming callers had no details all day. It is now tried again every 5 minutes until it lands (team). |
 
 ## Open with the client (Chetan Sir)
 
