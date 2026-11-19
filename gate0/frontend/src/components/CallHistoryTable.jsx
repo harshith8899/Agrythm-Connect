@@ -20,6 +20,39 @@ import { SliderLoader } from './SliderLoader';
 import { CallDirectionBadge } from './CallDirectionBadge';
 import { WeatherVisualBadge } from './WeatherVisualBadge';
 
+// Shorten verbose dispositions so log rows remain neat, compact and identical in height
+function shortenDisposition(text) {
+  if (!text) return 'Delivered';
+  const str = String(text).trim();
+
+  // "Callback requested for in 2 hours (not booked: time not understood)" -> "Callback: in 2 hours"
+  // "Callback requested for at 3 PM (not booked: time not understood)" -> "Callback: at 3 PM"
+  if (/callback requested/i.test(str)) {
+    const timeMatch = str.match(/for\s+(?:at\s+)?([^()]+?)(?:\s*\(|$)/i);
+    if (timeMatch && timeMatch[1]) {
+      return `Callback: ${timeMatch[1].trim()}`;
+    }
+    return 'Callback requested';
+  }
+
+  // "Failed: Carrier telecom pulse timeout / network congestion" -> "Carrier timeout / congestion"
+  if (/carrier telecom pulse timeout/i.test(str) || /network congestion/i.test(str)) {
+    return 'Carrier timeout / congestion';
+  }
+
+  // "Callback not placed in time" -> "Missed callback window"
+  if (/callback not placed in time/i.test(str)) {
+    return 'Missed callback window';
+  }
+
+  // "No Answer or Rejected" -> "No answer / rejected"
+  if (/no answer or rejected/i.test(str)) {
+    return 'No answer / rejected';
+  }
+
+  return str;
+}
+
 export const CallHistoryTable = ({ 
   callLogs, 
   onSelectCall, 
@@ -55,50 +88,50 @@ export const CallHistoryTable = ({
       case 'completed':
       case 'answered':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap shrink-0">
+            <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
             <span>Completed</span>
           </span>
         );
       case 'callback scheduled':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-            <Clock className="w-3 h-3 text-blue-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 whitespace-nowrap shrink-0">
+            <Clock className="w-3 h-3 text-blue-600 shrink-0" />
             <span>Callback Scheduled</span>
           </span>
         );
       case 'callback requested':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-50 text-sky-700 border border-sky-200">
-            <Clock className="w-3 h-3 text-sky-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-50 text-sky-700 border border-sky-200 whitespace-nowrap shrink-0">
+            <Clock className="w-3 h-3 text-sky-600 shrink-0" />
             <span>Callback Requested</span>
           </span>
         );
       case 'not confirmed':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-            <AlertCircle className="w-3 h-3 text-amber-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap shrink-0">
+            <AlertCircle className="w-3 h-3 text-amber-600 shrink-0" />
             <span>Not Confirmed</span>
           </span>
         );
       case 'callback missed':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-            <Clock className="w-3 h-3 text-rose-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 whitespace-nowrap shrink-0">
+            <Clock className="w-3 h-3 text-rose-600 shrink-0" />
             <span>Callback Missed</span>
           </span>
         );
       case 'callback done':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-            <CheckCircle2 className="w-3 h-3 text-slate-500" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap shrink-0">
+            <CheckCircle2 className="w-3 h-3 text-slate-500 shrink-0" />
             <span>Callback Done</span>
           </span>
         );
       case 'declined':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-            <AlertCircle className="w-3 h-3 text-slate-500" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap shrink-0">
+            <AlertCircle className="w-3 h-3 text-slate-500 shrink-0" />
             <span>Declined</span>
           </span>
         );
@@ -106,30 +139,30 @@ export const CallHistoryTable = ({
       case 'busy':
       case 'no_answer':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-            <PhoneOutgoing className="w-3 h-3 text-amber-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap shrink-0">
+            <PhoneOutgoing className="w-3 h-3 text-amber-600 shrink-0" />
             <span>Unanswered</span>
           </span>
         );
       case 'retrying':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-            <RefreshCw className="w-3 h-3 text-amber-600 animate-spin" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap shrink-0">
+            <RefreshCw className="w-3 h-3 text-amber-600 animate-spin shrink-0" />
             <span>Retrying</span>
           </span>
         );
       case 'escalated':
       case 'requires escalation':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
-            <ShieldAlert className="w-3 h-3 text-purple-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap shrink-0">
+            <ShieldAlert className="w-3 h-3 text-purple-600 shrink-0" />
             <span>Escalated</span>
           </span>
         );
       case 'failed':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-            <AlertCircle className="w-3 h-3 text-rose-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 whitespace-nowrap shrink-0">
+            <AlertCircle className="w-3 h-3 text-rose-600 shrink-0" />
             <span>Failed</span>
           </span>
         );
@@ -362,7 +395,7 @@ export const CallHistoryTable = ({
 
               {(call.disposition || call.next_attempt_at || hasCallback) && (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                  {call.disposition && <span className="text-slate-500 font-medium">{call.disposition}</span>}
+                  {call.disposition && <span className="text-slate-500 font-medium">{shortenDisposition(call.disposition)}</span>}
                   {call.next_attempt_at && (
                     <span className="text-amber-700 font-semibold">Next try {String(call.next_attempt_at).split(', ')[1] || call.next_attempt_at}</span>
                   )}
@@ -390,7 +423,7 @@ export const CallHistoryTable = ({
               <th className="px-3.5 py-3 whitespace-nowrap min-w-[195px]">Weather</th>
               <th className="px-3.5 py-3 whitespace-nowrap text-center min-w-[90px]">Attempts</th>
               <th className="px-3.5 py-3 whitespace-nowrap text-center min-w-[75px]">Duration</th>
-              <th className="px-3.5 py-3 whitespace-nowrap min-w-[160px]">Status & Disposition</th>
+              <th className="px-3.5 py-3 whitespace-nowrap min-w-[210px]">Status & Disposition</th>
               <th className="px-3.5 py-3 whitespace-nowrap text-right min-w-[130px]">Action</th>
             </tr>
           </thead>
@@ -408,7 +441,7 @@ export const CallHistoryTable = ({
                 <tr
                   key={call.call_id}
                   onClick={() => onSelectCall(call)}
-                  className={`cursor-pointer transition-all ${
+                  className={`cursor-pointer transition-all h-[62px] ${
                     isSelected ? 'bg-blue-50/70 hover:bg-blue-50' : 'hover:bg-slate-50/70'
                   }`}
                 >
@@ -468,32 +501,32 @@ export const CallHistoryTable = ({
                   </td>
 
                   {/* Status & Disposition (Uniform 2-line layout) */}
-                  <td className="px-3.5 py-2.5 align-middle max-w-[280px]">
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                  <td className="px-3.5 py-2.5 whitespace-nowrap align-middle min-w-[210px]">
+                    <div className="flex items-center gap-1.5 flex-nowrap">
                       {getStatusBadge(
                         isPastMissedCb ? 'Callback Missed' : call.status,
                         isPastMissedCb ? 'Callback not placed in time' : call.disposition,
                         call.skip_reason
                       )}
                       {(Number(call.messages_sent || 0) > 0 || call.status === 'Completed' || call.disposition === 'Weather Delivered' || call.understood_weather === 'yes') && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 shrink-0" title="Weather advisory SMS sent to farmer">
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 whitespace-nowrap shrink-0" title="Weather advisory SMS sent to farmer">
                           SMS Sent
                         </span>
                       )}
                       {(call.direction === 'incoming' || call.direction === 'inbound') && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-50 text-teal-700 border border-teal-200 shrink-0" title="The farmer rang us">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap shrink-0" title="The farmer rang us">
                           <PhoneIncoming className="w-3 h-3" />Incoming
                         </span>
                       )}
                       {call.is_test && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200 shrink-0">
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200 whitespace-nowrap shrink-0">
                           TEST
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-slate-500 font-medium mt-1 leading-normal break-words" title={call.disposition}>
+                    <div className="text-[10px] text-slate-500 font-medium mt-1 leading-normal whitespace-nowrap" title={call.disposition}>
                       {isPastMissedCb ? (
-                        <span className="text-rose-700 font-semibold">Callback not placed in time</span>
+                        <span className="text-rose-700 font-semibold">Missed callback window</span>
                       ) : hasCallback ? (
                         <span className="inline-flex items-center gap-1 text-amber-800 font-semibold">
                           <Calendar className="w-2.5 h-2.5 text-amber-600 shrink-0" />
@@ -501,10 +534,10 @@ export const CallHistoryTable = ({
                         </span>
                       ) : (call.next_attempt_at && isToday) ? (
                         <span className="text-amber-700 font-semibold">
-                          Next try: {String(call.next_attempt_at).split(', ')[1] || call.next_attempt_at}
+                          Next: {String(call.next_attempt_at).split(', ')[1] || call.next_attempt_at}
                         </span>
                       ) : (
-                        <span>{call.disposition || 'Delivered'}</span>
+                        <span>{shortenDisposition(call.disposition)}</span>
                       )}
                     </div>
                   </td>

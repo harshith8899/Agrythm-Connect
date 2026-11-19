@@ -369,11 +369,13 @@ export const DonutAnalyticsGrid = ({
 
     const messageCost = Math.round(totalMessages * messageRate * 100) / 100;
 
-    // Rule 9A: Fixed ₹59/mo rental is NEVER added into operational or total spend
+    const is14d = dayFilter === '14d' || dayFilter === 'all';
+    const numberRentalCost = is14d ? 59.0 : 0;
+
     const totalSpend =
       authoritativeSpend !== undefined && authoritativeSpend >= 0
         ? authoritativeSpend
-        : Math.round((voiceAiCost + messageCost) * 100) / 100;
+        : Math.round((voiceAiCost + messageCost + numberRentalCost) * 100) / 100;
 
     const displayAttempts =
       authoritativeAttempts !== undefined && authoritativeAttempts > 0
@@ -393,6 +395,17 @@ export const DonutAnalyticsGrid = ({
         color: '#1E6F43',
         secondaryText: `${effectiveBilledMins} billed mins (₹${Number(rate).toFixed(2)}/min)`,
       },
+      ...(numberRentalCost > 0
+        ? [
+            {
+              id: 'number_rental',
+              label: 'Sarvam Number Rental',
+              value: numberRentalCost,
+              color: '#0F2444',
+              secondaryText: 'Fixed monthly DID (₹59.00)',
+            },
+          ]
+        : []),
       ...(totalMessages > 0
         ? [
             {
@@ -546,8 +559,9 @@ export const DonutAnalyticsGrid = ({
       durationSlices,
       connectedCount,
       totalBilledMins: effectiveBilledMins,
+      is14d,
     };
-  }, [filteredCalls, rate, messageRate, authoritativeSpend, authoritativeVoiceSpend, authoritativeBilledMins, authoritativeAttempts]);
+  }, [filteredCalls, rate, messageRate, authoritativeSpend, authoritativeVoiceSpend, authoritativeBilledMins, authoritativeAttempts, dayFilter]);
 
   const containerClass = embedded
     ? 'space-y-4'
@@ -608,13 +622,23 @@ export const DonutAnalyticsGrid = ({
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
         <SvgDonutCard
           title="Spend Split"
-          subtitle={analytics.totalMessages > 0 ? 'Voice AI calls vs. advisory messages' : 'Sarvam Voice AI call usage'}
+          subtitle={
+            analytics.is14d
+              ? 'Voice AI calls, number rental & messages'
+              : (analytics.totalMessages > 0 ? 'Voice AI calls vs. advisory messages' : 'Sarvam Voice AI call usage')
+          }
           slices={analytics.costSplitSlices}
-          centerTitle="Usage Spend"
+          centerTitle={analytics.is14d ? "Total Spend" : "Usage Spend"}
           centerValue={rupees(analytics.totalSpend)}
           isCurrency={true}
           footer={
             <div className="space-y-1.5">
+              {analytics.is14d && (
+                <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-blue-50/70 border border-blue-200/60 text-[11px]">
+                  <span className="text-trust-navy font-semibold">Sarvam Number Rental:</span>
+                  <span className="font-bold font-mono text-trust-navy shrink-0 whitespace-nowrap">₹59.00 (Fixed DID included)</span>
+                </div>
+              )}
               {analytics.totalMessages > 0 && (
                 <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-sky-50/70 border border-sky-200/60 text-[11px]">
                   <span className="text-sky-800 font-medium">Messages Dispatched:</span>
@@ -629,10 +653,12 @@ export const DonutAnalyticsGrid = ({
                   {analytics.connectedCount} calls ({analytics.totalBilledMins} mins)
                 </span>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-blue-50/70 border border-blue-200/60 text-[11px]">
-                <span className="text-trust-navy font-semibold">Separate Monthly Base:</span>
-                <span className="font-bold font-mono text-trust-navy shrink-0 whitespace-nowrap">₹59.00/mo (Fixed DID)</span>
-              </div>
+              {!analytics.is14d && (
+                <div className="flex flex-wrap items-center justify-between gap-1 p-1.5 rounded-lg bg-blue-50/70 border border-blue-200/60 text-[11px]">
+                  <span className="text-trust-navy font-semibold">Separate Monthly Base:</span>
+                  <span className="font-bold font-mono text-trust-navy shrink-0 whitespace-nowrap">₹59.00/mo (Fixed DID)</span>
+                </div>
+              )}
             </div>
           }
         />

@@ -123,14 +123,14 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
           </div>
         </div>
 
-        {/* Top-Right: High-level Agronomic Status Verdict (NO duplicate temperature) */}
+        {/* Top-Right: High-level Weather Status Verdict (NO duplicate temperature) */}
         <div className="shrink-0">
           {rain >= 50 ? (
             <div className="px-3 py-1.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-800 flex items-center gap-2 shadow-2xs">
               <CloudRain className="w-4 h-4 text-sky-600 shrink-0" />
               <div className="text-right">
                 <div className="text-xs font-bold leading-tight">Rain Caution Active</div>
-                <div className="text-[10px] text-sky-600 font-medium">Defer spraying & harvest</div>
+                <div className="text-[10px] text-sky-600 font-medium">Significant rainfall expected</div>
               </div>
             </div>
           ) : wind >= 25 ? (
@@ -138,15 +138,15 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
               <Wind className="w-4 h-4 text-amber-600 shrink-0" />
               <div className="text-right">
                 <div className="text-xs font-bold leading-tight">Wind Advisory Active</div>
-                <div className="text-[10px] text-amber-600 font-medium">Check crop shade nets</div>
+                <div className="text-[10px] text-amber-600 font-medium">Elevated wind conditions</div>
               </div>
             </div>
           ) : (
             <div className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-2 shadow-2xs">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
               <div className="text-right">
-                <div className="text-xs font-bold leading-tight">Favorable Farming Window</div>
-                <div className="text-[10px] text-emerald-600 font-medium">Optimal for routine field work</div>
+                <div className="text-xs font-bold leading-tight">Clear Weather Window</div>
+                <div className="text-[10px] text-emerald-600 font-medium">Favorable weather conditions</div>
               </div>
             </div>
           )}

@@ -247,7 +247,8 @@ function generateSimulatedUsage(callLogs = [], rate = 3.5, messageRate = 0.2) {
     voice_amount: Math.round(days.reduce((s, d) => s + (d.voice_amount || 0), 0) * 100) / 100,
     messages_sent: days.reduce((s, d) => s + (d.messages_sent || 0), 0),
     message_amount: Math.round(days.reduce((s, d) => s + (d.message_amount || 0), 0) * 100) / 100,
-    amount: Math.round(days.reduce((s, d) => s + d.amount, 0) * 100) / 100,
+    number_rental: 59.0,
+    amount: Math.round((days.reduce((s, d) => s + d.amount, 0) + 59.0) * 100) / 100,
   };
 
   return {
@@ -1120,7 +1121,9 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
       ? backendPeriodData.amount
       : Math.round(totalBilledMins * voiceRate * 100) / 100;
     const messageSpend = Math.round(totalMessages * smsRate * 100) / 100;
-    const operationalSpend = Math.round((voiceSpend + messageSpend) * 100) / 100;
+    const is14d = selectedTimeframe === '14d';
+    const numberRental = is14d ? 59.0 : 0;
+    const operationalSpend = Math.round((voiceSpend + messageSpend + numberRental) * 100) / 100;
 
     let timeframeLabel = 'Last 14 Days';
     if (selectedTimeframe === 'today') timeframeLabel = 'Today';
@@ -1140,10 +1143,43 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
       totalMessages,
       voiceSpend,
       messageSpend,
+      numberRental,
       operationalSpend,
       timeframeLabel,
     };
   }, [callLogs, selectedTimeframe, customDate, rateInput, smsRateInput, usage]);
+
+  const effectiveBalance = useMemo(() => {
+    const bal = usage?.balance;
+    if (bal && bal.remaining !== null && bal.spent !== null) {
+      return bal;
+    }
+    const checkpoint = bal ? Number(bal.checkpoint || 0) : null;
+    const checkpointAt = bal?.checkpoint_at ? new Date(bal.checkpoint_at).getTime() : null;
+    if (checkpoint !== null && checkpointAt) {
+      let spentSince = 0;
+      (callLogs || []).forEach((c) => {
+        const rawDate = c.call_date || c.date || c.call_timestamp || c.created_at;
+        if (!rawDate) return;
+        const t = new Date(rawDate).getTime();
+        if (t >= checkpointAt) {
+          const sec = Number(c.duration_seconds ?? c.duration_sec ?? c.duration ?? 0);
+          const mins = sec > 0 ? Math.ceil(sec / 60) : 0;
+          const pulses = sec > 0 ? Math.ceil(sec / 30) : 0;
+          spentSince += mins * (Number(rateInput) || 3.5) + pulses * 0.20;
+        }
+      });
+      spentSince = Math.round(spentSince * 100) / 100;
+      return {
+        checkpoint,
+        checkpoint_at: bal.checkpoint_at,
+        spent: spentSince,
+        remaining: Math.max(0, Math.round((checkpoint - spentSince) * 100) / 100),
+        low: (checkpoint - spentSince) <= 100,
+      };
+    }
+    return bal || null;
+  }, [usage?.balance, callLogs, rateInput]);
 
   const noCalls = activeUsage && activeUsage.window && (activeUsage.days || []).length === 0;
 
@@ -1176,24 +1212,24 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
         </div>
       )}
 
-      {usage && usage.configured && (
+      {usage && (
         <div className="flex flex-wrap items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 text-xs text-slate-600 shadow-2xs">
           <div>
             <span className="block text-[10px] font-bold tracking-wider text-slate-400 uppercase">Sarvam credits left (estimate)</span>
-            {usage.balance && usage.balance.remaining !== null ? (
-              <span className={`text-lg font-bold ${usage.balance.low ? 'text-rose-700' : 'text-slate-900'}`}>
-                {rupees(usage.balance.remaining)}
+            {effectiveBalance && effectiveBalance.remaining !== null ? (
+              <span className={`text-lg font-bold ${effectiveBalance.low ? 'text-rose-700' : 'text-slate-900'}`}>
+                {rupees(effectiveBalance.remaining)}
               </span>
             ) : (
               <span className="text-sm font-semibold text-slate-500">
-                {usage.balance ? `Saved ${rupees(usage.balance.checkpoint)}, spend not readable now` : 'Not set: type the Credits Left from Sarvam'}
+                {effectiveBalance ? `Saved ${rupees(effectiveBalance.checkpoint)}, spend not readable now` : 'Not set: type the Credits Left from Sarvam'}
               </span>
             )}
-            {usage.balance && usage.balance.remaining !== null && (
+            {effectiveBalance && effectiveBalance.remaining !== null && (
               <span className="block text-[11px] text-slate-500">
-                {rupees(usage.balance.checkpoint)} saved on {new Date(usage.balance.checkpoint_at).toLocaleString('en-IN')}, minus{' '}
-                {rupees(usage.balance.spent)} spent since
-                {usage.balance.partial ? ' (older than the call records, so the spend is only partly counted)' : ''}
+                {rupees(effectiveBalance.checkpoint)} saved on {new Date(effectiveBalance.checkpoint_at).toLocaleString('en-IN')}, minus{' '}
+                {rupees(effectiveBalance.spent)} spent since
+                {effectiveBalance.partial ? ' (older than the call records, so the spend is only partly counted)' : ''}
               </span>
             )}
           </div>
@@ -1303,7 +1339,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
               </div>
               <div className="text-2xl font-bold text-trust-green mt-1">{rupees(activeUsage.window?.amount)}</div>
               <div className="text-[11px] text-slate-500 mt-2.5 pt-2 border-t border-slate-100 break-words leading-relaxed">
-                {activeUsage.window?.billed_minutes || 0}m voice ({rupees(activeUsage.window?.voice_amount ?? activeUsage.window?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.window?.messages_sent || 0) > 0 ? ` · ${activeUsage.window.messages_sent} SMS (${rupees(activeUsage.window?.message_amount || 0)})` : ''} · {activeUsage.window?.farmers_reached ?? 0} of {activeUsage.window?.farmers_targeted ?? (activeUsage.window?.calls ? 1 : 0)} farmers reached
+                {activeUsage.window?.billed_minutes || 0}m voice ({rupees(activeUsage.window?.voice_amount ?? activeUsage.window?.amount ?? 0)}){hasAnyMessages && Number(activeUsage.window?.messages_sent || 0) > 0 ? ` · ${activeUsage.window.messages_sent} SMS (${rupees(activeUsage.window?.message_amount || 0)})` : ''} · ₹59.00 Sarvam rental · {activeUsage.window?.farmers_reached ?? 0} of {activeUsage.window?.farmers_targeted ?? (activeUsage.window?.calls ? 1 : 0)} farmers reached
               </div>
             </button>
           </div>
