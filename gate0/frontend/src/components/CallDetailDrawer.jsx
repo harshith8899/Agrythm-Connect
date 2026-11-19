@@ -64,6 +64,11 @@ const AttemptRowWithHover = ({ attempt, isCurrent, onSelect }) => {
               }`}>
                 {attempt.status}
               </span>
+              {(Number(attempt.messages_sent || 0) > 0 || attempt.status === 'Completed' || attempt.disposition === 'Weather Delivered') && (
+                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 shrink-0" title="Weather advisory SMS sent to farmer">
+                  SMS Sent
+                </span>
+              )}
               {attempt.disposition && (
                 <>
                   <span className="shrink-0">•</span>
@@ -485,16 +490,16 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack, allCalls = [], onS
             </div>
           )}
 
-          {Number(call.messages_sent || 0) > 0 && (
+          {(Number(call.messages_sent || 0) > 0 || call.status === 'Completed' || call.disposition === 'Weather Delivered' || call.understood_weather === 'yes') && (
             <div className="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-200/80 flex items-center justify-between text-xs shadow-2xs">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-sky-500" />
+                <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse" />
                 <span className="font-semibold text-sky-950">
                   Advisory SMS Message Dispatched
                 </span>
               </div>
               <span className="font-mono font-bold text-sky-700 bg-white px-2.5 py-0.5 rounded-lg border border-sky-200">
-                {call.messages_sent} sent (₹{(call.messages_sent * 0.20).toFixed(2)})
+                {Math.max(Number(call.messages_sent || 0), 1)} sent (₹{(Math.max(Number(call.messages_sent || 0), 1) * 0.20).toFixed(2)})
               </span>
             </div>
           )}

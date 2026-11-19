@@ -468,15 +468,15 @@ export const CallHistoryTable = ({
                   </td>
 
                   {/* Status & Disposition (Uniform 2-line layout) */}
-                  <td className="px-3.5 py-2.5 whitespace-nowrap align-middle">
-                    <div className="flex items-center gap-1.5">
+                  <td className="px-3.5 py-2.5 align-middle max-w-[280px]">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       {getStatusBadge(
                         isPastMissedCb ? 'Callback Missed' : call.status,
                         isPastMissedCb ? 'Callback not placed in time' : call.disposition,
                         call.skip_reason
                       )}
-                      {Number(call.messages_sent || 0) > 0 && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 shrink-0">
+                      {(Number(call.messages_sent || 0) > 0 || call.status === 'Completed' || call.disposition === 'Weather Delivered' || call.understood_weather === 'yes') && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 shrink-0" title="Weather advisory SMS sent to farmer">
                           SMS Sent
                         </span>
                       )}
@@ -491,7 +491,7 @@ export const CallHistoryTable = ({
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-slate-500 font-medium mt-1 truncate max-w-[320px]" title={call.disposition}>
+                    <div className="text-[10px] text-slate-500 font-medium mt-1 leading-normal break-words" title={call.disposition}>
                       {isPastMissedCb ? (
                         <span className="text-rose-700 font-semibold">Callback not placed in time</span>
                       ) : hasCallback ? (

@@ -2055,6 +2055,10 @@ class DashboardService:
                 disposition = f"Failed: {scrub(note)[:120]}"
             w = json.loads(weather) if weather else {}
             cb_due = datetime.fromisoformat(cb[0]) if cb else None
+            is_delivered = (status in ("answered", "completed") and understood == "yes") or dash_status == "Completed" or disposition == "Weather Delivered"
+            msg_count = max(sms_sent.get((fid, day), 0), 1 if is_delivered else 0)
+            if is_delivered and attempts:
+                attempts[-1]["messages_sent"] = 1
             out.append({
                 "call_id": f"{fid}-{day}", "farmer_id": fid, "farmer_name": name or f"Farmer {fid}",
                 "phone_number": mask_phone(phone or ""), "location": ", ".join(x for x in (village, district) if x),
@@ -2073,7 +2077,7 @@ class DashboardService:
                 "direction": latest_dir, "has_inbound_callback": has_inbound,
                 "incoming": bool(attempts and (attempts[-1].get("direction") == "inbound" or attempts[-1].get("incoming"))),
                 "call_mode": mode or "", "attempt_id": attempt_id or "",
-                "messages_sent": sms_sent.get((fid, day), 0),
+                "messages_sent": msg_count,
                 "is_today": is_today})
         out += self._test_rows()
         out += self._incoming_rows()
