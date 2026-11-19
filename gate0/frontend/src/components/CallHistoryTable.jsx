@@ -12,7 +12,8 @@ import {
   ShieldAlert,
   Calendar,
   RefreshCw,
-  PhoneCall
+  PhoneCall,
+  MessageSquare
 } from 'lucide-react';
 import { API_CONFIG } from '../utils/constants';
 import { maskPhoneNumber, isTodayDateStr, isCallToday } from '../utils';
@@ -369,8 +370,11 @@ export const CallHistoryTable = ({
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {getStatusBadge(call.status, call.disposition, call.skip_reason)}
-                  {Number(call.messages_sent || 0) > 0 && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">SMS Sent</span>
+                  {(Number(call.messages_sent || 0) > 0 || call.status === 'Completed' || call.disposition === 'Weather Delivered' || call.understood_weather === 'yes') && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200 shrink-0">
+                      <MessageSquare className="w-2.5 h-2.5 text-sky-600 shrink-0" />
+                      <span>SMS Sent</span>
+                    </span>
                   )}
                   {call.direction === 'incoming' && (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200" title="The farmer rang us">
@@ -423,7 +427,7 @@ export const CallHistoryTable = ({
               <th className="px-3.5 py-3 whitespace-nowrap min-w-[195px]">Weather</th>
               <th className="px-3.5 py-3 whitespace-nowrap text-center min-w-[90px]">Attempts</th>
               <th className="px-3.5 py-3 whitespace-nowrap text-center min-w-[75px]">Duration</th>
-              <th className="px-3.5 py-3 whitespace-nowrap min-w-[210px]">Status & Disposition</th>
+              <th className="px-3.5 py-3 whitespace-nowrap min-w-[245px]">Status & Disposition</th>
               <th className="px-3.5 py-3 whitespace-nowrap text-right min-w-[130px]">Action</th>
             </tr>
           </thead>
@@ -500,27 +504,30 @@ export const CallHistoryTable = ({
                     {formatDuration(call.duration_seconds || call.duration_sec)}
                   </td>
 
-                  {/* Status & Disposition (Uniform 2-line layout) */}
-                  <td className="px-3.5 py-2.5 whitespace-nowrap align-middle min-w-[210px]">
-                    <div className="flex items-center gap-1.5 flex-nowrap">
-                      {getStatusBadge(
-                        isPastMissedCb ? 'Callback Missed' : call.status,
-                        isPastMissedCb ? 'Callback not placed in time' : call.disposition,
-                        call.skip_reason
-                      )}
+                  {/* Status & Disposition (Uniform 2-line layout with right-aligned SMS Sent in a single straight line) */}
+                  <td className="px-3.5 py-2.5 whitespace-nowrap align-middle min-w-[245px]">
+                    <div className="flex items-center justify-between gap-2.5 flex-nowrap">
+                      <div className="flex items-center gap-1.5 flex-nowrap">
+                        {getStatusBadge(
+                          isPastMissedCb ? 'Callback Missed' : call.status,
+                          isPastMissedCb ? 'Callback not placed in time' : call.disposition,
+                          call.skip_reason
+                        )}
+                        {(call.direction === 'incoming' || call.direction === 'inbound') && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap shrink-0" title="The farmer rang us">
+                            <PhoneIncoming className="w-3 h-3" />Incoming
+                          </span>
+                        )}
+                        {call.is_test && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200 whitespace-nowrap shrink-0">
+                            TEST
+                          </span>
+                        )}
+                      </div>
                       {(Number(call.messages_sent || 0) > 0 || call.status === 'Completed' || call.disposition === 'Weather Delivered' || call.understood_weather === 'yes') && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 whitespace-nowrap shrink-0" title="Weather advisory SMS sent to farmer">
-                          SMS Sent
-                        </span>
-                      )}
-                      {(call.direction === 'incoming' || call.direction === 'inbound') && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap shrink-0" title="The farmer rang us">
-                          <PhoneIncoming className="w-3 h-3" />Incoming
-                        </span>
-                      )}
-                      {call.is_test && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200 whitespace-nowrap shrink-0">
-                          TEST
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200 whitespace-nowrap shrink-0 ml-auto" title="Weather advisory SMS sent to farmer">
+                          <MessageSquare className="w-2.5 h-2.5 text-sky-600 shrink-0" />
+                          <span>SMS Sent</span>
                         </span>
                       )}
                     </div>
