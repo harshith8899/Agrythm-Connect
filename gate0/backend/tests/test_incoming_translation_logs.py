@@ -214,3 +214,27 @@ def test_two_calls_to_the_line_are_both_logged_and_two_numbers_ending_the_same_a
     assert first["farmer_name"] == "Ramesh" and "not a registered farmer" in first["disposition"].lower()   # the exact number, not the last 4
     assert second["farmer_name"] == "Unknown number"                          # 9111113736 is nobody's, though it ends like two others
     assert s.incoming()["sync"]["seen"] == 2 and s.incoming()["sync"]["error"] == ""
+
+
+# ---- a successful incoming call: the weather email goes out, and a second call the same day is not served ------------------
+def test_a_successful_incoming_call_sends_the_weather_email_even_before_the_daily_call(tmp_path):
+    d = Dial()
+    s, mail = make(tmp_path, d)                                                # F1 has not been called today: no weather saved yet
+    rings(d)
+    assert s.sync_inbound(T0 + timedelta(minutes=15)) == 1
+    assert any("Weather update for Mandya" in m[1] for m in mail.sent)         # the farmer understood: the email follows
+    saved = s._saved_weather("F1", D.isoformat())
+    assert saved["temp_max"] is not None and saved["source"]                   # the weather the farmer was told is kept with the result
+
+
+def test_after_a_successful_call_the_line_is_told_not_to_give_the_weather_again_today(tmp_path):
+    d = Dial()
+    s, _ = make(tmp_path, d)
+    rings(d)
+    s.sync_inbound(T0 + timedelta(minutes=15))
+    e = d.pushed("F1")
+    assert e["state"] == "completed" and "do not give the weather again" in e["variables"]["callback_context"]
+    rings(d, attempt_id="IN2", minutes=40)                                     # a second call the same day
+    s.sync_inbound(T0 + timedelta(minutes=50))
+    assert len([m for m in s.messages() if m["kind"] == "weather"]) == 1       # still one email for the day
+    assert s.calls()[0]["status"] == "Completed"
