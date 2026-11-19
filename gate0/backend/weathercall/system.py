@@ -35,6 +35,7 @@ _EXHAUSTED = re.compile(r"insufficient[_ ]quota|\b402\b", re.I)
 
 
 TELEPHONY_PULSE_SECONDS = 30          # Sarvam telephony is metered in started 30-second pulses of connected calls
+SMS_RATE = 0.20                                    # Rs per SMS (email costs nothing, so it is not counted)
 TELEPHONY_PULSE_RATE = 0.20           # INR a pulse, before GST (docs.sarvam.ai/voice-agents/pricing), the same on every plan
 
 
@@ -145,6 +146,33 @@ class SystemChecks:
                 "billed_minutes": minutes, "amount": round(minutes * rate, 2),
                 "telephony_pulses": pulses, "telephony_amount": round(pulses * TELEPHONY_PULSE_RATE, 2)}
 
+    def _sms_by_day(self) -> dict[str, int]:
+        """SMS sent per day. Only SMS costs money (email does not), so only SMS is counted."""
+        try:
+            with self.service.lock:
+                rows = self.service.db.execute("SELECT call_date, COUNT(*) FROM dash_messages WHERE status='sent' AND channel='sms' "
+                                               "GROUP BY call_date").fetchall()
+            return {r[0]: r[1] for r in rows}
+        except Exception:
+            return {}
+
+    def _farmers_by_day(self) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+        """Farmers called and farmers reached (answered) per day, from the stored results."""
+        called: dict[str, set[str]] = {}
+        reached: dict[str, set[str]] = {}
+        try:
+            with self.service.lock:
+                rows = self.service.db.execute("SELECT call_date, farmer_id, status, understood_weather FROM dash_results").fetchall()
+            for day, fid, status, understood in rows:
+                if not day or not fid or status == "skipped":
+                    continue
+                called.setdefault(day, set()).add(fid)
+                if status == "answered" or understood == "yes":
+                    reached.setdefault(day, set()).add(fid)
+        except Exception:
+            pass
+        return called, reached
+
     def usage(self, refresh: bool = False) -> dict:
         rate = self.rate()
         out = {"configured": self.usage_reader is not None, "error": "", "exhausted": False, "today": None, "week": None,
@@ -164,10 +192,25 @@ class SystemChecks:
         by_day: dict[str, list[dict]] = {}
         for a in rows:
             by_day.setdefault(_when(a).astimezone(IST).date().isoformat(), []).append(a)
-        out["today"] = self._totals(by_day.get(today.isoformat(), []), rate)
-        out["week"] = self._totals([a for a in rows if _when(a) >= now - timedelta(days=7)], rate)
-        out["window"] = self._totals(rows, rate)
-        out["days"] = [{"date": d, **self._totals(by_day[d], rate)} for d in sorted(by_day, reverse=True)[:14]]
+        sms, called, reached = self._sms_by_day(), *self._farmers_by_day()
+
+        def enrich(t: dict, days: list[str] | None) -> dict:
+            keys = days if days is not None else sorted(set(sms) | set(called))
+            n_sms = sum(sms.get(d, 0) for d in keys)
+            targeted = set().union(*(called.get(d, set()) for d in keys)) if keys else set()
+            got = set().union(*(reached.get(d, set()) for d in keys)) if keys else set()
+            t["voice_amount"] = t["amount"]
+            t["messages_sent"], t["message_amount"] = n_sms, round(n_sms * SMS_RATE, 2)
+            t["amount"] = round(t["voice_amount"] + t["message_amount"], 2)
+            t["farmers_targeted"], t["farmers_reached"] = len(targeted), len(got & targeted)
+            t["retries"] = max(0, t["calls"] - len(targeted))
+            return t
+
+        week_days = [(today - timedelta(days=i)).isoformat() for i in range(7)]
+        out["today"] = enrich(self._totals(by_day.get(today.isoformat(), []), rate), [today.isoformat()])
+        out["week"] = enrich(self._totals([a for a in rows if _when(a) >= now - timedelta(days=7)], rate), week_days)
+        out["window"] = enrich(self._totals(rows, rate), None)
+        out["days"] = [{"date": d, **enrich(self._totals(by_day[d], rate), [d])} for d in sorted(by_day, reverse=True)[:14]]
         out["exhausted"] = any(a.get("failure_reason") and _EXHAUSTED.search(a["failure_reason"])
                                and _when(a) >= now - timedelta(days=7) for a in rows)
         return out

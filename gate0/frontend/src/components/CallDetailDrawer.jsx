@@ -1,10 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   X, 
-  CloudRain, 
-  Thermometer, 
-  Wind, 
-  Droplets, 
   Phone, 
   PhoneCall,
   PhoneIncoming,
@@ -14,19 +10,130 @@ import {
   Clock,
   Calendar,
   User,
-  Bot
+  Bot,
+  Info
 } from 'lucide-react';
 
-import { maskPhoneNumber, getCallTranslation } from '../utils';
+import { maskPhoneNumber, getCallTranslation, formatTranscriptText, hasIndicScript, isTodayDateStr, isCallToday } from '../utils';
+import { CallDirectionBadge } from './CallDirectionBadge';
+import { WeatherVisualBadge } from './WeatherVisualBadge';
 
 const LANG_CODES = { Hindi: 'hi', Kannada: 'kn', Telugu: 'te', English: 'en' };
-// Fonts that carry the Indian scripts, so Kannada, Telugu and Hindi are drawn properly on every device
 const INDIC_FONTS = "'Noto Sans Kannada', 'Noto Sans Telugu', 'Noto Sans Devanagari', 'Nirmala UI', 'Mangal', Inter, system-ui, sans-serif";
 
-export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
+const AttemptRowWithHover = ({ attempt, isCurrent, onSelect }) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  const durationStr = (() => {
+    const s = parseInt(attempt.duration_seconds || attempt.duration_sec, 10);
+    if (isNaN(s) || s <= 0) return '0s';
+    const mins = Math.floor(s / 60);
+    const secs = s % 60;
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  })();
+
+  const weatherText = attempt.weather_temp
+    ? `${attempt.weather_temp}°C · Rain: ${attempt.weather_rainfall ?? 0}% · Wind: ${attempt.weather_windspeed ?? 0}km/h`
+    : (attempt.temperature ? `${attempt.temperature}` : 'No weather data');
+
+  return (
+    <div
+      className={`relative p-3 rounded-xl border transition-all ${
+        isCurrent
+          ? 'bg-blue-50/70 border-blue-200 ring-1 ring-blue-300/40 shadow-2xs'
+          : 'bg-slate-50/60 border-slate-200/80 hover:bg-white hover:border-slate-300 hover:shadow-2xs'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <CallDirectionBadge direction={attempt.direction} compact />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono font-bold text-xs text-slate-900">
+                {attempt.call_id}
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {attempt.created_at ? attempt.created_at.slice(0, 16).replace('T', ' ') : (attempt.call_date || '')}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500 flex-wrap">
+              <span className={`font-semibold shrink-0 ${
+                attempt.status === 'Completed' || attempt.status === 'Answered'
+                  ? 'text-emerald-700'
+                  : (attempt.status === 'Retrying' || attempt.status === 'Unanswered' ? 'text-amber-700' : 'text-slate-700')
+              }`}>
+                {attempt.status}
+              </span>
+              {attempt.disposition && (
+                <>
+                  <span className="shrink-0">•</span>
+                  <span className="text-slate-600 font-medium" title={attempt.disposition}>{attempt.disposition}</span>
+                </>
+              )}
+              <span className="shrink-0">•</span>
+              <span className="font-mono shrink-0">{durationStr}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {isCurrent ? (
+            <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+              Active
+            </span>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onSelect}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-trust-navy bg-white border border-slate-200 hover:bg-trust-navy hover:text-white transition-colors cursor-pointer shadow-2xs"
+              >
+                Inspect
+              </button>
+
+              {/* Hover Button for Note preview (only on other attempts with notes) */}
+              {(attempt.summary || attempt.note) && (
+                <div 
+                  className="relative"
+                  onMouseEnter={() => setShowTooltip(true)}
+                  onMouseLeave={() => setShowTooltip(false)}
+                >
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-slate-600 bg-white border border-slate-200/90 hover:text-trust-navy hover:border-slate-300 hover:bg-slate-50 shadow-2xs transition-colors cursor-pointer"
+                    title="Hover to preview attempt note"
+                  >
+                    <Info className="w-3.5 h-3.5 text-trust-navy" />
+                    <span>Note</span>
+                  </button>
+
+                  {/* Hover Floating Popover with strictly the note (no redundant parameters) */}
+                  {showTooltip && (
+                    <div className="absolute right-0 bottom-full mb-2 z-50 w-72 p-3 rounded-xl bg-slate-900/95 backdrop-blur-md text-white shadow-xl text-xs space-y-1.5 pointer-events-none animate-in fade-in zoom-in-95 duration-150 border border-slate-800">
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 border-b border-slate-800 pb-1">
+                        <span className="font-semibold uppercase tracking-wider">Attempt Note</span>
+                        <span className="font-mono">{attempt.call_id}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-200 leading-relaxed font-normal">
+                        {attempt.summary || attempt.note}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const CallDetailDrawer = ({ call, onClose, onCallBack, allCalls = [], onSelectCall }) => {
   const [callingBack, setCallingBack] = useState(false);
   const [callNote, setCallNote] = useState(null);
   const [english, setEnglish] = useState({ show: false, loading: false, turns: null, error: '' });   // the English under each turn
+  const [transcriptMode, setTranscriptMode] = useState('romanized');
 
   const toggleEnglish = async () => {
     if (english.show) {
@@ -59,11 +166,81 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
     return `${secs}s`;
   };
 
-  const isPendingCallback = call.status === 'Callback Scheduled' || call.callback_status === 'pending';
-  const isCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested' || isPendingCallback;
+  const isToday = call.is_today ?? (isTodayDateStr(call.call_date) || isCallToday(call.call_date || call.created_at || call.call_timestamp));
+  const isPendingCallback = isToday && (call.status === 'Callback Scheduled' || call.callback_status === 'pending');
+  const isCallback = (isToday && (Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested' || isPendingCallback)) || call.callback_status === 'pending';
+  const isPastMissedCb = !isToday && (call.status === 'Callback Scheduled' || call.callback_status === 'missed' || call.callback_status === 'pending');
   const attempts = Array.isArray(call.attempts_log) ? call.attempts_log : [];
 
-  // Why the call is not finished, in plain words (a rejected call and an unpicked one look the same to the network)
+  // All recorded attempts/calls for this farmer strictly on the current day of the clicked call
+  const farmerAttempts = useMemo(() => {
+    if (!call) return [];
+    const fid = String(call.farmer_id || '').trim();
+    const phone = String(call.phone_number || call.phone || '').trim();
+    const getCallDateString = (c) => {
+      if (!c) return '';
+      if (c.call_date && /^\d{4}-\d{2}-\d{2}/.test(c.call_date)) return c.call_date.slice(0, 10);
+      if (c.date && /^\d{4}-\d{2}-\d{2}/.test(c.date)) return c.date.slice(0, 10);
+      if (c.created_at && /^\d{4}-\d{2}-\d{2}/.test(c.created_at)) return c.created_at.slice(0, 10);
+      const match = String(c.call_id || '').match(/\d{4}-\d{2}-\d{2}/);
+      if (match) return match[0];
+      return '';
+    };
+    const targetDate = getCallDateString(call);
+
+    // 1. Filter allCalls to match this farmer AND strictly match the selected call's date
+    let sameDayCalls = [];
+    if (Array.isArray(allCalls) && allCalls.length > 0 && (fid || phone)) {
+      sameDayCalls = allCalls.filter((c) => {
+        const matchFarmer =
+          (fid && String(c.farmer_id || '').trim() === fid) ||
+          (phone && String(c.phone_number || c.phone || '').trim() === phone);
+        if (!matchFarmer) return false;
+        if (targetDate) {
+          const cDate = getCallDateString(c);
+          return cDate === targetDate;
+        }
+        return true;
+      });
+    }
+
+    // Ensure the current call is included in the list
+    if (!sameDayCalls.some((c) => c.call_id === call.call_id)) {
+      sameDayCalls.push(call);
+    }
+
+    // 2. If there are multiple separate call log rows on this day, display them
+    if (sameDayCalls.length > 1) {
+      return sameDayCalls.sort((a, b) => {
+        const da = a.created_at || a.time || a.call_timestamp || '';
+        const db = b.created_at || b.time || b.call_timestamp || '';
+        return db.localeCompare(da);
+      });
+    }
+
+    // 3. If there is only 1 call log row on this day, check if it contains multiple attempts in attempts_log
+    const attemptsLog = Array.isArray(call.attempts_log) ? call.attempts_log : [];
+    if (attemptsLog.length > 1) {
+      return attemptsLog.map((att, idx) => {
+        const attNum = att.attempt_number || idx + 1;
+        const isCurrent = idx === attemptsLog.length - 1;
+        return {
+          ...call,
+          call_id: `${call.call_id} (Attempt ${attNum})`,
+          attempt_number: attNum,
+          status: att.status || (isCurrent ? call.status : 'Retrying'),
+          disposition: att.disposition || att.error_message || (isCurrent ? call.disposition : `Attempt ${attNum}`),
+          duration_seconds: att.duration_seconds != null ? att.duration_seconds : 0,
+          created_at: att.created_at || att.time || call.created_at,
+          direction: att.direction || call.direction,
+          isCurrent,
+        };
+      }).reverse();
+    }
+
+    return sameDayCalls;
+  }, [call, allCalls]);
+
   const lastAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
   const retryNote = (() => {
     if (!lastAttempt || !['Retrying', 'Unanswered', 'Not Confirmed', 'Failed'].includes(call.status)) return null;
@@ -84,7 +261,6 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
     return null;
   })();
 
-  // Parse transcript array or text
   let transcriptItems = [];
   if (Array.isArray(call.transcript)) {
     transcriptItems = call.transcript;
@@ -97,25 +273,19 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
     }
   }
 
-  const tempDisplay = call.weather_temp != null ? `${call.weather_temp}°C` : (call.temperature || 'N/A');
-  const windDisplay = call.weather_windspeed != null ? `${call.weather_windspeed} km/h` : (call.wind || 'N/A');
-  const rainDisplay = call.weather_rainfall != null ? `${call.weather_rainfall}%` : (call.rainfall_chance || 'N/A');
-  const humidityDisplay = call.weather_humidity != null ? `${call.weather_humidity}%` : (call.humidity || 'N/A');
-
   return (
     <>
-      {/* Backdrop */}
       <div 
         onClick={onClose}
         className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 transition-opacity"
       />
 
-      {/* Drawer Container */}
       <aside className="fixed top-0 right-0 bottom-0 z-50 w-full max-w-2xl bg-white shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-300">
-        {/* Drawer Header */}
+        {/* Drawer Header with Incoming / Outgoing Arrow Badge */}
         <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <CallDirectionBadge direction={call.direction} />
               <span className="font-mono font-bold text-sm text-slate-900">
                 {call.call_id}
               </span>
@@ -123,7 +293,7 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
                 {call.displayDateTime || call.call_timestamp || 'Active Call'}
               </span>
             </div>
-            <p className="text-[11px] font-bold tracking-wider text-slate-500 uppercase mt-0.5">
+            <p className="text-[11px] font-bold tracking-wider text-slate-500 uppercase mt-1">
               Call Inspection
             </p>
           </div>
@@ -143,6 +313,7 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
               {call.status === 'In Call' ? 'This call is in progress.' : 'This call is waiting in the queue.'} The result, transcript and weather appear here when it ends.
             </div>
           )}
+
           {/* Farmer Profile Card */}
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
             <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
@@ -172,15 +343,7 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
               </div>
 
               <div className="flex items-center gap-2">
-                <span
-                  className={`px-2.5 py-1 rounded-xl text-xs font-bold border ${
-                    call.primary_language === 'English'
-                      ? 'bg-blue-50 text-blue-700 border-blue-200'
-                      : call.primary_language === 'Kannada'
-                      ? 'bg-purple-50 text-purple-700 border-purple-200'
-                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                  }`}
-                >
+                <span className="px-2.5 py-1 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
                   {call.primary_language || 'Hindi'}
                 </span>
                 <span className="px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-trust-green font-mono">
@@ -194,8 +357,38 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
             </div>
           </div>
 
-          {/* Callback Requested Highlight (if present) */}
-          {isCallback && (
+          {/* Farmer Attempt History (Only attempts for this farmer on the selected day) */}
+          {farmerAttempts.length > 0 && (
+            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                    Farmer Attempt History
+                  </span>
+                  <h4 className="text-xs font-bold text-slate-800 mt-0.5">
+                    {call.farmer_name || `Farmer ${call.farmer_id}`} • {call.created_at ? call.created_at.slice(0, 10) : (call.call_date || call.date || 'Today')} ({farmerAttempts.length} Attempt{farmerAttempts.length === 1 ? '' : 's'})
+                  </h4>
+                </div>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  {farmerAttempts.length} Record{farmerAttempts.length > 1 ? 's' : ''} on {call.created_at ? call.created_at.slice(0, 10) : (call.call_date || call.date || 'this day')}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {farmerAttempts.map((att) => (
+                  <AttemptRowWithHover
+                    key={att.call_id}
+                    attempt={att}
+                    isCurrent={att.call_id === call.call_id || att.isCurrent}
+                    onSelect={() => onSelectCall && onSelectCall(att)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Callback Requested Highlight (Active for Today) */}
+          {isCallback && isToday && (
             <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wider">
@@ -242,7 +435,19 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
             </div>
           )}
 
-          {/* Why the call is not finished yet */}
+          {/* Missed Callback on Past Day (Does not carry over to next day) */}
+          {isPastMissedCb && (
+            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 space-y-1.5">
+              <div className="flex items-center gap-2 text-rose-900 font-bold text-xs uppercase tracking-wider">
+                <Clock className="w-4 h-4 text-rose-600" />
+                <span>Callback Not Placed in Time</span>
+              </div>
+              <p className="text-xs text-rose-800 leading-relaxed">
+                A callback was requested for {call.scheduled_callback_time || 'that day'}{call.callback_requested_text ? ` (${call.callback_requested_text})` : ''}, but could not be completed within the day. In accordance with telephony retry rules, callbacks do not continue into the next day.
+              </p>
+            </div>
+          )}
+
           {retryNote && (
             <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-1">
               <span className="text-[10px] font-bold tracking-wider text-amber-800 uppercase">
@@ -252,7 +457,6 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
             </div>
           )}
 
-          {/* What the voice agent recorded after the call */}
           {(call.summary || call.understood_weather || call.note || call.call_mode) && (
             <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-2">
               <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
@@ -278,133 +482,20 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
                   </span>
                 )}
               </div>
-              {call.note && <p className="text-[11px] text-slate-500 break-words">{call.note}</p>}
+              {call.note && call.note.trim() !== String(call.summary || '').trim() && (
+                <p className="text-[11px] text-slate-500 break-words">{call.note}</p>
+              )}
             </div>
           )}
 
-          {/* Advisory Message Dispatched */}
-          {Number(call.messages_sent || 0) > 0 && (
-            <div className="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-200/80 flex items-center justify-between text-xs shadow-2xs">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-sky-500" />
-                <span className="font-semibold text-sky-950">
-                  Advisory SMS Message Dispatched
-                </span>
-              </div>
-              <span className="font-mono font-bold text-sky-700 bg-white px-2.5 py-0.5 rounded-lg border border-sky-200">
-                {call.messages_sent} sent (₹{(call.messages_sent * 0.20).toFixed(2)})
-              </span>
-            </div>
-          )}
+          {/* Pictorial 4-Parameter Weather Card */}
+          <WeatherVisualBadge call={call} />
 
-          {/* 4-Parameter Weather Delivered */}
-          <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                4-Parameter Open-Meteo Grounding
-              </span>
-              <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                <CloudRain className="w-3.5 h-3.5 text-emerald-600" />
-                Open-Meteo Ingestion
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              {/* 1. Temperature */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold">
-                  <Thermometer className="w-3.5 h-3.5 text-amber-500" />
-                  1. Temperature
-                </span>
-                <div className="font-bold text-base text-slate-900 mt-1">{tempDisplay}</div>
-              </div>
-
-              {/* 2. Wind Speed */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold">
-                  <Wind className="w-3.5 h-3.5 text-slate-500" />
-                  2. Wind Speed
-                </span>
-                <div className="font-bold text-base text-slate-900 mt-1">{windDisplay}</div>
-              </div>
-
-              {/* 3. Rainfall Probability */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold">
-                  <CloudRain className="w-3.5 h-3.5 text-blue-500" />
-                  3. Rain Chance
-                </span>
-                <div className="font-bold text-base text-slate-900 mt-1">{rainDisplay}</div>
-              </div>
-
-              {/* 4. Relative Humidity */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold">
-                  <Droplets className="w-3.5 h-3.5 text-cyan-500" />
-                  4. Humidity
-                </span>
-                <div className="font-bold text-base text-slate-900 mt-1">{humidityDisplay}</div>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-100 text-xs text-slate-700 leading-relaxed">
-              <strong className="text-trust-navy block mb-0.5">Forecast Summary:</strong>
-              {call.advisory_summary || call.message_text || 'Routine meteorological forecast delivered to farmer.'}
-            </div>
-          </div>
-
-          {/* Auditability: 2-Retry Cycle Attempt History */}
-          {attempts.length > 0 && (
-            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                  Telephony Audit Log (2-Retry Cycle History)
-                </span>
-                <span className="text-xs text-slate-500 font-mono">
-                  {attempts.length} Attempt{attempts.length > 1 ? 's' : ''} Recorded
-                </span>
-              </div>
-
-              <div className="space-y-2">
-                {attempts.map((att, idx) => (
-                  <div 
-                    key={att.id || idx} 
-                    className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 text-xs flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center font-bold text-[10px] text-slate-700 font-mono">
-                        {att.attempt_number || idx + 1}
-                      </span>
-                      <div>
-                        <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                          <span>Attempt {att.attempt_number || idx + 1}:</span>
-                          <span className={`px-2 py-0.2 rounded text-[10px] ${
-                            att.status === 'Answered' 
-                              ? 'bg-emerald-100 text-emerald-800' 
-                              : (att.status === 'Busy' ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800')
-                          }`}>
-                            {att.status}
-                          </span>
-                        </div>
-                        {att.error_message && (
-                          <p className="text-[10px] text-slate-500 mt-0.5">{att.error_message}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-right font-mono text-[11px] text-slate-500">
-                      {att.duration_seconds}s
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Conversation: what was actually said, in the language of the call, with the English summary on top */}
+          {/* Conversation */}
           <div className="p-4 rounded-2xl bg-white border border-slate-200/80 space-y-3.5">
-            <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
-              <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">Conversation</span>
-              <span className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">Conversation</span>
                 {(call.language || call.primary_language) && (
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
                     {call.language || call.primary_language}
@@ -414,29 +505,55 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
                   <button
                     onClick={toggleEnglish}
                     disabled={english.loading}
-                    className="h-8 px-3 rounded-lg inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[11px] font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+                    className="h-7 px-2.5 rounded-lg inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    <Languages className="w-3.5 h-3.5" />
+                    <Languages className="w-3 h-3 text-trust-green" />
                     {english.loading ? 'Translating...' : english.show ? 'Hide English' : 'Show English'}
                   </button>
                 )}
-              </span>
-            </div>
-            {english.show && english.error && (
-              <p className="text-[11px] font-semibold text-rose-700">{english.error}</p>
-            )}
-
-            {call.summary && (
-              <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-100 text-xs text-slate-700 leading-relaxed">
-                <strong className="block text-[10px] font-bold tracking-wider text-blue-700 uppercase mb-0.5">In English</strong>
-                {call.summary}
               </div>
-            )}
+
+              <div className="inline-flex items-center p-0.5 rounded-lg bg-slate-100 border border-slate-200/60 text-[11px] self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setTranscriptMode('romanized')}
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                    transcriptMode === 'romanized'
+                      ? 'bg-white text-trust-navy shadow-xs font-bold'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  English Script
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTranscriptMode('translated')}
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    transcriptMode === 'translated'
+                      ? 'bg-white text-trust-navy shadow-xs font-bold'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Languages className="w-3 h-3 text-trust-green" />
+                  Translate to English
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTranscriptMode('original')}
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                    transcriptMode === 'original'
+                      ? 'bg-white text-trust-navy shadow-xs font-bold'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Original
+                </button>
+              </div>
+            </div>
 
             {transcriptItems.length > 0 ? (
               <div className="space-y-3 pt-1">
                 {transcriptItems.map((turn, idx) => {
-                  // Both schemas: { speaker, text } from the backend and { role, content } from the provider
                   const rawSpeaker = turn.speaker || turn.role || turn.author || (idx % 2 === 0 ? 'Agent' : 'Farmer');
                   const isAgent = /agent|bot|assistant/i.test(rawSpeaker);
                   const isSystem = /system|notice/i.test(rawSpeaker);
@@ -447,10 +564,12 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
                   if (isSystem) {
                     return (
                       <div key={idx} className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
-                        <strong>Note:</strong> {text}
+                        <strong>Note:</strong> {formatTranscriptText(text, transcriptMode)}
                       </div>
                     );
                   }
+
+                  const renderedText = formatTranscriptText(text, transcriptMode);
 
                   return (
                     <div key={idx} className={`flex gap-2.5 ${isAgent ? 'items-start' : 'items-start flex-row-reverse'}`}>
@@ -464,15 +583,22 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
                           ? 'bg-slate-50 text-slate-800 border border-slate-200/60 rounded-tl-xs'
                           : 'bg-emerald-50/80 text-emerald-950 border border-emerald-200/80 rounded-tr-xs'
                       }`}>
-                        <div className="font-bold text-[10px] uppercase tracking-wider text-slate-400 mb-1">
-                          {isAgent ? 'Agent' : (call.farmer_name || 'Farmer')}
+                        <div className="flex items-center justify-between gap-3 mb-1">
+                          <span className="font-bold text-[10px] uppercase tracking-wider text-slate-400">
+                            {isAgent ? 'Agent' : (call.farmer_name || 'Farmer')}
+                          </span>
+                          {transcriptMode !== 'original' && hasIndicScript(text) && (
+                            <span className="text-[9px] font-medium px-1.5 py-0.2 rounded bg-white text-slate-500 border border-slate-200 shadow-2xs">
+                              {transcriptMode === 'romanized' ? 'English script' : 'English translation'}
+                            </span>
+                          )}
                         </div>
                         <p
-                          lang={LANG_CODES[call.language || call.primary_language] || undefined}
+                          lang={transcriptMode === 'original' ? (LANG_CODES[call.language || call.primary_language] || undefined) : undefined}
                           className="whitespace-pre-line text-[14px] leading-7 break-words"
-                          style={{ fontFamily: INDIC_FONTS }}
+                          style={{ fontFamily: transcriptMode === 'original' ? INDIC_FONTS : undefined }}
                         >
-                          {text}
+                          {renderedText}
                         </p>
                         {english.show && english.turns && (english.turns[idx]?.english || '') !== '' && (
                           <p className="mt-1.5 pt-1.5 border-t border-slate-200/70 text-[12px] leading-relaxed text-slate-500 italic whitespace-pre-line break-words">
@@ -485,8 +611,11 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
                 })}
               </div>
             ) : rawTranscript ? (
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-800 leading-7 whitespace-pre-line" style={{ fontFamily: INDIC_FONTS }}>
-                {String(rawTranscript).trim()}
+              <div 
+                className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-800 leading-7 whitespace-pre-line" 
+                style={{ fontFamily: transcriptMode === 'original' ? INDIC_FONTS : undefined }}
+              >
+                {formatTranscriptText(rawTranscript, transcriptMode)}
               </div>
             ) : (
               <div className="p-6 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 text-slate-400 text-xs">
@@ -500,3 +629,5 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack }) => {
     </>
   );
 };
+
+export default CallDetailDrawer;

@@ -1,9 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { 
   ChevronRight, 
   Clock, 
   MapPin, 
-  CloudRain, 
   CheckCircle2, 
   AlertCircle, 
   PhoneOutgoing,
@@ -16,8 +15,10 @@ import {
   PhoneCall
 } from 'lucide-react';
 import { API_CONFIG } from '../utils/constants';
-import { maskPhoneNumber } from '../utils';
+import { maskPhoneNumber, isTodayDateStr, isCallToday } from '../utils';
 import { SliderLoader } from './SliderLoader';
+import { CallDirectionBadge } from './CallDirectionBadge';
+import { WeatherVisualBadge } from './WeatherVisualBadge';
 
 export const CallHistoryTable = ({ 
   callLogs, 
@@ -31,6 +32,23 @@ export const CallHistoryTable = ({
   onRefresh,
   onCallBack,
 }) => {
+  // Compute outgoing and incoming counts dynamically from current scoped call logs
+  const { outgoingCount, incomingCount } = useMemo(() => {
+    let outCount = 0;
+    let inCount = 0;
+    (callLogs || []).forEach((c) => {
+      const isIncoming =
+        String(c.direction || '').toLowerCase() === 'inbound' ||
+        Boolean(c.has_inbound_callback) ||
+        (Array.isArray(c.attempts_log) && c.attempts_log.some((a) => a.direction === 'inbound'));
+      if (isIncoming) {
+        inCount += 1;
+      } else {
+        outCount += 1;
+      }
+    });
+    return { outgoingCount: outCount, incomingCount: inCount };
+  }, [callLogs]);
   const getStatusBadge = (status, disposition, skipReason) => {
     const s = String(status || '').toLowerCase();
     switch (s) {
@@ -198,17 +216,13 @@ export const CallHistoryTable = ({
           <div className="w-14 h-14 rounded-2xl bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-600 mx-auto">
             <AlertCircle className="w-7 h-7" />
           </div>
-          
           <div>
-            <h3 className="text-base font-bold text-rose-900">
-              Backend API Offline
-            </h3>
+            <h3 className="text-base font-bold text-rose-900">Backend API Offline</h3>
             <p className="text-xs text-rose-700 max-w-md mx-auto mt-1 leading-relaxed">
               Unable to reach <code className="bg-rose-100 px-1 py-0.5 rounded font-mono font-bold text-rose-950">{API_CONFIG.callLogsApiUrl}</code>.
               Run <code className="bg-rose-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-950">npm run backend</code> in your terminal to start the orchestrator and load call logs.
             </p>
           </div>
-
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -227,7 +241,6 @@ export const CallHistoryTable = ({
         <div className="w-14 h-14 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mx-auto">
           {isFiltered ? <PhoneOutgoing className="w-7 h-7" /> : <Database className="w-7 h-7 text-trust-navy" />}
         </div>
-        
         <div>
           <h3 className="text-base font-bold text-slate-900">
             {isFiltered ? 'No Matching Call Records' : 'No calls for this day yet'}
@@ -238,7 +251,6 @@ export const CallHistoryTable = ({
               : 'Nothing has been called yet. The daily send places the calls, or use Send now in the header. Pick "All Dates" to see earlier days.'}
           </p>
         </div>
-
         {isFiltered ? (
           onResetFilters && (
             <button
@@ -268,23 +280,40 @@ export const CallHistoryTable = ({
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-2xs">
       {refreshing && <SliderLoader />}
-      {/* Table Header Controls */}
       <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <span className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
             Call history
           </span>
           <h3 className="text-base font-bold text-slate-900">
-            Weather calls and retries
+            Incoming & outgoing weather calls
           </h3>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>Showing live records from the backend database</span>
+        <div className="flex items-center gap-2 text-xs">
+          <span
+            title={`${outgoingCount} Outgoing Call${outgoingCount === 1 ? '' : 's'}`}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200/80 text-[11px] font-semibold text-slate-700 shadow-2xs"
+          >
+            <CallDirectionBadge direction="outbound" compact />
+            <span>Outgoing</span>
+            <span className="ml-0.5 px-1.5 py-0.2 rounded bg-slate-200/70 text-slate-800 font-mono text-[10px] font-bold tabular-nums">
+              {outgoingCount}
+            </span>
+          </span>
+          <span
+            title={`${incomingCount} Incoming Call${incomingCount === 1 ? '' : 's'}`}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50/70 border border-emerald-200/80 text-[11px] font-semibold text-emerald-800 shadow-2xs"
+          >
+            <CallDirectionBadge direction="inbound" compact />
+            <span>Incoming</span>
+            <span className="ml-0.5 px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 font-mono text-[10px] font-bold tabular-nums">
+              {incomingCount}
+            </span>
+          </span>
         </div>
       </div>
 
-      {/* Phones: one card per call */}
+      {/* Mobile Cards */}
       <div className="md:hidden divide-y divide-slate-100">
         {callLogs.map((call) => {
           const attemptNumber = call.attempts_log?.length || (call.retry_count ? call.retry_count + 1 : 1);
@@ -295,12 +324,15 @@ export const CallHistoryTable = ({
               key={call.call_id}
               type="button"
               onClick={() => onSelectCall(call)}
-              className={`w-full text-left p-4 space-y-2 cursor-pointer ${selectedCallId === call.call_id ? 'bg-blue-50/70' : 'active:bg-slate-50'}`}
+              className={`w-full text-left p-4 space-y-2.5 cursor-pointer ${selectedCallId === call.call_id ? 'bg-blue-50/70' : 'active:bg-slate-50'}`}
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-bold text-sm text-slate-900 truncate" title={call.farmer_name}>{call.farmer_name}</div>
-                  <div className="text-[11px] text-slate-500 font-mono">{maskPhoneNumber(call.phone_number || call.phone)}</div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <CallDirectionBadge direction={call.direction} compact />
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm text-slate-900 truncate" title={call.farmer_name}>{call.farmer_name}</div>
+                    <div className="text-[11px] text-slate-500 font-mono">{maskPhoneNumber(call.phone_number || call.phone)}</div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {getStatusBadge(call.status, call.disposition, call.skip_reason)}
@@ -317,6 +349,9 @@ export const CallHistoryTable = ({
                   )}
                 </div>
               </div>
+
+              <WeatherVisualBadge call={call} compact />
+
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
                 <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />{call.displayDateTime || call.call_timestamp || 'Just now'}</span>
                 <span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{[call.village, call.district].filter(Boolean).join(', ') || 'N/A'}</span>
@@ -324,14 +359,7 @@ export const CallHistoryTable = ({
                 <span className="font-mono font-semibold text-slate-700">{attemptLabel}</span>
                 <span className="font-mono">{formatDuration(call.duration_seconds || call.duration_sec)}</span>
               </div>
-              {(call.weather_temp != null || call.temperature) && (
-                <div className="text-[11px] text-slate-600">
-                  {call.weather_temp != null ? `${call.weather_temp}°C` : call.temperature}
-                  {call.weather_windspeed != null && ` · wind ${call.weather_windspeed} km/h`}
-                  {call.weather_rainfall != null && ` · rain ${call.weather_rainfall}%`}
-                  {call.weather_humidity != null && ` · humidity ${call.weather_humidity}%`}
-                </div>
-              )}
+
               {(call.disposition || call.next_attempt_at || hasCallback) && (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
                   {call.disposition && <span className="text-slate-500 font-medium">{call.disposition}</span>}
@@ -350,29 +378,29 @@ export const CallHistoryTable = ({
         })}
       </div>
 
-      {/* Larger screens: the full table */}
-      {/* The table scrolls inside its own box (both ways, header stays put) so the sideways scrollbar is always in view at the
-          bottom of the box and not at the end of a long list. */}
-      <div className="hidden md:block overflow-auto max-h-[calc(100vh-9rem)]">
+      {/* Desktop Table (Consolidated 8-column layout with clean balance & zero clipping) */}
+      <div className="hidden md:block overflow-x-auto overflow-y-auto max-h-[calc(100vh-9rem)]">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 sticky top-0 z-10 text-[11px] font-bold tracking-wider text-slate-500 uppercase border-b border-slate-200/80">
             <tr>
-              <th className="px-4 py-3.5">Call ID & Time</th>
-              <th className="px-4 py-3.5">Farmer & Contact</th>
-              <th className="px-4 py-3.5">District / Village</th>
-              <th className="px-4 py-3.5">Language</th>
-              <th className="px-4 py-3.5 min-w-[200px]">4-Parameter Weather</th>
-              <th className="px-4 py-3.5">Attempts</th>
-              <th className="px-4 py-3.5">Duration</th>
-              <th className="px-4 py-3.5">Status & Disposition</th>
-              <th className="px-4 py-3.5">Callback Requested</th>
-              <th className="px-4 py-3.5 text-right">Action</th>
+              <th className="px-3.5 py-3 whitespace-nowrap min-w-[130px]">Call & Time</th>
+              <th className="px-3.5 py-3 whitespace-nowrap min-w-[150px]">Farmer & Contact</th>
+              <th className="px-3.5 py-3 whitespace-nowrap min-w-[110px]">District / Village</th>
+              <th className="px-3.5 py-3 whitespace-nowrap text-center min-w-[80px]">Language</th>
+              <th className="px-3.5 py-3 whitespace-nowrap min-w-[195px]">Weather</th>
+              <th className="px-3.5 py-3 whitespace-nowrap text-center min-w-[90px]">Attempts</th>
+              <th className="px-3.5 py-3 whitespace-nowrap text-center min-w-[75px]">Duration</th>
+              <th className="px-3.5 py-3 whitespace-nowrap min-w-[160px]">Status & Disposition</th>
+              <th className="px-3.5 py-3 whitespace-nowrap text-right min-w-[130px]">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {callLogs.map((call) => {
               const isSelected = selectedCallId === call.call_id;
-              const hasCallback = Boolean(call.scheduled_callback_time) || call.disposition === 'Callback Requested';
+              const isToday = call.is_today ?? (isTodayDateStr(call.call_date) || isCallToday(call.call_date || call.created_at || call.call_timestamp));
+              const isPendingCb = isToday && (call.status === 'Callback Scheduled' || call.callback_status === 'pending');
+              const hasCallback = isPendingCb || (isToday && Boolean(call.scheduled_callback_time));
+              const isPastMissedCb = !isToday && (call.status === 'Callback Scheduled' || call.callback_status === 'missed' || call.callback_status === 'pending');
               const attemptNumber = call.attempts_log?.length || (call.retry_count ? call.retry_count + 1 : 1);
               const attemptLabel = call.is_test ? 'Test call' : `Attempt ${attemptNumber}/${call.max_attempts || 3}`;
 
@@ -381,145 +409,117 @@ export const CallHistoryTable = ({
                   key={call.call_id}
                   onClick={() => onSelectCall(call)}
                   className={`cursor-pointer transition-all ${
-                    isSelected
-                      ? 'bg-blue-50/70 hover:bg-blue-50'
-                      : 'hover:bg-slate-50/70'
+                    isSelected ? 'bg-blue-50/70 hover:bg-blue-50' : 'hover:bg-slate-50/70'
                   }`}
                 >
-                  {/* Call ID & Timestamp */}
-                  <td className="px-4 py-3.5 whitespace-nowrap">
-                    <div className="font-bold text-slate-900 font-mono">{call.call_id}</div>
-                    <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                      <Clock className="w-3 h-3 text-slate-400" />
-                      {call.displayDateTime || call.call_timestamp || 'Just now'}
+                  {/* Direction Arrow Badge (Arrow Only) + Call ID & Timestamp */}
+                  <td className="px-3.5 py-2.5 whitespace-nowrap align-middle">
+                    <div className="flex items-center gap-1.5">
+                      <CallDirectionBadge direction={call.direction} compact />
+                      <span className="font-bold text-slate-900 font-mono text-[11px]">{call.call_id}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                      <Clock className="w-3 h-3 text-slate-400 shrink-0" />
+                      <span>{call.displayDateTime || call.call_timestamp || 'Just now'}</span>
                     </div>
                   </td>
 
                   {/* Farmer Details */}
-                  <td className="px-4 py-3.5 whitespace-nowrap">
+                  <td className="px-3.5 py-2.5 whitespace-nowrap align-middle">
                     <div className="font-bold text-slate-900">{call.farmer_name}</div>
-                    <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">
                       {maskPhoneNumber(call.phone_number || call.phone)}
                     </div>
                   </td>
 
                   {/* District & Village */}
-                  <td className="px-4 py-3.5 whitespace-nowrap">
+                  <td className="px-3.5 py-2.5 whitespace-nowrap align-middle">
                     <div className="font-medium text-slate-800">{call.district || 'Mandya'}</div>
-                    <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                      <MapPin className="w-3 h-3 text-slate-400" />
-                      {call.village || 'N/A'}
+                    <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                      <MapPin className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                      <span>{call.village || 'N/A'}</span>
                     </div>
                   </td>
 
-                  {/* Primary Language */}
-                  <td className="px-4 py-3.5 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold text-[11px] border ${
-                        call.primary_language === 'English'
-                          ? 'bg-blue-50 text-blue-700 border-blue-200'
-                          : 'bg-amber-50 text-amber-700 border-amber-200'
-                      }`}
-                    >
+                  {/* Primary Language (Neutral uniform color) */}
+                  <td className="px-3.5 py-2.5 whitespace-nowrap text-center align-middle">
+                    <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full font-bold text-[10px] bg-slate-100 text-slate-700 border border-slate-200">
                       {call.primary_language || 'Hindi'}
                     </span>
                   </td>
 
-                  {/* 4-Parameter Weather Advisory */}
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-start gap-1.5">
-                      <CloudRain className="w-3.5 h-3.5 text-trust-navy mt-0.5 shrink-0" />
-                      <div>
-                        <div className="font-semibold text-slate-800 text-[11px] flex items-center gap-1.5">
-                          <span>{call.weather_forecast || 'Weather Report'}</span>
-                          {call.weather_temp != null && (
-                            <span className="font-mono text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded text-[10px]">
-                              {call.weather_temp}°C
-                            </span>
-                          )}
-                        </div>
-                        <p
-                          className="text-[11px] text-slate-500 line-clamp-1 mt-0.5"
-                          title={call.advisory_summary || `Temp ${call.temperature || 'N/A'} | Rain ${call.rainfall_chance || 'N/A'}`}
-                        >
-                          {call.advisory_summary || `Temp ${call.temperature || 'N/A'} | Rain ${call.rainfall_chance || 'N/A'}`}
-                        </p>
-                      </div>
-                    </div>
+                  {/* Pictorial 4-Parameter Weather */}
+                  <td className="px-3.5 py-2.5 whitespace-nowrap align-middle min-w-[195px]">
+                    <WeatherVisualBadge call={call} compact />
                   </td>
 
-                  {/* Attempts (1/3, 2/3, 3/3) */}
-                  <td className="px-4 py-3.5 whitespace-nowrap">
-                    <span className={`inline-flex items-center gap-1 font-mono text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                  {/* Dedicated Attempts Column */}
+                  <td className="px-3.5 py-2.5 whitespace-nowrap text-center align-middle">
+                    <span className={`inline-flex items-center justify-center font-mono text-[11px] font-bold px-2 py-0.5 rounded-md ${
                       attemptNumber > 1 ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-700'
                     }`}>
                       {attemptLabel}
                     </span>
                   </td>
 
-                  {/* Duration */}
-                  <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 font-mono text-[11px]">
+                  {/* Dedicated Duration Column */}
+                  <td className="px-3.5 py-2.5 whitespace-nowrap text-center align-middle text-slate-600 font-mono text-[11px] font-medium">
                     {formatDuration(call.duration_seconds || call.duration_sec)}
                   </td>
 
-                  {/* Status & Disposition */}
-                  <td className="px-4 py-3.5 whitespace-nowrap">
-                    <div className="flex flex-col gap-1 items-start">
-                      <div className="flex items-center gap-1.5">
-                        {getStatusBadge(call.status, call.disposition, call.skip_reason)}
-                        {Number(call.messages_sent || 0) > 0 && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">SMS Sent</span>
-                        )}
-                        {call.direction === 'incoming' && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200" title="The farmer rang us">
-                            <PhoneIncoming className="w-3 h-3" />Incoming
-                          </span>
-                        )}
-                        {call.is_test && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200">TEST</span>
-                        )}
-                      </div>
-                      {call.disposition && (
-                        <span className="text-[10px] text-slate-500 font-medium">
-                          {call.disposition}
+                  {/* Status & Disposition (Uniform 2-line layout) */}
+                  <td className="px-3.5 py-2.5 align-middle max-w-[280px]">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {getStatusBadge(
+                        isPastMissedCb ? 'Callback Missed' : call.status,
+                        isPastMissedCb ? 'Callback not placed in time' : call.disposition,
+                        call.skip_reason
+                      )}
+                      {Number(call.messages_sent || 0) > 0 && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 shrink-0" title="Weather advisory SMS sent to farmer">
+                          SMS Sent
                         </span>
                       )}
-                      {call.next_attempt_at && (
-                        <span className="text-[10px] text-amber-700 font-semibold">
-                          Next try {String(call.next_attempt_at).split(', ')[1] || call.next_attempt_at}
+                      {(call.direction === 'incoming' || call.direction === 'inbound') && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-50 text-teal-700 border border-teal-200 shrink-0" title="The farmer rang us">
+                          <PhoneIncoming className="w-3 h-3" />Incoming
                         </span>
                       )}
-                      {call.status === 'Unanswered' && call.attempts_used > 0 && (
-                        <span className="text-[10px] text-slate-400">
-                          after {call.attempts_used} attempt{call.attempts_used > 1 ? 's' : ''}
+                      {call.is_test && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200 shrink-0">
+                          TEST
                         </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-medium mt-1 leading-normal break-words" title={call.disposition}>
+                      {isPastMissedCb ? (
+                        <span className="text-rose-700 font-semibold">Callback not placed in time</span>
+                      ) : hasCallback ? (
+                        <span className="inline-flex items-center gap-1 text-amber-800 font-semibold">
+                          <Calendar className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                          <span>{call.scheduled_callback_time || 'Callback Pending'}</span>
+                        </span>
+                      ) : (call.next_attempt_at && isToday) ? (
+                        <span className="text-amber-700 font-semibold">
+                          Next try: {String(call.next_attempt_at).split(', ')[1] || call.next_attempt_at}
+                        </span>
+                      ) : (
+                        <span>{call.disposition || 'Delivered'}</span>
                       )}
                     </div>
                   </td>
 
-                  {/* Dedicated Callback Requested Indicator */}
-                  <td className="px-4 py-3.5 whitespace-nowrap">
-                    {hasCallback ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                        <Calendar className="w-3 h-3 text-amber-600 shrink-0" />
-                        <span>{call.scheduled_callback_time || 'Callback Pending'}</span>
-                      </span>
-                    ) : (
-                      <span className="text-slate-400 font-mono text-[11px]">-</span>
-                    )}
-                  </td>
-
                   {/* Action / Inspect & Call Back */}
-                  <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                  <td className="px-3.5 py-2.5 whitespace-nowrap text-right align-middle min-w-[130px]">
                     <div className="flex items-center justify-end gap-1.5">
-                      {hasCallback && (call.status === 'Callback Scheduled' || call.callback_status === 'pending') && onCallBack && (
+                      {isPendingCb && onCallBack && (
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             onCallBack(call);
                           }}
-                          className="h-8 px-3 rounded-lg justify-center whitespace-nowrap inline-flex items-center gap-1 text-xs font-semibold text-white bg-trust-green hover:bg-emerald-700 shadow-2xs transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold text-white bg-trust-green hover:bg-emerald-700 shadow-2xs transition-colors cursor-pointer shrink-0"
                           title="Call back now to fulfill this requested callback"
                         >
                           <PhoneCall className="w-3 h-3" />
@@ -531,7 +531,7 @@ export const CallHistoryTable = ({
                           e.stopPropagation();
                           onSelectCall(call);
                         }}
-                        className="h-8 px-3 rounded-lg justify-center whitespace-nowrap inline-flex items-center gap-1 text-xs font-semibold text-trust-navy bg-slate-100 hover:bg-trust-navy hover:text-white transition-colors cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-trust-navy bg-slate-100 hover:bg-trust-navy hover:text-white transition-colors cursor-pointer shrink-0"
                       >
                         <span>Inspect</span>
                         <ChevronRight className="w-3 h-3" />
@@ -547,3 +547,5 @@ export const CallHistoryTable = ({
     </div>
   );
 };
+
+export default CallHistoryTable;
