@@ -85,3 +85,22 @@ weather again, and that `understood_weather` is still recorded as `yes` on the d
 3. **Voice threshold.** Version 15 has `volume_threshold -50` (more sensitive). If line noise or the agent's own echo is being taken for speech, the farmer's real words can be missed and
    the agent thinks they are silent. Put it back to -45 and test the silence again before touching anything else.
 4. **An unknown or inactive caller.** The agent ends the call after one sentence (already in version 15); the line still answers it. Stopping the answer itself is for Sarvam.
+
+
+## Edits ready for v17 (19 Nov), APPLIED 19 Nov: committed as v17, inbound deployment moved to v17 (draft only, then commit, pause, move, resume)
+These replace the 17 Nov silence item 2. The existing script is adjusted, nothing new is written.
+
+1. **Silence (decided 19 Nov).** If the farmer is silent for 7 seconds the agent asks "are you there?"; after 10 more seconds of silence it asks again;
+   if there is still no reply it ends the call politely. In Sarvam's silence nudges (`configure_silence_nudges`): first nudge at 7 s, second at 10 s after
+   the first, end the interaction after the second nudge goes unanswered. In the prompt, replace the bullet that starts
+   "Only says hello, stays silent, or you cannot hear them" with:
+   "Only says hello, stays silent, or you cannot hear them: do not give the weather. When the farmer has been silent for about 7 seconds, ask once, in the
+   call's language, whether they are there (Hindi \"क्या आप वहाँ हैं?\", Kannada \"ನೀವು ಅಲ್ಲಿದ್ದೀರಾ?\", Telugu \"మీరు అక్కడ ఉన్నారా?\", English \"Are you there?\"),
+   then wait about 10 seconds. If they are still silent, ask once more. If there is still no reply, say politely that they may be busy and that we will call
+   them again later (Hindi \"लगता है आप व्यस्त हैं। हम आपको बाद में फ़ोन करेंगे।\", Kannada \"ನೀವು ಬ್ಯುಸಿ ಇರಬಹುದು. ನಾವು ನಂತರ ಕರೆ ಮಾಡುತ್ತೇವೆ.\",
+   Telugu \"మీరు బిజీగా ఉండవచ్చు. మేము తర్వాత కాల్ చేస్తాము.\", English \"You may be busy. We will call you later.\"), say the normal goodbye from CLOSING and
+   end the call. Never end the call before the second 'are you there' has had its 10 seconds."
+   The call then counts as not reached, so the retry rules call the farmer again later.
+2. **Already served today.** In the bullet "if we already gave them today's weather and they understood it", say in one short sentence that today's weather was
+   already shared and the next update comes tomorrow, say the normal goodbye and end; do not give the weather again, even if asked. The backend `completed`
+   context says the same (PR 63). This dry-ran clean on the draft (prompt sha 8d50c31a735deb9d).
