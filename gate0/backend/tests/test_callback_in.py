@@ -314,3 +314,23 @@ def test_the_cohort_push_leaves_out_blank_values_shared_numbers_and_numbers_that
     assert [u["user_phone_number"] for u in users] == ["+919876543210", "+919876543211"]
     assert users[0]["app_variables"] == {"farmer_name": "Ramesh"}           # the blank value is not sent
     assert users[1]["app_variables"] == {}                                   # an unknown number carries no values at all
+
+
+def test_a_failed_push_to_the_line_is_tried_again_in_a_few_minutes_not_tomorrow(tmp_path):
+    clock = {"now": T0}
+    d = Dial(fail_push=True)
+    s = DashboardService(str(tmp_path / "rp.db"), dialler=d, env={"GATE0_WEATHER": "mock"}, now=lambda: clock["now"])
+    s.async_inbound = False
+    s.import_csv(CSV)
+    s._daily_inbound_roster()                                   # refused: nothing landed
+    assert d.pushes == [] and any(r["status"] == "failed" for r in s.inbound())
+    d.fail_push = False
+    clock["now"] = T0 + timedelta(minutes=1)
+    s._daily_inbound_roster()                                   # too soon: not tried
+    assert d.pushes == []
+    clock["now"] = T0 + timedelta(minutes=6)
+    s._daily_inbound_roster()                                   # tried again, and it lands
+    assert len(d.pushes) == 1 and not any(r["status"] == "failed" for r in s.inbound())
+    clock["now"] = T0 + timedelta(minutes=20)
+    s._daily_inbound_roster()                                   # done for the day
+    assert len(d.pushes) == 1

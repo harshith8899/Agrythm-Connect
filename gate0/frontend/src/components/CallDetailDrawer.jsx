@@ -3,7 +3,6 @@ import {
   X, 
   Phone, 
   PhoneCall,
-  PhoneIncoming,
   Languages,
   MapPin, 
   MessageSquare,
@@ -129,7 +128,7 @@ const AttemptRowWithHover = ({ attempt, isCurrent, onSelect }) => {
   );
 };
 
-export const CallDetailDrawer = ({ call, onClose, onCallBack, allCalls = [], onSelectCall }) => {
+const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onSelectCall }) => {
   const [callingBack, setCallingBack] = useState(false);
   const [callNote, setCallNote] = useState(null);
   const [english, setEnglish] = useState({ show: false, loading: false, turns: null, error: '' });   // the English under each turn
@@ -153,7 +152,6 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack, allCalls = [], onS
     }
   };
 
-  if (!call) return null;
 
   const rawTranscript = call.transcript_preview || call.transcript || '';
 
@@ -248,6 +246,9 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack, allCalls = [], onS
     const when = call.next_attempt_at ? `Next try: ${call.next_attempt_at}.` : 'No attempts are left for today.';
     if (['No Answer or Rejected', 'Busy'].includes(lastAttempt.status)) {
       return { title: 'Not picked up or rejected', text: `The phone network reports a rejected call and an unpicked call the same way, so each counts as a missed attempt (${attemptText}). ${when}` };
+    }
+    if (lastAttempt.status === 'Answered' && call.understood_weather === 'no_response') {
+      return { title: 'Farmer stayed silent', text: `The farmer picked up but did not say anything, so the agent ended the call (${attemptText}). ${when}` };
     }
     if (lastAttempt.status === 'Answered') {
       return { title: 'Picked up, not confirmed', text: `The farmer answered but did not confirm they understood the weather (${attemptText}). ${when}` };
@@ -626,5 +627,8 @@ export const CallDetailDrawer = ({ call, onClose, onCallBack, allCalls = [], onS
     </>
   );
 };
+
+// the hooks above run only when there is a call: the drawer is closed (null) without them
+export const CallDetailDrawer = (props) => (props.call ? <CallDetailDrawerContent {...props} /> : null);
 
 export default CallDetailDrawer;

@@ -74,10 +74,11 @@ def test_send_calls_eligible_farmers_with_their_weather_and_skips_the_rest(tmp_p
     s.import_csv(CSV)
     s.fire(D)
     assert len(d.calls) == 2
-    v = d.calls[0][2]
+    placed = {c[2]["farmer_name"]: c for c in d.calls}               # calls run together, so their order is not fixed
+    v = placed["Ramesh"][2]
     assert (v["farmer_name"], v["place_name"], v["wind_kmh"], v["humidity_pct"]) == ("Ramesh", "Mandya", "14", "62")
     assert v["now_text"].endswith(("AM", "PM"))
-    assert d.calls[1][1] == "Kannada"
+    assert placed["Savitha"][1] == "Kannada"
     rows = {c["farmer_id"]: c for c in s.calls()}
     assert rows["F3"]["status"] == "Skipped" and rows["F3"]["disposition"] == "No Consent"
     assert rows["F4"]["status"] == "Skipped" and rows["F4"]["disposition"] == "Weather Unavailable"
