@@ -625,7 +625,7 @@ class DashboardService:
             "note": "", "retry_count": 0, "duration_seconds": 0, "attempts_used": 0, "max_attempts": self.settings.max_attempts,
             "next_attempt_at": None, "scheduled_callback_time": None, "callback_status": None, "callback_requested_text": "",
             "summary": "", "understood_weather": "", "stop_calls_requested": "", "transcript": [], "attempts_log": [],
-            "direction": "outbound", "has_inbound_callback": False,
+            "direction": "outgoing", "has_inbound_callback": False,
             "call_mode": self.dialler.mode, "attempt_id": "", "messages_sent": 0}
 
     # -- sending the day's calls ---------------------------------------------------------------------------------
@@ -1056,7 +1056,7 @@ class DashboardService:
                 "transcript": json.loads(transcript) if transcript else [],
                 "attempts_log": [{"attempt_number": 1, "status": label.get(status, status), "duration_seconds": dur or 0,
                                   "error_message": scrub(note or ""), "direction": "outbound"}] if status != "skipped" else [],
-                "direction": "outbound", "has_inbound_callback": False,
+                "direction": "outgoing", "has_inbound_callback": False,
                 "call_mode": self.dialler.mode, "attempt_id": attempt_id or "", "messages_sent": 0})
         return out
 
@@ -2047,8 +2047,8 @@ class DashboardService:
             if dash_status == "Callback Requested":
                 disposition = f"Callback requested for {cb_text} (not booked: time not understood)"
             attempts = all_attempts.get((fid, day), [])
-            has_inbound = any(a.get("direction") == "inbound" for a in attempts)
-            latest_dir = attempts[-1]["direction"] if attempts else "outbound"
+            has_inbound = any(a.get("incoming") or a.get("direction") in ("inbound", "incoming") for a in attempts)
+            latest_dir = "incoming" if (attempts and (attempts[-1].get("incoming") or attempts[-1].get("direction") in ("inbound", "incoming"))) else "outgoing"
             if status == "skipped":
                 disposition = (note or "skipped").replace("_", " ").title()
             elif status == "failed" and note:

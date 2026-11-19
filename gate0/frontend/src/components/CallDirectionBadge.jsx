@@ -1,8 +1,8 @@
 import React from 'react';
 import { ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 
-export const CallDirectionBadge = ({ direction = 'outbound', compact = false }) => {
-  const isInbound = String(direction).toLowerCase() === 'inbound';
+export const CallDirectionBadge = ({ direction = 'outgoing', compact = false }) => {
+  const isInbound = ['inbound', 'incoming'].includes(String(direction).toLowerCase());
 
   if (compact) {
     return isInbound ? (
