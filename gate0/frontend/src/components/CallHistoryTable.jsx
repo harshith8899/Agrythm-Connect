@@ -376,11 +376,6 @@ export const CallHistoryTable = ({
                       <span>SMS Sent</span>
                     </span>
                   )}
-                  {call.direction === 'incoming' && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200" title="The farmer rang us">
-                      <PhoneIncoming className="w-3 h-3" />Incoming
-                    </span>
-                  )}
                   {call.is_test && (
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200">TEST</span>
                   )}
@@ -512,11 +507,6 @@ export const CallHistoryTable = ({
                           isPastMissedCb ? 'Callback Missed' : call.status,
                           isPastMissedCb ? 'Callback not placed in time' : call.disposition,
                           call.skip_reason
-                        )}
-                        {(call.direction === 'incoming' || call.direction === 'inbound') && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap shrink-0" title="The farmer rang us">
-                            <PhoneIncoming className="w-3 h-3" />Incoming
-                          </span>
                         )}
                         {call.is_test && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200 whitespace-nowrap shrink-0">
