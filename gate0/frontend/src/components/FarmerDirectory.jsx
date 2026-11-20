@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, MapPin, Phone, PhoneCall, Upload, Users, Plus, Pencil, X, Phone as PhoneIcon, Loader2, ChevronDown, Check, UserCheck } from 'lucide-react';
-import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, callFarmer, confirmDialog, INDIAN_STATES, getDistrictsForState, ALL_INDIAN_DISTRICTS, getStateForDistrict, getHeadPincodeForDistrict, fetchPincodeForLocation } from '../utils';
+import { Search, MapPin, Phone, PhoneCall, Upload, Users, Plus, Pencil, Trash2, X, Phone as PhoneIcon, Loader2, ChevronDown, Check, UserCheck } from 'lucide-react';
+import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, deleteFarmer, callFarmer, confirmDialog, INDIAN_STATES, getDistrictsForState, ALL_INDIAN_DISTRICTS, getStateForDistrict, getHeadPincodeForDistrict, fetchPincodeForLocation } from '../utils';
 
 // Upload a farmers CSV; the backend saves it (same Farmer ID updates the farmer) and the list reloads.
 const ImportCsvButton = ({ onImported }) => {
@@ -760,6 +760,24 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
     }
   };
 
+  const removeFarmer = async (farmer) => {
+    setToggleError('');
+    const sure = await confirmDialog({
+      title: `Delete ${farmer.farmer_name} permanently?`,
+      message: 'This removes the farmer and everything kept about them: call history, transcripts, callbacks and emails. It cannot be undone. If the farmer is still in your uploaded sheet, uploading it again adds them back.',
+      confirmLabel: 'Delete permanently',
+      cancelLabel: 'Keep farmer',
+      tone: 'danger',
+    });
+    if (!sure) return;
+    try {
+      await deleteFarmer(farmer.farmer_id);
+      if (onImported) onImported();
+    } catch (err) {
+      setToggleError(err.message);
+    }
+  };
+
   const toggleActive = async (farmer) => {
     setToggleError('');
     try {
@@ -1242,13 +1260,23 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                 <input type="checkbox" checked={farmer.active !== 'No'} onChange={() => toggleActive(farmer)} />
                 <span>{farmer.active === 'No' ? 'Inactive' : 'Active'}</span>
               </label>
-              <button
-                onClick={() => setEditing(farmer)}
-                className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-              >
-                <Pencil className="w-3 h-3" />
-                <span>Edit</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => removeFarmer(farmer)}
+                  title="Delete this farmer permanently"
+                  className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>Delete</span>
+                </button>
+                <button
+                  onClick={() => setEditing(farmer)}
+                  className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Pencil className="w-3 h-3" />
+                  <span>Edit</span>
+                </button>
+              </div>
             </div>
 
             <div className="space-y-1">

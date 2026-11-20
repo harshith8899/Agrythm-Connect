@@ -115,7 +115,8 @@ class SarvamDialler(SarvamAgentTelephony):
                 detail = f"HTTP {exc.code} {code}".strip()
                 if message:             # Sarvam's own words say which field it did not like; digits and quoted values are masked
                     detail += ": " + _strip_quoted(scrub(message))[:140]
-                raise SarvamHTTPError(detail[:200]) from None
+                sent = sorted({k for u in users[i:i + 1000] for k in u})          # field names only, never values
+                raise SarvamHTTPError(f"{detail[:170]} [sent fields: {', '.join(sent)}]") from None
         return ids
 
     def find_inbound_calls(self, start, end, known_ids):
