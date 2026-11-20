@@ -164,7 +164,9 @@ def make_handler(
                 return
             try:
                 if path == "/api/health":
-                    return self._send(200, {"status": "ok", "service": "Agrythm Connect API"})
+                    # which build is running: Render sets RENDER_GIT_COMMIT on every deploy (a commit id, nothing secret)
+                    return self._send(200, {"status": "ok", "service": "Agrythm Connect API",
+                                            "version": (os.environ.get("RENDER_GIT_COMMIT") or "")[:7]})
                 if path == "/api/calls":
                     calls = service.calls()
                     limit = int(q["limit"][0]) if "limit" in q else None
