@@ -185,11 +185,14 @@ const postJson = async (path, options = {}) => {
 
 const sendJson = async (method, path, payload) => {
   const headers = authHeaders({ 'Content-Type': 'application/json' });
-  const response = await fetch(`${API_BASE}${path}`, {
+  const options = {
     method,
     headers,
-    body: JSON.stringify(payload),
-  });
+  };
+  if (payload !== undefined) {
+    options.body = JSON.stringify(payload);
+  }
+  const response = await fetch(`${API_BASE}${path}`, options);
   checkAuthResponse(response);
   let body = null;
   try {
@@ -207,8 +210,15 @@ export const addFarmer = (fields) => sendJson('POST', '/api/farmers', fields);
 /** Changes the fields sent for one farmer (name, phone, language, place, call_consent, active). */
 export const updateFarmer = (farmerId, fields) => sendJson('PUT', `/api/farmers/${encodeURIComponent(farmerId)}`, fields);
 
-/** Permanently deletes one farmer and all their records (call history, transcripts, callbacks, messages). */
+/** Deletes one farmer from the database. */
 export const deleteFarmer = (farmerId) => sendJson('DELETE', `/api/farmers/${encodeURIComponent(farmerId)}`);
+
+/** Deletes multiple farmers by their IDs. */
+export const batchDeleteFarmers = (farmerIds) =>
+  postJson('/api/farmers/batch-delete', {
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ farmer_ids: farmerIds }),
+  });
 
 /** Places a call now for one farmer. mode 'retry' follows the retry rules (first call or next attempt); 'test' is a one-off test row outside them. Returns at once. */
 export const callFarmer = (farmerId, mode = 'retry') =>

@@ -587,6 +587,17 @@ class DashboardService:
             self.db.commit()
         return {"deleted": fid}
 
+    def delete_farmers(self, fids: list[str]) -> dict:
+        """Removes multiple farmers by their IDs."""
+        deleted = []
+        for fid in (fids or []):
+            try:
+                self.delete_farmer(fid)
+                deleted.append(fid)
+            except (KeyError, ValueError):
+                pass
+        return {"deleted": deleted, "count": len(deleted)}
+
     # -- calls in progress: shown on the call log from the moment they are triggered --------------------------------
     def _live_set(self, fid: str, day: date, kind: str, attempt: int, state: str) -> None:
         """Marks the farmer In Queue ('queued') or In Call ('calling') on the call log. Never raises: showing a call must

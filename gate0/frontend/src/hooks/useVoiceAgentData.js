@@ -207,9 +207,10 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
       const advisorySummary = call.advisory_summary || weatherFallback.advisory_summary;
 
       const isInbound =
-        String(call.direction || '').toLowerCase() === 'inbound' ||
+        ['inbound', 'incoming'].includes(String(call.direction || '').toLowerCase()) ||
+        String(call.call_id || '').startsWith('IN-') ||
         Boolean(call.has_inbound_callback) ||
-        (Array.isArray(call.attempts_log) && call.attempts_log.some((a) => a.direction === 'inbound'));
+        (Array.isArray(call.attempts_log) && call.attempts_log.some((a) => ['inbound', 'incoming'].includes(String(a.direction || '').toLowerCase()) || a.incoming));
 
       return {
         ...call,

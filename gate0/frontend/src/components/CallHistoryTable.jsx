@@ -72,9 +72,10 @@ export const CallHistoryTable = ({
     let inCount = 0;
     (callLogs || []).forEach((c) => {
       const isIncoming =
-        String(c.direction || '').toLowerCase() === 'inbound' ||
+        ['inbound', 'incoming'].includes(String(c.direction || '').toLowerCase()) ||
+        String(c.call_id || '').startsWith('IN-') ||
         Boolean(c.has_inbound_callback) ||
-        (Array.isArray(c.attempts_log) && c.attempts_log.some((a) => a.direction === 'inbound'));
+        (Array.isArray(c.attempts_log) && c.attempts_log.some((a) => ['inbound', 'incoming'].includes(String(a.direction || '').toLowerCase()) || a.incoming));
       if (isIncoming) {
         inCount += 1;
       } else {
@@ -362,7 +363,7 @@ export const CallHistoryTable = ({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <CallDirectionBadge direction={call.direction} compact />
+                  <CallDirectionBadge direction={call.direction} callId={call.call_id} compact />
                   <div className="min-w-0">
                     <div className="font-bold text-sm text-slate-900 truncate" title={call.farmer_name}>{call.farmer_name}</div>
                     <div className="text-[11px] text-slate-500 font-mono">{maskPhoneNumber(call.phone_number || call.phone)}</div>
@@ -374,6 +375,11 @@ export const CallHistoryTable = ({
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200 shrink-0">
                       <MessageSquare className="w-2.5 h-2.5 text-sky-600 shrink-0" />
                       <span>SMS Sent</span>
+                    </span>
+                  )}
+                  {(['incoming', 'inbound'].includes(String(call.direction).toLowerCase()) || String(call.call_id).startsWith('IN-')) && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200" title="The farmer rang us">
+                      <PhoneIncoming className="w-3 h-3" />Incoming
                     </span>
                   )}
                   {call.is_test && (
@@ -447,7 +453,7 @@ export const CallHistoryTable = ({
                   {/* Direction Arrow Badge (Arrow Only) + Call ID & Timestamp */}
                   <td className="px-3.5 py-2.5 whitespace-nowrap align-middle">
                     <div className="flex items-center gap-1.5">
-                      <CallDirectionBadge direction={call.direction} compact />
+                      <CallDirectionBadge direction={call.direction} callId={call.call_id} compact />
                       <span className="font-bold text-slate-900 font-mono text-[11px]">{call.call_id}</span>
                     </div>
                     <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
@@ -507,6 +513,11 @@ export const CallHistoryTable = ({
                           isPastMissedCb ? 'Callback Missed' : call.status,
                           isPastMissedCb ? 'Callback not placed in time' : call.disposition,
                           call.skip_reason
+                        )}
+                        {(['incoming', 'inbound'].includes(String(call.direction).toLowerCase()) || String(call.call_id).startsWith('IN-')) && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap shrink-0" title="The farmer rang us">
+                            <PhoneIncoming className="w-3 h-3" />Incoming
+                          </span>
                         )}
                         {call.is_test && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200 whitespace-nowrap shrink-0">

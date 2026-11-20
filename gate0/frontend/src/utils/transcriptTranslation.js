@@ -391,7 +391,10 @@ const VOCABULARY_TRANSLATIONS = [
   { pattern: makeWordRegex("ಕೃಷಿ|ಖೇತ್|ಹೊಲ|ಪೊಲಂ|పొలం|krishi|khet|hola|polam"), replacement: "farm" },
   { pattern: makeWordRegex("నీటి పారుదల|నీటిపారుదల"), replacement: "irrigation" },
   { pattern: makeWordRegex("ఏర్పాట్లు|ఏర్పాటు"), replacement: "arrangements" },
-  { pattern: makeWordRegex("చేసుకుంటాను"), replacement: "I will make" }
+  { pattern: makeWordRegex("చేసుకుంటాను"), replacement: "I will make" },
+  // Brand name normalization for Indic scripts
+  { pattern: makeWordRegex("ಅಗ್ರಿಥಮ್ ಕನೆಕ್ಟ್|ಅಗ್ರಿಥಮ್ ಕನೆಕ್ಟ|అగ్రిథమ్ కనెక్ట్|एग्रिद्म कनेक्ट|एग्रिड्म कनेक्ट"), replacement: "Agrythm Connect" },
+  { pattern: makeWordRegex("ಅಗ್ರಿಥಮ್|అగ్రిథమ్|అగ్రీధమ్|एग्रिद्म|एग्रिड्म"), replacement: "Agrythm" }
 ];
 
 /**
@@ -553,16 +556,27 @@ export function getRomanizedTranscript(text) {
   for (const item of PHRASE_PATTERNS) {
     const match = trimmed.match(item.regex);
     if (match) {
-      return item.romanized(match);
+      return normalizeAgrythmSpelling(item.romanized(match));
     }
   }
 
   // 2. Fall back to character-level transliterator if Indic script is present
   if (hasIndicScript(trimmed)) {
-    return transliterateIndicCharacters(trimmed);
+    return normalizeAgrythmSpelling(transliterateIndicCharacters(trimmed));
   }
 
-  return trimmed;
+  return normalizeAgrythmSpelling(trimmed);
+}
+
+/**
+ * Normalizes any spelling, case or phonetic variant of Agrythm to the canonical brand name "Agrythm"
+ * (and "Agrythm Connect" when followed by connect).
+ */
+export function normalizeAgrythmSpelling(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text
+    .replace(/\b(agrythm|agrithm|agrythum|agrithum|agreetham|agreethm|egridm|agridm|agreedham|agreedhm|agreedam|agritham|agrytham)\s+(connect|kanekt|kannect)\b/gi, 'Agrythm Connect')
+    .replace(/\b(agrythm|agrithm|agrythum|agrithum|agreetham|agreethm|egridm|agridm|agreedham|agreedhm|agreedam|agritham|agrytham)\b/gi, 'Agrythm');
 }
 
 /**
@@ -577,7 +591,7 @@ export function getTranslatedTranscript(text) {
   for (const item of PHRASE_PATTERNS) {
     const match = trimmed.match(item.regex);
     if (match) {
-      return item.translated(match);
+      return normalizeAgrythmSpelling(item.translated(match));
     }
   }
 
@@ -586,7 +600,7 @@ export function getTranslatedTranscript(text) {
     !/\b(namaskar|namaste|avare|dhanyavad|khet|kare|madi|bataiye|dhoop|khandita|sari|mausam|barish|gaaru|nundi|neti)\b/i.test(trimmed);
 
   if (isStandardEnglish) {
-    return trimmed;
+    return normalizeAgrythmSpelling(trimmed);
   }
 
   // 3. Intelligent vocabulary & clause translation
@@ -597,10 +611,10 @@ export function getTranslatedTranscript(text) {
 
   // If any Indic script remains after vocabulary replacement, transliterate the remaining Indic words
   if (hasIndicScript(translatedText)) {
-    return transliterateIndicCharacters(translatedText);
+    return normalizeAgrythmSpelling(transliterateIndicCharacters(translatedText));
   }
 
-  return translatedText;
+  return normalizeAgrythmSpelling(translatedText);
 }
 
 /**
@@ -613,11 +627,11 @@ export function formatTranscriptText(text, mode = 'romanized') {
   if (!text) return '';
   switch (mode) {
     case 'translated':
-      return getTranslatedTranscript(text);
+      return normalizeAgrythmSpelling(getTranslatedTranscript(text));
     case 'original':
       return text;
     case 'romanized':
     default:
-      return getRomanizedTranscript(text);
+      return normalizeAgrythmSpelling(getRomanizedTranscript(text));
   }
 }

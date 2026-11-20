@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, MapPin, Phone, PhoneCall, Upload, Users, Plus, Pencil, Trash2, X, Phone as PhoneIcon, Loader2, ChevronDown, Check, UserCheck } from 'lucide-react';
-import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, deleteFarmer, callFarmer, confirmDialog, INDIAN_STATES, getDistrictsForState, ALL_INDIAN_DISTRICTS, getStateForDistrict, getHeadPincodeForDistrict, fetchPincodeForLocation } from '../utils';
+import { isCallToday, didFarmerPickUpAndTalk, getCallTimestamp, maskPhoneNumber, normalizeLanguage, importFarmersCsv, addFarmer, updateFarmer, deleteFarmer, batchDeleteFarmers, callFarmer, confirmDialog, INDIAN_STATES, getDistrictsForState, ALL_INDIAN_DISTRICTS, getStateForDistrict, getHeadPincodeForDistrict, fetchPincodeForLocation } from '../utils';
 
 // Upload a farmers CSV; the backend saves it (same Farmer ID updates the farmer) and the list reloads.
 const ImportCsvButton = ({ onImported }) => {
@@ -713,6 +713,7 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [batchCalling, setBatchCalling] = useState(false);
   const [batchActivating, setBatchActivating] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
   const [districtFilter, setDistrictFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
@@ -757,24 +758,6 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
       setCallNote((n) => ({ ...n, [farmer.farmer_id]: { ok: false, text: err.message } }));
     } finally {
       setTimeout(() => setCalling((c) => ({ ...c, [farmer.farmer_id]: false })), 4000);
-    }
-  };
-
-  const removeFarmer = async (farmer) => {
-    setToggleError('');
-    const sure = await confirmDialog({
-      title: `Delete ${farmer.farmer_name} permanently?`,
-      message: 'This removes the farmer and everything kept about them: call history, transcripts, callbacks and emails. It cannot be undone. If the farmer is still in your uploaded sheet, uploading it again adds them back.',
-      confirmLabel: 'Delete permanently',
-      cancelLabel: 'Keep farmer',
-      tone: 'danger',
-    });
-    if (!sure) return;
-    try {
-      await deleteFarmer(farmer.farmer_id);
-      if (onImported) onImported();
-    } catch (err) {
-      setToggleError(err.message);
     }
   };
 
@@ -942,6 +925,56 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
       setToggleError(`Started ${successCount} calls; ${failCount} failed.`);
     }
     [3000, 10000, 25000].forEach((ms) => setTimeout(() => onImported && onImported(), ms));
+  };
+
+  const handleDeleteFarmer = async (farmer) => {
+    setToggleError('');
+    const sure = await confirmDialog({
+      title: `Delete ${farmer.farmer_name} permanently?`,
+      message:
+        'This removes the farmer and everything kept about them: call history, transcripts, callbacks and emails. It cannot be undone. If the farmer is still in your uploaded sheet, uploading it again adds them back.',
+      confirmLabel: 'Delete permanently',
+      cancelLabel: 'Keep farmer',
+      tone: 'danger',
+    });
+    if (!sure) return;
+
+    try {
+      await deleteFarmer(farmer.farmer_id);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(farmer.farmer_id);
+        return next;
+      });
+      if (onImported) onImported();
+    } catch (err) {
+      setToggleError(err.message || 'Could not delete farmer');
+    }
+  };
+
+  const handleBatchDeleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    const sure = await confirmDialog({
+      title: `Delete ${count} selected farmer${count === 1 ? '' : 's'} permanently?`,
+      message: `This removes ${count} selected farmer${count === 1 ? '' : 's'} and everything kept about them: call history, transcripts, callbacks and emails. It cannot be undone.`,
+      confirmLabel: `Delete ${count} Permanently`,
+      cancelLabel: 'Keep farmers',
+      tone: 'danger',
+    });
+    if (!sure) return;
+
+    setBatchDeleting(true);
+    setToggleError('');
+    try {
+      await batchDeleteFarmers(Array.from(selectedIds));
+      setSelectedIds(new Set());
+      if (onImported) onImported();
+    } catch (err) {
+      setToggleError(err.message || 'Failed to delete selected farmers');
+    } finally {
+      setBatchDeleting(false);
+    }
   };
 
   if (farmers.length === 0) {
@@ -1159,6 +1192,26 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
 
             <button
               type="button"
+              onClick={handleBatchDeleteSelected}
+              disabled={batchDeleting || selectedIds.size === 0}
+              className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title={`Delete ${selectedIds.size} selected farmer(s)`}
+            >
+              {batchDeleting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Deleting...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Selected ({selectedIds.size})</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={handleBatchCallSelected}
               disabled={batchCalling || selectedConsentedFarmers.length === 0}
               className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1.5 bg-trust-green hover:bg-emerald-600 text-white text-xs font-semibold transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
@@ -1260,21 +1313,23 @@ export const FarmerDirectory = ({ farmers = [], callLogs = [], onSelectFarmer, o
                 <input type="checkbox" checked={farmer.active !== 'No'} onChange={() => toggleActive(farmer)} />
                 <span>{farmer.active === 'No' ? 'Inactive' : 'Active'}</span>
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
-                  onClick={() => removeFarmer(farmer)}
-                  title="Delete this farmer permanently"
-                  className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  <span>Delete</span>
-                </button>
-                <button
+                  type="button"
                   onClick={() => setEditing(farmer)}
-                  className="h-9 px-3.5 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                  className="h-9 px-3 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
                 >
                   <Pencil className="w-3 h-3" />
                   <span>Edit</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteFarmer(farmer)}
+                  className="h-9 px-3 rounded-xl justify-center whitespace-nowrap inline-flex items-center gap-1 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer"
+                  title={`Delete ${farmer.farmer_name}`}
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>Delete</span>
                 </button>
               </div>
             </div>

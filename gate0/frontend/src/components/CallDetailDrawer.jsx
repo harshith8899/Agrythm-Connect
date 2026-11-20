@@ -45,7 +45,7 @@ const AttemptRowWithHover = ({ attempt, isCurrent, onSelect }) => {
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <CallDirectionBadge direction={attempt.direction} compact />
+          <CallDirectionBadge direction={attempt.direction} callId={attempt.call_id} compact />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono font-bold text-xs text-slate-900">
@@ -312,7 +312,7 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
         <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <CallDirectionBadge direction={call.direction} />
+              <CallDirectionBadge direction={call.direction} callId={call.call_id} />
               <span className="font-mono font-bold text-sm text-slate-900">
                 {call.call_id}
               </span>

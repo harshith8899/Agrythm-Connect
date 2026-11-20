@@ -942,3 +942,23 @@ def test_the_system_still_places_no_retry_outside_the_calling_hours(tmp_path):
     s.manual_call("F1", "retry")                                     # placed by hand at 21:50, not picked up
     wait_idle(s)
     assert s.run_due_retries(datetime(2026, 11, 5, 22, 30, tzinfo=IST)) == 0     # the automatic retry would fall after 22:00
+
+
+def test_delete_farmer_and_batch_delete(tmp_path):
+    s = DashboardService(tmp_path / "test.db", MockDialler())
+    s.import_csv(CSV)
+    assert len(s.farmers()) == 4
+    # Delete single farmer
+    res = s.delete_farmer("F1")
+    assert res["deleted"] == "F1"
+    assert len(s.farmers()) == 3
+    assert not any(f["farmer_id"] == "F1" for f in s.farmers())
+    with pytest.raises(KeyError):
+        s.delete_farmer("F1")
+
+    # Batch delete farmers
+    b_res = s.delete_farmers(["F2", "F3", "NONEXISTENT"])
+    assert b_res["count"] == 2
+    assert set(b_res["deleted"]) == {"F2", "F3"}
+    assert len(s.farmers()) == 1
+    assert s.farmers()[0]["farmer_id"] == "F4"

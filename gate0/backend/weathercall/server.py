@@ -290,6 +290,14 @@ def make_handler(
                     if not isinstance(fields, dict):
                         raise ValueError("expected a JSON object")
                     return self._send(201, service.add_farmer(fields))
+                if path == "/api/farmers/batch-delete":
+                    fields = json.loads(body or "{}")
+                    if not isinstance(fields, dict):
+                        raise ValueError("expected a JSON object")
+                    ids = fields.get("farmer_ids") or fields.get("ids") or []
+                    if not isinstance(ids, list):
+                        raise ValueError("farmer_ids must be a list")
+                    return self._send(200, service.delete_farmers(ids))
                 if path == "/api/farmers/import":
                     try:
                         return self._send(200, service.import_csv(body))
