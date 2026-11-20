@@ -207,6 +207,9 @@ export const addFarmer = (fields) => sendJson('POST', '/api/farmers', fields);
 /** Changes the fields sent for one farmer (name, phone, language, place, call_consent, active). */
 export const updateFarmer = (farmerId, fields) => sendJson('PUT', `/api/farmers/${encodeURIComponent(farmerId)}`, fields);
 
+/** Permanently deletes one farmer and all their records (call history, transcripts, callbacks, messages). */
+export const deleteFarmer = (farmerId) => sendJson('DELETE', `/api/farmers/${encodeURIComponent(farmerId)}`);
+
 /** Places a call now for one farmer. mode 'retry' follows the retry rules (first call or next attempt); 'test' is a one-off test row outside them. Returns at once. */
 export const callFarmer = (farmerId, mode = 'retry') =>
   postJson(`/api/farmers/${encodeURIComponent(farmerId)}/call`, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });

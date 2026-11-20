@@ -334,3 +334,28 @@ def test_a_failed_push_to_the_line_is_tried_again_in_a_few_minutes_not_tomorrow(
     clock["now"] = T0 + timedelta(minutes=20)
     s._daily_inbound_roster()                                   # done for the day
     assert len(d.pushes) == 1
+
+
+def test_delete_farmer_removes_everything_about_them_and_tells_the_line(tmp_path):
+    d = Dial(status=A.ANSWERED, understood="yes")
+    s, _ = make(tmp_path, d)
+    s.fire(D)
+    assert any(f["farmer_id"] == "F1" for f in s.farmers()) and any(c["farmer_id"] == "F1" for c in s.calls())
+    d.pushes.clear()
+    assert s.delete_farmer("F1") == {"deleted": "F1"}
+    assert not any(f["farmer_id"] == "F1" for f in s.farmers())
+    assert not any(c["farmer_id"] == "F1" for c in s.calls())
+    for table in ("dash_results", "dash_messages", "dash_inbound", "attempts", "day_results"):
+        assert s.db.execute(f"SELECT COUNT(*) FROM {table} WHERE farmer_id='F1'").fetchone()[0] == 0
+    assert d.pushes and d.pushes[0][0][0]["variables"]["farmer_name"] == ""        # the line now treats the number as unknown
+    assert any(f["farmer_id"] != "F1" for f in s.farmers())                       # the others are untouched
+
+
+def test_delete_farmer_unknown_or_in_a_call_is_refused(tmp_path):
+    import pytest
+    s, _ = make(tmp_path, Dial())
+    with pytest.raises(KeyError):
+        s.delete_farmer("NOPE")
+    s._manual.add("F1")
+    with pytest.raises(ValueError):
+        s.delete_farmer("F1")

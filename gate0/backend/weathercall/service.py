@@ -555,6 +555,38 @@ class DashboardService:
         self._refresh_inbound_later([fid])
         return next(f for f in self.farmers() if f["farmer_id"] == fid)
 
+    _FARMER_TABLES = ("dash_results", "dash_callbacks", "dash_stops", "dash_declines", "dash_tests", "dash_paused", "dash_alerts",
+                      "dash_retries", "dash_live", "dash_incoming", "dash_inbound", "dash_messages", "attempts", "day_results")
+
+    def delete_farmer(self, fid: str) -> dict:
+        """Permanently removes one farmer and everything kept about them: results, call history and transcripts, callbacks,
+        retries, messages, incoming-call rows. It cannot be undone. A farmer with a call in progress is refused. The inbound
+        line is told, best effort, to treat their number as unknown (a blank entry), so they are not recognised any more."""
+        with self.lock:
+            r = self.db.execute("SELECT phone, language FROM dash_farmers WHERE farmer_id=?", (fid,)).fetchone()
+            busy = fid in self._manual or self.db.execute("SELECT 1 FROM dash_live WHERE farmer_id=?", (fid,)).fetchone()
+        if not r:
+            raise KeyError(fid)
+        if busy:
+            raise ValueError("a call to this farmer is in progress: delete after it ends")
+        if self._inbound_ready() and r[0]:
+            blank = {k: "" for k in ("farmer_name", "place_name", "temp_min_c", "temp_max_c", "wind_kmh", "rain_chance_pct",
+                                     "humidity_pct", "callback_context")}
+            try:
+                self.dialler.push_inbound_many([{"fid": fid, "phone": r[0], "language_name": _LANG_NAMES[Language(r[1])],
+                                                 "variables": blank, "state": "unregistered"}], f"removed-{self._now():%Y%m%d-%H%M%S}")
+            except Exception:
+                pass                                         # the line is refreshed daily; the farmer is gone either way
+        with self.lock:
+            for table in self._FARMER_TABLES:
+                try:
+                    self.db.execute(f"DELETE FROM {table} WHERE farmer_id=?", (fid,))
+                except OperationalError:
+                    continue                                 # a table this deployment does not have
+            self.db.execute("DELETE FROM dash_farmers WHERE farmer_id=?", (fid,))
+            self.db.commit()
+        return {"deleted": fid}
+
     # -- calls in progress: shown on the call log from the moment they are triggered --------------------------------
     def _live_set(self, fid: str, day: date, kind: str, attempt: int, state: str) -> None:
         """Marks the farmer In Queue ('queued') or In Call ('calling') on the call log. Never raises: showing a call must
