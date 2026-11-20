@@ -8,10 +8,23 @@
 export default {
   async fetch(request, env) {
     const backend = String(env.BACKEND_URL || '').replace(/\/+$/, '');
+    const url = new URL(request.url);
+    // The "Wake the server" button on the dashboard. It needs only BACKEND_URL (the health address takes no token), so it works
+    // before the token is set. GET /api/wake asks the backend's health address from here and says what it answered (the first
+    // answer after a sleep can take a minute); GET /api/wake?open=1 sends the browser to that health address itself.
+    if (url.pathname === '/api/wake') {
+      if (!backend) return Response.json({ status: 0, error: 'BACKEND_URL is not set on the Worker' }, { status: 503 });
+      if (url.searchParams.get('open')) return Response.redirect(backend + '/api/health', 302);
+      try {
+        const answer = await fetch(backend + '/api/health', { headers: { 'User-Agent': 'agrythm-wake-button' }, cache: 'no-store' });
+        return Response.json({ status: answer.status }, { headers: { 'Cache-Control': 'no-store' } });
+      } catch {
+        return Response.json({ status: 0, error: 'Backend not reachable' }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
+      }
+    }
     if (!backend || !env.API_TOKEN) {
       return Response.json({ error: 'API proxy is not configured' }, { status: 503 });
     }
-    const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS.fetch(request);
     }
