@@ -106,17 +106,17 @@ These replace the 17 Nov silence item 2. The existing script is adjusted, nothin
    context says the same (PR 63). This dry-ran clean on the draft (prompt sha 8d50c31a735deb9d).
 
 
-## Edits for v19 (21 Nov), not applied yet: faster silence and no hang-up while the farmer is talking
-Found in a real call: the agent waited 9 to 10 s before asking "are you there" (7 s set, plus speech and delay), and it hung up while the farmer
-was still talking at the end. Not applied because the Sarvam connector was pointing at another workspace (it listed only "Conversation Agent 1904").
-1. **Silence nudges** (`configure_silence_nudges`, end the call after the last): 3 s "Are you there in the call?", then 4 s "Are you still there in the call?",
-   then 4 s "You may be busy. We will call you later. Thank you, have a good day from Agrythm." (3 s is the lowest Sarvam allows; the real delay also
-   includes the speech itself, so measure it with a stopwatch.)
-2. **Prompt, silence bullet:** "about 7 seconds" becomes "about 3 seconds"; each "wait about 10 seconds" becomes "wait about 4 seconds"; "has had its 10 seconds"
-   becomes "has had its 4 seconds".
-3. **Prompt, CLOSING:** before "Finish speaking the goodbye completely, and only then end the call with the End call tool." add: "Before the goodbye, make
-   sure the farmer has finished speaking: if the farmer's last words were a question, a new remark or something unclear, or they start speaking while you
-   say the goodbye, stop, listen to everything they say and answer first. End the call only when the farmer's last message was clearly a closing (they said
-   they understood and have nothing more, or thank you, okay, bye). Never end the call while the farmer is speaking."
-4. **If it still hangs up on a speaking farmer**, check the voice settings next: `volume_threshold` (-45 now; a farmer on a quiet line may be taken as silent)
-   and `silence_duration_frames`. Read the call's record in Sarvam (interaction id) to see whether the nudges or the End call tool ended it.
+## Agent v19 (21 Nov): patient with a slow farmer, fast checks, no hang-up while the farmer is talking
+APPLIED to the draft on 21 Nov (the Sarvam connector was first on another workspace). Found in real calls on 20 Nov: the agent waited 9 to 10 s before
+"are you there" (7 s set, plus speech and delay); farmers take about 11 s to start answering; and in one call (20 Nov, 19:21) a farmer's long sentence with
+pauses was answered in pieces, then the agent ended the call in the same turn as its refusal, before the last words were heard.
+1. **Silence nudges** (end the call after the last): 5 s "Are you there in the call?" (a slow farmer or one recalling what to say gets time), then 4 s
+   "Are you still there in the call?", then 4 s "You may be busy. We will call you later. Thank you, have a good day from Agrythm." Sarvam's nudge timer is
+   one setting for every pause, so it cannot tell "the farmer is thinking" from "the farmer was asked if they are there"; the 5 s first nudge is the
+   compromise. The real delay is the setting plus about 2 to 3 s of speech and processing.
+2. **Prompt, silence bullet:** after any question or turn the agent waits quietly at least 5 s unless the farmer speaks, never replies to half a
+   sentence, asks "are you there in the call" at about 5 s, waits about 4 s, asks "are you still there in the call", waits about 4 s, then the polite goodbye.
+3. **Prompt, CLOSING and STRICT LIMITS:** the agent never ends the call while the farmer is speaking; it listens to everything, answers first if the last
+   words were a question or something new, and ends only after a clear closing (or after refusing an off-topic request twice).
+4. **Not changed:** the voice setting `silence_duration_frames` (6): raising it to 9 would stop the agent answering half a sentence but slows every answer.
+   `volume_threshold` stays -45.
