@@ -104,3 +104,19 @@ These replace the 17 Nov silence item 2. The existing script is adjusted, nothin
 2. **Already served today.** In the bullet "if we already gave them today's weather and they understood it", say in one short sentence that today's weather was
    already shared and the next update comes tomorrow, say the normal goodbye and end; do not give the weather again, even if asked. The backend `completed`
    context says the same (PR 63). This dry-ran clean on the draft (prompt sha 8d50c31a735deb9d).
+
+
+## Edits for v19 (21 Nov), not applied yet: faster silence and no hang-up while the farmer is talking
+Found in a real call: the agent waited 9 to 10 s before asking "are you there" (7 s set, plus speech and delay), and it hung up while the farmer
+was still talking at the end. Not applied because the Sarvam connector was pointing at another workspace (it listed only "Conversation Agent 1904").
+1. **Silence nudges** (`configure_silence_nudges`, end the call after the last): 3 s "Are you there in the call?", then 4 s "Are you still there in the call?",
+   then 4 s "You may be busy. We will call you later. Thank you, have a good day from Agrythm." (3 s is the lowest Sarvam allows; the real delay also
+   includes the speech itself, so measure it with a stopwatch.)
+2. **Prompt, silence bullet:** "about 7 seconds" becomes "about 3 seconds"; each "wait about 10 seconds" becomes "wait about 4 seconds"; "has had its 10 seconds"
+   becomes "has had its 4 seconds".
+3. **Prompt, CLOSING:** before "Finish speaking the goodbye completely, and only then end the call with the End call tool." add: "Before the goodbye, make
+   sure the farmer has finished speaking: if the farmer's last words were a question, a new remark or something unclear, or they start speaking while you
+   say the goodbye, stop, listen to everything they say and answer first. End the call only when the farmer's last message was clearly a closing (they said
+   they understood and have nothing more, or thank you, okay, bye). Never end the call while the farmer is speaking."
+4. **If it still hangs up on a speaking farmer**, check the voice settings next: `volume_threshold` (-45 now; a farmer on a quiet line may be taken as silent)
+   and `silence_duration_frames`. Read the call's record in Sarvam (interaction id) to see whether the nudges or the End call tool ended it.
