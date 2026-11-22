@@ -110,12 +110,14 @@ These replace the 17 Nov silence item 2. The existing script is adjusted, nothin
 APPLIED to the draft on 21 Nov (the Sarvam connector was first on another workspace). Found in real calls on 20 Nov: the agent waited 9 to 10 s before
 "are you there" (7 s set, plus speech and delay); farmers take about 11 s to start answering; and in one call (20 Nov, 19:21) a farmer's long sentence with
 pauses was answered in pieces, then the agent ended the call in the same turn as its refusal, before the last words were heard.
-1. **Silence nudges** (end the call after the last): 5 s "Are you there in the call?" (a slow farmer or one recalling what to say gets time), then 4 s
-   "Are you still there in the call?", then 4 s "You may be busy. We will call you later. Thank you, have a good day from Agrythm." Sarvam's nudge timer is
-   one setting for every pause, so it cannot tell "the farmer is thinking" from "the farmer was asked if they are there"; the 5 s first nudge is the
-   compromise. The real delay is the setting plus about 2 to 3 s of speech and processing.
-2. **Prompt, silence bullet:** after any question or turn the agent waits quietly at least 5 s unless the farmer speaks, never replies to half a
-   sentence, asks "are you there in the call" at about 5 s, waits about 4 s, asks "are you still there in the call", waits about 4 s, then the polite goodbye.
+1. **Silence nudges** (end the call after the last): 3 s "Are you there in the call?", then 3 s "Are you still there in the call?", then 4 s
+   "You may be busy. We will call you later. Thank you, have a good day from Agrythm." (changed on 22 Nov from 5/4/4 at the team's request.) Sarvam's nudge
+   timer is one setting for every pause, so it cannot tell "the farmer is thinking" from "the farmer was asked if they are there". Calls on 20 Nov showed
+   farmers taking about 11 s to start answering, so a slow farmer may now hear both questions: if that happens, raise the first two values. The real delay is
+   the setting plus about 2 to 3 s of speech and processing.
+2. **Prompt, silence bullet:** after any question or turn the agent waits quietly at least 3 s unless the farmer speaks and never replies to half a
+   sentence; it asks "are you there in the call" at about 3 s, waits about 3 s, asks "are you still there in the call", waits about 4 s, then the polite
+   goodbye. If the farmer starts to speak at any moment, even during "are you there" or the goodbye, it stops, listens and answers.
 3. **Prompt, CLOSING and STRICT LIMITS:** the agent never ends the call while the farmer is speaking; it listens to everything, answers first if the last
    words were a question or something new, and ends only after a clear closing (or after refusing an off-topic request twice).
 4. **Not changed:** the voice setting `silence_duration_frames` (6): raising it to 9 would stop the agent answering half a sentence but slows every answer.
