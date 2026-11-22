@@ -68,7 +68,9 @@ export const SignInStatus = ({ username, info, onCancel }) => {
                 Last answer from the connection to the server: {last.status ? `HTTP ${last.status}` : 'no answer'}{last.message ? ` (${last.message})` : ''}.{' '}
                 {last.status === 0
                   ? 'The request is not being answered at all: check that the Cloudflare Worker is deployed.'
-                  : 'The Worker answers but cannot reach the server: check that BACKEND_URL on the Cloudflare Worker is exactly the Render address (https, no path).'}
+                  : last.status === 429
+                    ? 'The host says too many requests (HTTP 429) while the server starts. This is not a wrong setting: the page waits longer between tries and carries on by itself. If it lasts more than a few minutes, open the service in Render and check that it is Live.'
+                    : 'The Worker answers but cannot reach the server: check that BACKEND_URL on the Cloudflare Worker is exactly the Render address (https, no path).'}
               </span>
             )}
           </div>
