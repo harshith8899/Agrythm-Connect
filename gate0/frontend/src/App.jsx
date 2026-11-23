@@ -15,8 +15,8 @@ import {
   LoginScreen,
   SignInStatus
 } from './components';
-import { useVoiceAgentData } from './hooks';
-import { getSessionToken, logoutAdmin, loginAdmin, pingServer, callFarmer } from './utils';
+import { useVoiceAgentData, useServerWake } from './hooks';
+import { getSessionToken, logoutAdmin, loginAdmin, callFarmer } from './utils';
 
 // signingIn: the dashboard is on screen but the sign-in is still finishing in the background (the server may be asleep): nothing is
 // requested and the buttons that need the server do nothing until it is done.
@@ -208,7 +208,6 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function App() {
   const [sessionToken, setSessionToken] = useState(() => getSessionToken());
   const [pending, setPending] = useState(null);          // { username, password } while the sign-in finishes in the background
-  const [info, setInfo] = useState({ phase: 'waking', seconds: 0, last: null });
   const [loginError, setLoginError] = useState('');
 
   useEffect(() => {
@@ -223,26 +222,16 @@ function App() {
     };
   }, []);
 
-  // The sign-in itself: wait for the server to answer (this wakes it), then check the details; a start-up error right after is tried
-  // again, a wrong password is not. The person is already looking at the dashboard meanwhile.
+  // The one wake-up of the server: it starts when the sign-in page opens and goes on while the sign-in waits (never a second wake).
+  const wake = useServerWake(!sessionToken);
+  const [retrying, setRetrying] = useState(false);       // the server went back to sleep between the wake and the sign-in
+
+  // The sign-in itself: once the server has answered, check the details; a start-up error right after is tried again, a wrong
+  // password is not. The person is already looking at the dashboard meanwhile.
   useEffect(() => {
-    if (!pending) return undefined;
+    if (!pending || wake.server !== 'ready') return undefined;
     let stopped = false;
-    const startedAt = Date.now();
-    const tick = setInterval(() => setInfo((prev) => ({ ...prev, seconds: Math.round((Date.now() - startedAt) / 1000) })), 1000);
     (async () => {
-      for (let miss = 0; ; miss += 1) {
-        const answer = await pingServer();
-        if (stopped) return;
-        if (answer.ok) break;
-        const unconfigured = answer.status === 503 && /not configured/i.test(answer.message);
-        setInfo((prev) => ({ ...prev, phase: unconfigured ? 'unconfigured' : 'waking', last: { status: answer.status, message: answer.message } }));
-        // back off while the server starts: 3 s, then longer, and at least 10 s after "too many requests" (HTTP 429), so the retries do not make it worse
-        const pause = unconfigured ? 10000 : Math.max(answer.status === 429 ? 10000 : 0, Math.min(3000 + miss * 2000, 15000));
-        await wait(pause);
-        if (stopped) return;
-      }
-      setInfo((prev) => ({ ...prev, phase: 'signing' }));
       for (let attempt = 0; ; attempt += 1) {
         try {
           await loginAdmin(pending.username, pending.password);       // stores the session: the dashboard then starts loading
@@ -251,27 +240,35 @@ function App() {
         } catch (err) {
           if (stopped) return;
           if (err.transient && attempt < 10) {
-            setInfo((prev) => ({ ...prev, phase: 'waking' }));
+            setRetrying(true);
             await wait(3000);
             continue;
           }
+          setRetrying(false);
           setPending(null);
           setLoginError(err.transient ? 'The server did not answer. Check that the Render service shows Live, then try again.' : (err.message || 'Invalid username or password.'));
           return;
         }
       }
     })();
-    return () => { stopped = true; clearInterval(tick); };
-  }, [pending]);
+    return () => { stopped = true; };
+  }, [pending, wake.server]);
+
+  // what the banner on the dashboard shows while the sign-in is finishing
+  const info = {
+    phase: wake.server === 'unconfigured' ? 'unconfigured' : (wake.server === 'ready' && !retrying ? 'signing' : 'waking'),
+    seconds: wake.seconds,
+    last: wake.last,
+  };
 
   const signIn = (username, password) => {
     setLoginError('');
-    setInfo({ phase: 'waking', seconds: 0, last: null });
+    setRetrying(false);
     setPending({ username, password });
   };
 
   if (!sessionToken && !pending) {
-    return <LoginScreen onSignIn={signIn} initialError={loginError} />;
+    return <LoginScreen onSignIn={signIn} initialError={loginError} wake={wake} />;
   }
 
   const signingIn = !sessionToken;

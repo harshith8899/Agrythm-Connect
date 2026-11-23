@@ -1,50 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Lock, User, Eye, EyeOff, ShieldCheck, Server, CheckCircle2 } from 'lucide-react';
-import { pingServer } from '../utils';
 import { WakeServerControls } from './WakeServerControls';
 
 const NOT_CONNECTED = 'This dashboard is not connected to the server. In Cloudflare, open the Worker, Settings, Variables and Secrets, and check that BACKEND_URL and API_TOKEN are both there (type Secret), then deploy.';
 const DIAGNOSE_AFTER_S = 40;      // a cold start answers within about 25 s: past this, show what the connection is really saying
 const SLOW_AFTER_S = 180;         // a start normally takes under a minute; after this the note changes, but waking never stops
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Collects the username and password. Pressing Sign in goes straight into the dashboard (App finishes the sign-in in the background,
 // waiting for the server if it is asleep); a wrong password brings the person back here with initialError.
-export const LoginScreen = ({ onSignIn, initialError = '' }) => {
+export const LoginScreen = ({ onSignIn, initialError = '', wake }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [server, setServer] = useState('waking');      // waking | ready | unconfigured
-  const [seconds, setSeconds] = useState(0);
-  const [lastAnswer, setLastAnswer] = useState(null);   // what the last health check got back: { status, message }
-
-  // Wake the server the moment this page opens, so it is already up when the details are typed.
-  useEffect(() => {
-    let stopped = false;
-    const startedAt = Date.now();
-    const tick = setInterval(() => setSeconds(Math.round((Date.now() - startedAt) / 1000)), 1000);
-    (async () => {
-      for (let miss = 0; !stopped; miss += 1) {
-        const answer = await pingServer();
-        if (stopped) return;
-        setLastAnswer({ status: answer.status, message: answer.message });
-        if (answer.ok) {
-          setServer('ready');
-          return;
-        }
-        if (answer.status === 503 && /not configured/i.test(answer.message)) {
-          setServer('unconfigured');
-          await wait(10000);
-        } else {
-          setServer('waking');
-          // back off while the server starts: 3 s, then longer (up to 15 s), and at least 10 s after "too many requests" (HTTP 429)
-          await wait(Math.max(answer.status === 429 ? 10000 : 0, Math.min(3000 + miss * 2000, 15000)));
-        }
-      }
-    })();
-    return () => { stopped = true; clearInterval(tick); };
-  }, []);
+  const { server, seconds, last: lastAnswer } = wake;                // the shared wake-up (useServerWake), started when this page opened
 
   const handleSubmit = (e) => {
     e.preventDefault();
