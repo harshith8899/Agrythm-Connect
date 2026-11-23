@@ -31,6 +31,7 @@ from .adapters.translate import TranslateError, make_translator
 from .adapters.mock import MockVoice, MockWeather
 from .adapters.weatherapi import geocode, make_weather
 from .adapters.sarvam_agent import _LANG_NAMES, to_e164
+from .inbound_openings import inbound_opening
 from .adapters.sarvam_campaign import IST, scrub
 from .adapters.sheet import _ALIASES, _LANG, _key, _read_rows, load_farmers
 from .adapters.weather_store import StoredWeather
@@ -574,7 +575,9 @@ class DashboardService:
                                      "humidity_pct", "callback_context")}
             try:
                 self.dialler.push_inbound_many([{"fid": fid, "phone": r[0], "language_name": _LANG_NAMES[Language(r[1])],
-                                                 "variables": blank, "state": "unregistered"}], f"removed-{self._now():%Y%m%d-%H%M%S}")
+                                                 "variables": blank, "state": "unregistered",
+                                                 "opening": inbound_opening("unregistered", _LANG_NAMES[Language(r[1])])}],
+                                               f"removed-{self._now():%Y%m%d-%H%M%S}")
             except Exception:
                 pass                                         # the line is refreshed daily; the farmer is gone either way
         with self.lock:
@@ -1429,8 +1432,9 @@ class DashboardService:
                                       "humidity_pct": str(weather.get("humidity", "")), "callback_context": text + " They are now calling us."})
                 elif state == "stopped":
                     variables.update({"farmer_name": r[0], "callback_context": text + " They are now calling us."})
-                entries.append({"fid": fid, "state": state, "phone": r[1], "language_name": _LANG_NAMES[Language(r[2])],
-                                "variables": variables})
+                lang_name = _LANG_NAMES[Language(r[2])]
+                entries.append({"fid": fid, "state": state, "phone": r[1], "language_name": lang_name, "variables": variables,
+                                "opening": inbound_opening(state, lang_name, variables.get("farmer_name", ""))})
             if not entries:
                 return 0
             status, note = "waiting", ""
