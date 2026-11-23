@@ -112,18 +112,20 @@ class SarvamDialler(SarvamAgentTelephony):
             if phone in seen:                               # two farmers on one number: the line can know only one of them
                 continue
             seen.add(phone)
-            rows.append((phone, e["language_name"], e["variables"]))
+            rows.append((phone, e["language_name"], e["variables"], str(e.get("opening") or "")))
         if not rows:
             return []
-        names = sorted({k for _, _, v in rows for k in v})              # the agent's variable names, one CSV column each
+        names = sorted({k for _, _, v, _ in rows for k in v})           # the agent's variable names, one CSV column each
+        with_opening = all(o for _, _, _, o in rows)                    # a blank opening would silence the greeting: all or none
         out = io.StringIO()
         writer = csv.writer(out, lineterminator="\n")
-        writer.writerow(["phone", "language", *names])
-        for phone, language, variables in rows:
-            writer.writerow([phone, language, *[str(variables.get(k, "")) for k in names]])
+        writer.writerow(["phone", "language", *names, *(["opening"] if with_opening else [])])
+        for phone, language, variables, opening in rows:
+            writer.writerow([phone, language, *[str(variables.get(k, "")) for k in names], *([opening] if with_opening else [])])
         transformation = {"phone_number": {"column_name": "phone", "country_code": "IN"},
                           "app_variables": {k: {"column_name": k} for k in names},
-                          "app_overrides": {"initial_language_name": {"column_name": "language"}}}
+                          "app_overrides": {"initial_language_name": {"column_name": "language"},
+                                            **({"initial_bot_message": {"column_name": "opening"}} if with_opening else {})}}
         body, content_type = _multipart({"name": cohort_name[:50]}, {
             "cohort_file": ("cohort.csv", "text/csv", out.getvalue().encode("utf-8")),
             "cohort_transformation_file": ("transformation.json", "application/json", json.dumps(transformation).encode("utf-8"))})
@@ -146,7 +148,7 @@ class SarvamDialler(SarvamAgentTelephony):
             detail = f"HTTP {exc.code} {code}".strip()
             if message:             # Sarvam's own words say which field it did not like; digits and quoted values are masked
                 detail += ": " + _strip_quoted(scrub(message))[:140]
-            raise SarvamHTTPError(f"{detail[:170]} [upload columns: {', '.join(['phone', 'language', *names])}]") from None
+            raise SarvamHTTPError(f"{detail[:170]} [upload columns: {', '.join(['phone', 'language', *names, *(['opening'] if with_opening else [])])}]") from None
 
     def find_inbound_calls(self, start, end, known_ids):
         """Connected calls between start and end that are not ours (not in known_ids): farmers ringing the line. Returns

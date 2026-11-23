@@ -200,7 +200,8 @@ def test_a_farmer_who_rings_again_after_completing_keeps_their_result(tmp_path):
     d.inbound_out = {"understood_weather": "no", "stop_calls_requested": "no", "call_summary": "s", "callback_time": ""}
     rings(d, attempt_id="IN2")
     assert s.sync_inbound(T0 + timedelta(minutes=15)) == 1
-    assert s.calls()[0]["status"] == "Completed" and d.pushed("F1")["state"] == "completed"
+    assert next(c for c in s.calls() if c["call_id"].startswith("F1-"))["status"] == "Completed" and d.pushed("F1")["state"] == "completed"
+    assert any(c["call_id"] == "IN-IN2" and c["direction"] == "incoming" for c in s.calls())      # and the call itself is listed
 
 
 def test_a_farmer_who_rings_before_the_daily_call_is_served_and_not_called_again_today(tmp_path):
@@ -387,3 +388,34 @@ def test_delete_farmer_unknown_or_in_a_call_is_refused(tmp_path):
     s._manual.add("F1")
     with pytest.raises(ValueError):
         s.delete_farmer("F1")
+
+
+def test_the_opening_goes_with_the_roster_as_the_cohorts_initial_bot_message():
+    op = UploadOpener()
+    d = SarvamDialler(env=ENV, opener=op)
+    entries = [{"fid": "F1", "phone": "9876543210", "language_name": "English", "variables": {"farmer_name": "Asha"},
+                "opening": "Hello Asha, we have already shared today's weather with you, thank you."}]
+    d.push_inbound_many(entries, "roster-x")
+    parts = parts_of(op)[3]
+    lines = [x for x in parts["cohort_file"].decode().split("\n") if x]
+    assert lines[0] == "phone,language,farmer_name,opening" and lines[1].endswith('"Hello Asha, we have already shared today\'s weather with you, thank you."')
+    assert json.loads(parts["cohort_transformation_file"])["app_overrides"] == {
+        "initial_language_name": {"column_name": "language"}, "initial_bot_message": {"column_name": "opening"}}
+
+
+def test_a_farmer_whose_weather_was_already_shared_is_not_greeted_as_if_we_had_called_to_give_it(tmp_path):
+    from weathercall.inbound_openings import inbound_opening
+    d = Dial(status=A.ANSWERED, understood="yes")
+    s, _ = make(tmp_path, d)
+    s.fire(D)                                                                   # F1 has the weather and understood it
+    s._refresh_inbound(force=True)
+    done = [e for push in d.pushes for e in push[0] if e["fid"] == "F1"][-1]                  # the latest entry sent for F1
+    name, lang = done["variables"]["farmer_name"], done["language_name"]
+    assert done["opening"] == inbound_opening("completed", lang, name) != inbound_opening("not_called", lang, name)
+    assert name in done["opening"]                                              # spoken to by name
+    # a farmer we have not called yet is welcomed and asked who is speaking, not told that we called
+    (tmp_path / "n").mkdir()
+    s2, _ = make(tmp_path / "n", Dial())
+    s2._refresh_inbound(force=True)
+    fresh = next(e for push in s2.dialler.pushes for e in push[0] if e["fid"] == "F1")
+    assert fresh["opening"] == inbound_opening("not_called", fresh["language_name"], fresh["variables"]["farmer_name"])

@@ -141,3 +141,10 @@ is planned. The silence goodbye is one fixed text for every silence in a call, s
 - New final nudge (and the matching prompt phrase): "You may be busy, so I will end the call now. Thank you, have a good day from Agrythm." No promise of a later call.
 - A farmer who never spoke is still retried by the normal rules (up to 3 attempts a day), without being told in the call.
 - Translations were read back after saving: Kannada, Hindi, Telugu and the rest are correct.
+
+
+## Agent draft after v20 (23 Nov): openings chosen by the backend for incoming calls
+The backend now sends an opening per caller with the roster (`initial_bot_message`), see DECISIONS.md. One prompt sentence was added to HOW THE CALL GOES, step 1,
+after "Wait for the answer and do not give any weather yet.": if the first message already said today's weather was shared, that the farmer does not need it, that
+the calls are stopped or that the number is only for registered farmers, the agent says nothing more on its own and asks nothing; if the farmer speaks it answers in
+one short sentence (never giving the weather again), says the goodbye and ends; if the farmer is silent the silence rules end the call. Commit it as the next version, move the deployment (paused) and set `SARVAM_APP_VERSION`.

@@ -237,4 +237,19 @@ def test_after_a_successful_call_the_line_is_told_not_to_give_the_weather_again_
     rings(d, attempt_id="IN2", minutes=40)                                     # a second call the same day
     s.sync_inbound(T0 + timedelta(minutes=50))
     assert len([m for m in s.messages() if m["kind"] == "weather"]) == 1       # still one email for the day
-    assert s.calls()[0]["status"] == "Completed"
+    assert next(c for c in s.calls() if c["call_id"].startswith("F1-"))["status"] == "Completed"        # the second call is listed on its own row
+
+
+def test_a_call_from_a_farmer_whose_day_is_already_completed_is_still_listed_as_an_incoming_call(tmp_path):
+    d = Dial(status=A.ANSWERED, understood="yes")
+    s, _ = make(tmp_path, d)
+    s.fire(D)                                                                  # F1 is called and understood: the day is completed
+    s._refresh_inbound(force=True)
+    rings(d, attempt_id="IN-LATE", minutes=40)
+    s.sync_inbound(T0 + timedelta(minutes=50))
+    rows = [c for c in s.calls() if c["call_id"] == "IN-IN-LATE"]
+    assert len(rows) == 1                                                       # visible in the call log
+    row = rows[0]
+    assert row["direction"] == "incoming" and row["farmer_id"] == "F1" and row["farmer_name"] != "Unknown number"
+    assert row["disposition"] == "Incoming call: weather already given today"
+    assert next(c for c in s.calls() if c["call_id"] == f"F1-{D.isoformat()}")["status"] == "Completed"   # the day's result is untouched
