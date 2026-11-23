@@ -133,3 +133,11 @@ which means "Did you make the call?" (the dashboard's English line showed "Have 
 - Lesson: after changing any nudge or intro text, read the saved translations back (`agents get`, config.interaction_config.nudge_config) before committing a version.
 - Known and not changed: the dashboard's "Show English" uses Sarvam's translate API on the stored text; it renders "Chetan Dabke's assistant" as "an assistant"
   in places. Sarvam's own interaction record carries a better English line per turn (`en_text`) and could be used instead.
+
+### The goodbye must not promise a call (23 Nov, same draft)
+Found in a second test call: the farmer said "I understood" while the weather was being read, was asked if they had any questions, and stayed silent. The silence
+timer ended the call with "We will call you later", but the dashboard (correctly) showed Completed: the farmer had understood, the weather email was sent, and no retry
+is planned. The silence goodbye is one fixed text for every silence in a call, so it cannot know whether a retry will follow.
+- New final nudge (and the matching prompt phrase): "You may be busy, so I will end the call now. Thank you, have a good day from Agrythm." No promise of a later call.
+- A farmer who never spoke is still retried by the normal rules (up to 3 attempts a day), without being told in the call.
+- Translations were read back after saving: Kannada, Hindi, Telugu and the rest are correct.
