@@ -7,7 +7,7 @@ The client does not need incoming calls in Gate Zero. Gate Zero calls farmers; i
 - With it set: the backend pushes each registered farmer (name, place, weather, what happened today) to the line, logs every incoming call (Incoming line panel, 'In' mark in the call log), turns a farmer's call into their result, and sends the weather email after a successful one.
 
 ## What was found
-- Sarvam answered every push of farmer details with HTTP 422 'User Identifier is not supported for deployments', also for a request without that field (tested through Sarvam's own cohort tool on 20 Nov). Their docs list the field as allowed. Ask Sarvam support before relying on cohorts for inbound.
+- Sarvam's JSON 'stream' route for deployments answered every push with HTTP 422 'User Identifier is not supported for deployments', also for a request without that field (23 Nov, the failure note listed the fields sent). Their docs list the field as allowed. The CSV upload route for the same deployment accepts the data, and the backend now uses it. Still unverified: whether a new cohort for a number replaces the old record, and how an incoming call is matched in practice.
 - Without farmer details on the line, every caller looks unknown and is refused; Sarvam cannot refuse a number before the line answers.
 - Incoming calls reach the dashboard only after Sarvam reports them (minutes), matched by the caller's number hash.
 

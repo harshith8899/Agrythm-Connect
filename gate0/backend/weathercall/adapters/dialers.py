@@ -10,11 +10,15 @@ and says why, so the dashboard can show which one is live.
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import re
 import urllib.error
 import urllib.parse
+import urllib.request
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from ..contracts import ProviderCallResult
@@ -34,6 +38,20 @@ class SarvamHTTPError(RuntimeError):
     def __init__(self, safe_text: str):
         super().__init__(safe_text)
         self.safe_text = safe_text
+
+
+def _multipart(fields: dict, files: dict) -> tuple[bytes, str]:
+    """A multipart/form-data body (standard library only). fields: name -> text; files: name -> (file name, type, bytes)."""
+    boundary = uuid.uuid4().hex
+    crlf = b"\r\n"
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        parts.append(f'--{boundary}'.encode() + crlf + f'Content-Disposition: form-data; name="{name}"'.encode() + crlf + crlf + str(value).encode() + crlf)
+    for name, (filename, ctype, data) in files.items():
+        parts.append(f'--{boundary}'.encode() + crlf + f'Content-Disposition: form-data; name="{name}"; filename="{filename}"'.encode() + crlf
+                     + f'Content-Type: {ctype}'.encode() + crlf + crlf + data + crlf)
+    parts.append(f'--{boundary}--'.encode() + crlf)
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
 OUTPUT_VARS = ("call_summary", "callback_time", "understood_weather", "stop_calls_requested")
@@ -79,11 +97,13 @@ class SarvamDialler(SarvamAgentTelephony):
     def push_inbound_many(self, entries, cohort_name) -> list[str]:
         """Tells the inbound deployment which numbers may ring and what to say to each: Sarvam matches a caller by number
         (a cohort of known callers) and starts the agent with that person's variables. entries: dicts with phone, fid,
-        language_name and variables; at most 1000 go in one request. Returns the cohort ids."""
+        language_name and variables. Sent as one CSV cohort upload (POST .../deployments/{id}/cohorts/upload): Sarvam refuses
+        the JSON 'stream' route for deployments with 'User Identifier is not supported' even when no identifier is sent (found
+        23 Nov), while the upload is accepted. Returns the cohort id."""
         if not self.inbound_ready:
             raise RuntimeError("SARVAM_INBOUND_DEPLOYMENT_ID is not set")
-        url = f"{BASE}/scheduling/v1/orgs/{self.org}/workspaces/{self.ws}/deployments/{self.inbound_deployment}/cohorts/stream"
-        users, seen = [], set()
+        url = f"{BASE}/scheduling/v1/orgs/{self.org}/workspaces/{self.ws}/deployments/{self.inbound_deployment}/cohorts/upload"
+        rows, seen = [], set()
         for e in entries:
             try:
                 phone = to_e164(e["phone"])
@@ -92,32 +112,41 @@ class SarvamDialler(SarvamAgentTelephony):
             if phone in seen:                               # two farmers on one number: the line can know only one of them
                 continue
             seen.add(phone)
-            users.append({"user_phone_number": phone,           # no user_identifier: Sarvam does not support it for deployments
-                          "app_variables": {k: v for k, v in e["variables"].items() if v != ""},     # no blank values
-                          "app_overrides": {"initial_language_name": e["language_name"]}})
-        ids = []
-        for i in range(0, len(users), 1000):
-            name = cohort_name if i == 0 else f"{cohort_name}-{i // 1000 + 1}"
+            rows.append((phone, e["language_name"], e["variables"]))
+        if not rows:
+            return []
+        names = sorted({k for _, _, v in rows for k in v})              # the agent's variable names, one CSV column each
+        out = io.StringIO()
+        writer = csv.writer(out, lineterminator="\n")
+        writer.writerow(["phone", "language", *names])
+        for phone, language, variables in rows:
+            writer.writerow([phone, language, *[str(variables.get(k, "")) for k in names]])
+        transformation = {"phone_number": {"column_name": "phone", "country_code": "IN"},
+                          "app_variables": {k: {"column_name": k} for k in names},
+                          "app_overrides": {"initial_language_name": {"column_name": "language"}}}
+        body, content_type = _multipart({"name": cohort_name[:50]}, {
+            "cohort_file": ("cohort.csv", "text/csv", out.getvalue().encode("utf-8")),
+            "cohort_transformation_file": ("transformation.json", "application/json", json.dumps(transformation).encode("utf-8"))})
+        req = urllib.request.Request(url, data=body, method="POST", headers={"X-API-Key": self._key, "Content-Type": content_type})
+        try:
+            with self._open(req, timeout=60) as resp:
+                return [str(json.load(resp).get("cohort_id", ""))]
+        except urllib.error.HTTPError as exc:
+            code, message = "", ""
             try:
-                ids.append(str(self._request(url, {"name": name[:50], "users": users[i:i + 1000]}).get("cohort_id", "")))
-            except urllib.error.HTTPError as exc:
-                code, message = "", ""
-                try:
-                    err = json.load(exc).get("error") or {}
-                    code, message = str(err.get("code", "")), str(err.get("message") or "")
-                    details = (err.get("data") or {}).get("details")        # Sarvam puts the real reason here
-                    if isinstance(details, str) and details:
-                        message = f"{message} {details}".strip() if message else details
-                    elif isinstance(details, (list, dict)) and details:
-                        message = f"{message} {json.dumps(details)}".strip()
-                except Exception:
-                    pass
-                detail = f"HTTP {exc.code} {code}".strip()
-                if message:             # Sarvam's own words say which field it did not like; digits and quoted values are masked
-                    detail += ": " + _strip_quoted(scrub(message))[:140]
-                sent = sorted({k for u in users[i:i + 1000] for k in u})          # field names only, never values
-                raise SarvamHTTPError(f"{detail[:170]} [sent fields: {', '.join(sent)}]") from None
-        return ids
+                err = json.load(exc).get("error") or {}
+                code, message = str(err.get("code", "")), str(err.get("message") or "")
+                details = (err.get("data") or {}).get("details")        # Sarvam puts the real reason here
+                if isinstance(details, str) and details:
+                    message = f"{message} {details}".strip() if message else details
+                elif isinstance(details, (list, dict)) and details:
+                    message = f"{message} {json.dumps(details)}".strip()
+            except Exception:
+                pass
+            detail = f"HTTP {exc.code} {code}".strip()
+            if message:             # Sarvam's own words say which field it did not like; digits and quoted values are masked
+                detail += ": " + _strip_quoted(scrub(message))[:140]
+            raise SarvamHTTPError(f"{detail[:170]} [upload columns: {', '.join(['phone', 'language', *names])}]") from None
 
     def find_inbound_calls(self, start, end, known_ids):
         """Connected calls between start and end that are not ours (not in known_ids): farmers ringing the line. Returns
