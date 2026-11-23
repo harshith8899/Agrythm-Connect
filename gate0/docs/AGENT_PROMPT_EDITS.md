@@ -122,3 +122,22 @@ pauses was answered in pieces, then the agent ended the call in the same turn as
    words were a question or something new, and ends only after a clear closing (or after refusing an off-topic request twice).
 4. **Not changed:** the voice setting `silence_duration_frames` (6): raising it to 9 would stop the agent answering half a sentence but slows every answer.
    `volume_threshold` stays -45.
+
+
+## Agent v20 draft (23 Nov): the silence question was mistranslated
+Found in the 23 Nov test call (v19): Sarvam machine-translates the silence-nudge text, and "Are you there in the call?" became Kannada "ನೀವು ಕರೆ ಮಾಡಿದ್ದೀರಾ?",
+which means "Did you make the call?" (the dashboard's English line showed "Have you made a call?"). The other languages were fine.
+- Nudge text (English, translated by Sarvam on save): 3 s "Hello, are you there? Can you hear me?", 3 s "Hello, are you still there? Can you hear me?", 4 s the polite
+  goodbye (unchanged). Read back after saving: Kannada "ಹಲೋ, ನೀವು ಇದ್ದೀರಾ? ನಾನು ಹೇಳ್ತಿರೋದು ನಿಮಗೆ ಕೇಳಿಸ್ತಿದೆಯಾ?", Hindi, Telugu and the rest read correctly.
+- Prompt: the two "are you there" phrases (Hindi, Kannada, Telugu, English) in the silence bullet match the nudge text.
+- Lesson: after changing any nudge or intro text, read the saved translations back (`agents get`, config.interaction_config.nudge_config) before committing a version.
+- Known and not changed: the dashboard's "Show English" uses Sarvam's translate API on the stored text; it renders "Chetan Dabke's assistant" as "an assistant"
+  in places. Sarvam's own interaction record carries a better English line per turn (`en_text`) and could be used instead.
+
+### The goodbye must not promise a call (23 Nov, same draft)
+Found in a second test call: the farmer said "I understood" while the weather was being read, was asked if they had any questions, and stayed silent. The silence
+timer ended the call with "We will call you later", but the dashboard (correctly) showed Completed: the farmer had understood, the weather email was sent, and no retry
+is planned. The silence goodbye is one fixed text for every silence in a call, so it cannot know whether a retry will follow.
+- New final nudge (and the matching prompt phrase): "You may be busy, so I will end the call now. Thank you, have a good day from Agrythm." No promise of a later call.
+- A farmer who never spoke is still retried by the normal rules (up to 3 attempts a day), without being told in the call.
+- Translations were read back after saving: Kannada, Hindi, Telugu and the rest are correct.
