@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Lock, User, Eye, EyeOff, ShieldCheck, Server, CheckCircle2 } from 'lucide-react';
 import { pingServer } from '../utils';
+import { WakeServerControls } from './WakeServerControls';
 
 const NOT_CONNECTED = 'This dashboard is not connected to the server. In Cloudflare, open the Worker, Settings, Variables and Secrets, and check that BACKEND_URL and API_TOKEN are both there (type Secret), then deploy.';
 const DIAGNOSE_AFTER_S = 40;      // a cold start answers within about 25 s: past this, show what the connection is really saying
@@ -24,7 +25,7 @@ export const LoginScreen = ({ onSignIn, initialError = '' }) => {
     const startedAt = Date.now();
     const tick = setInterval(() => setSeconds(Math.round((Date.now() - startedAt) / 1000)), 1000);
     (async () => {
-      while (!stopped) {
+      for (let miss = 0; !stopped; miss += 1) {
         const answer = await pingServer();
         if (stopped) return;
         setLastAnswer({ status: answer.status, message: answer.message });
@@ -37,7 +38,8 @@ export const LoginScreen = ({ onSignIn, initialError = '' }) => {
           await wait(10000);
         } else {
           setServer('waking');
-          await wait(3000);
+          // back off while the server starts: 3 s, then longer (up to 15 s), and at least 10 s after "too many requests" (HTTP 429)
+          await wait(Math.max(answer.status === 429 ? 10000 : 0, Math.min(3000 + miss * 2000, 15000)));
         }
       }
     })();
@@ -106,9 +108,12 @@ export const LoginScreen = ({ onSignIn, initialError = '' }) => {
                     {lastAnswer.message ? ` (${lastAnswer.message})` : ''}.{' '}
                     {lastAnswer.status === 0
                       ? 'The request is not being answered at all: check that the Cloudflare Worker is deployed.'
-                      : 'The Worker answers but cannot reach the server: check that BACKEND_URL on the Cloudflare Worker is exactly the Render address (https, no path).'}
+                      : lastAnswer.status === 429
+                        ? 'The host says too many requests (HTTP 429) while the server starts. This is not a wrong setting: the page waits longer between tries and carries on by itself. If it lasts more than a few minutes, open the service in Render and check that it is Live.'
+                        : 'The Worker answers but cannot reach the server: check that BACKEND_URL on the Cloudflare Worker is exactly the Render address (https, no path).'}
                   </span>
                 )}
+                <span className="block mt-2"><WakeServerControls /></span>
               </span>
             </div>
           )}

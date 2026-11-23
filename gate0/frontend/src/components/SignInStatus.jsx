@@ -1,40 +1,14 @@
-import React, { useState } from 'react';
-import { ExternalLink, Loader2, Power, Server, XCircle } from 'lucide-react';
-import { API_BASE } from '../utils/constants';
+import React from 'react';
+import { Loader2, Server, XCircle } from 'lucide-react';
 import { SliderLoader } from './SliderLoader';
+import { WakeServerControls } from './WakeServerControls';
 
 const DIAGNOSE_AFTER_S = 40;      // a cold start answers within about 25 s: past this, show what the connection is really saying
 
 // Shown on the dashboard while the sign-in is still being finished in the background (the server may be waking up).
 // info: { phase: 'waking' | 'signing' | 'unconfigured', seconds, last: { status, message } | null }
-const WAKE_TIMEOUT_MS = 90000;
-
-// The Wake button: asks the server (through the Worker, which knows the Render address) to answer, and says what came back.
-const useWake = () => {
-  const [wake, setWake] = useState({ busy: false, text: '' });
-  const run = async () => {
-    setWake({ busy: true, text: 'Asking the server to wake up (this can take up to a minute)...' });
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), WAKE_TIMEOUT_MS);
-    try {
-      const res = await fetch(`${API_BASE}/api/wake`, { cache: 'no-store', signal: controller.signal });
-      let body = {};
-      try { body = await res.json(); } catch { /* not JSON */ }
-      if (body.status === 200) setWake({ busy: false, text: 'The server answered: it is awake. The data will appear in a moment.' });
-      else if (body.status) setWake({ busy: false, text: `The server answered HTTP ${body.status}. It may still be starting: try again in a few seconds.` });
-      else setWake({ busy: false, text: body.error || 'The server did not answer yet. Try again in a few seconds.' });
-    } catch {
-      setWake({ busy: false, text: 'No answer yet. The server may still be starting: try again in a few seconds.' });
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-  return [wake, run];
-};
-
 export const SignInStatus = ({ username, info, onCancel }) => {
   const { phase, seconds, last } = info;
-  const [wake, runWake] = useWake();
   if (phase === 'unconfigured') {
     return (
       <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl text-rose-900 shadow-xs flex items-start justify-between gap-3" role="alert">
@@ -76,20 +50,10 @@ export const SignInStatus = ({ username, info, onCancel }) => {
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
-          {phase === 'waking' && (
-            <>
-              <button type="button" onClick={runWake} disabled={wake.busy} className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap bg-amber-600 text-white border border-amber-700 text-xs font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-wait">
-                {wake.busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}Wake the server
-              </button>
-              <a href={`${API_BASE}/api/wake?open=1`} target="_blank" rel="noreferrer" className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap bg-white border border-amber-200 text-xs font-semibold no-underline text-amber-950" title="Opens the server's own address in a new tab; opening it also wakes it">
-                <ExternalLink className="w-3.5 h-3.5" />Open server
-              </a>
-            </>
-          )}
+          {phase === 'waking' && <WakeServerControls />}
           <button type="button" onClick={onCancel} className="h-9 px-3.5 rounded-xl inline-flex items-center justify-center whitespace-nowrap bg-white border border-amber-200 text-xs font-semibold cursor-pointer">Cancel</button>
         </div>
       </div>
-      {wake.text && <div className="text-xs font-semibold text-amber-900" role="status">{wake.text}</div>}
       <SliderLoader tone="amber" />
     </div>
   );
