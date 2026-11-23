@@ -19,11 +19,12 @@ class Watching:
     mode, live = "watching", False
 
     def __init__(self, statuses, boom=False):
-        self.statuses, self.boom, self.service, self.seen = list(statuses), boom, None, []
+        self.statuses, self.boom, self.service, self.seen, self.phones = list(statuses), boom, None, [], []
 
     def place(self, phone, language_name, variables):
         self.seen.append({c["farmer_id"]: (c["status"], c["disposition"], c["call_id"], bool(c.get("is_test")))
                           for c in self.service.calls()})
+        self.phones.append(phone)                          # who is being rung, in the order the snapshots were taken
         if self.boom:
             raise RuntimeError("provider down")
         return ProviderCallResult(self.statuses.pop(0), provider_call_id=f"A{len(self.seen)}", duration_s=30)
@@ -43,17 +44,20 @@ def statuses(s):
     return {c["farmer_id"]: c["status"] for c in s.calls()}
 
 
-def test_the_daily_send_shows_everyone_in_queue_then_each_one_in_call_then_the_result(tmp_path):
+def test_the_daily_send_shows_each_farmer_in_call_while_their_call_is_placed_and_then_the_result(tmp_path):
+    # calls are placed at the same time, so which farmer is rung first is not fixed: check each farmer's own snapshot
     d = Watching([A.ANSWERED, A.NO_ANSWER])
     s, _ = make(tmp_path, d)
     s.import_csv(TWO)
     s.fire(D)
-    first, second = d.seen
-    assert first["F1"][0] == "In Call" and first["F2"][0] == "In Queue"          # F1 is on the phone, F2 waits
-    assert second["F1"][0] == "Completed" and second["F2"][0] == "In Call"      # F1 has its result, F2 is next
-    assert "Calling now" in first["F1"][1] and "Waiting in the queue" in first["F2"][1]
-    assert statuses(s) == {"F1": "Completed", "F2": "Retrying"}                  # nothing is left In Queue or In Call
-    assert s.db.execute("SELECT COUNT(*) FROM dash_live").fetchone()[0] == 0
+    assert len(d.seen) == 2 and sorted(d.phones) == ["9876543210", "9876543211"]
+    for phone, snapshot in zip(d.phones, d.seen):
+        me = "F1" if phone == "9876543210" else "F2"
+        assert snapshot[me][0] == "In Call" and "Calling now" in snapshot[me][1]      # the farmer being rung shows In Call
+        other = snapshot["F2" if me == "F1" else "F1"][0]
+        assert other in ("In Queue", "In Call", "Completed", "Retrying")             # the other is waiting, on the phone, or done
+    assert statuses(s) == {"F1": "Completed", "F2": "Retrying"} or statuses(s) == {"F1": "Retrying", "F2": "Completed"}
+    assert s.db.execute("SELECT COUNT(*) FROM dash_live").fetchone()[0] == 0           # nothing is left In Queue or In Call
 
 
 def test_the_live_row_and_the_result_are_one_row_with_the_same_id(tmp_path):
