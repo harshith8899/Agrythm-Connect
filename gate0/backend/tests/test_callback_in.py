@@ -269,17 +269,46 @@ class Opener:
         return io.BytesIO(json.dumps(self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]).encode())
 
 
-def test_push_inbound_many_streams_a_cohort_to_the_inbound_deployment_in_chunks_of_1000():
-    op = Opener({"cohort_id": "coh-1"})
+class UploadOpener:
+    """Records the multipart request of a cohort upload and answers like Sarvam."""
+    def __init__(self):
+        self.requests = []
+
+    def __call__(self, req, timeout=0):
+        self.requests.append((req.full_url, req.get_method(), dict(req.header_items()), req.data))
+        return io.BytesIO(json.dumps({"cohort_id": "coh-1", "status": "processing"}).encode())
+
+
+def parts_of(op):
+    """The form parts of the one recorded multipart request: {name: bytes}."""
+    import re
+    url, method, headers, data = op.requests[0]
+    boundary = re.search(r"boundary=(\S+)", headers["Content-type"]).group(1).encode()
+    out = {}
+    for chunk in data.split(b"--" + boundary):
+        m = re.search(rb'name="([^"]+)"', chunk)
+        if m:
+            out[m.group(1).decode()] = chunk.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n", 1)[0]
+    return url, method, headers, out
+
+
+def test_push_inbound_many_uploads_one_csv_cohort_to_the_inbound_deployment():
+    op = UploadOpener()
     d = SarvamDialler(env=ENV, opener=op)
     entries = [{"fid": f"F{i}", "phone": f"98765{i:05d}", "language_name": "Hindi", "variables": {"farmer_name": f"n{i}"}} for i in range(1001)]
-    assert d.inbound_ready and d.push_inbound_many(entries, "roster-x") == ["coh-1", "coh-1"]
-    url, method, body = op.requests[0]
-    assert url.endswith("/scheduling/v1/orgs/o/workspaces/w/deployments/dep-1/cohorts/stream") and method == "POST"
-    assert body["name"] == "roster-x" and len(body["users"]) == 1000 and op.requests[1][2]["name"] == "roster-x-2"
-    assert body["users"][0] == {"user_phone_number": "+919876500000",
-                                "app_variables": {"farmer_name": "n0"}, "app_overrides": {"initial_language_name": "Hindi"}}
-    assert all("user_identifier" not in u for u in body["users"])                # Sarvam refuses it for deployments
+    assert d.inbound_ready and d.push_inbound_many(entries, "roster-x") == ["coh-1"]
+    assert len(op.requests) == 1                                                  # one upload, however many farmers
+    url, method, headers, parts = parts_of(op)
+    assert url.endswith("/scheduling/v1/orgs/o/workspaces/w/deployments/dep-1/cohorts/upload") and method == "POST"
+    assert headers["X-api-key"] == "k" and headers["Content-type"].startswith("multipart/form-data; boundary=")
+    assert parts["name"] == b"roster-x"
+    lines = parts["cohort_file"].decode().split("\n")
+    assert lines[0] == "phone,language,farmer_name" and lines[1] == "+919876500000,Hindi,n0" and len([x for x in lines if x]) == 1002
+    t = json.loads(parts["cohort_transformation_file"])
+    assert t == {"phone_number": {"column_name": "phone", "country_code": "IN"},
+                 "app_variables": {"farmer_name": {"column_name": "farmer_name"}},
+                 "app_overrides": {"initial_language_name": {"column_name": "language"}}}
+    assert "user_identifier" not in parts["cohort_transformation_file"].decode()  # Sarvam refuses it for deployments
 
 
 def test_without_a_deployment_id_there_is_no_inbound_line():
@@ -300,8 +329,8 @@ def test_find_inbound_calls_skips_our_own_calls_and_unanswered_ones_and_reads_ev
     assert found[0][2] == datetime(2026, 11, 15, 3, 51, 30, tzinfo=found[0][2].tzinfo)
 
 
-def test_the_cohort_push_leaves_out_blank_values_shared_numbers_and_numbers_that_cannot_be_dialled():
-    op = Opener({"cohort_id": "coh-1"})
+def test_the_cohort_push_leaves_out_shared_numbers_and_numbers_that_cannot_be_dialled():
+    op = UploadOpener()
     d = SarvamDialler(env=ENV, opener=op)
     entries = [
         {"fid": "F1", "phone": "9876543210", "language_name": "Hindi", "variables": {"farmer_name": "Ramesh", "temp_min_c": ""}},
@@ -310,10 +339,9 @@ def test_the_cohort_push_leaves_out_blank_values_shared_numbers_and_numbers_that
         {"fid": "F4", "phone": "9876543211", "language_name": "English", "variables": {"farmer_name": "", "callback_context": ""}},
     ]
     assert d.push_inbound_many(entries, "roster-x") == ["coh-1"]
-    users = op.requests[0][2]["users"]
-    assert [u["user_phone_number"] for u in users] == ["+919876543210", "+919876543211"]
-    assert users[0]["app_variables"] == {"farmer_name": "Ramesh"}           # the blank value is not sent
-    assert users[1]["app_variables"] == {}                                   # an unknown number carries no values at all
+    lines = [x for x in parts_of(op)[3]["cohort_file"].decode().split("\n") if x]
+    assert lines == ["phone,language,callback_context,farmer_name,temp_min_c",
+                     "+919876543210,Hindi,,Ramesh,", "+919876543211,English,,,"]       # one row per dialable number, blanks stay blank
 
 
 def test_a_failed_push_to_the_line_is_tried_again_in_a_few_minutes_not_tomorrow(tmp_path):

@@ -35,7 +35,11 @@ class Opener:
         self.error, self.requests = error, []
 
     def __call__(self, req, timeout=0):
-        self.requests.append((req.full_url, req.get_method(), dict(req.header_items()), json.loads(req.data)))
+        try:
+            body = json.loads(req.data)
+        except ValueError:           # a multipart cohort upload is not JSON
+            body = req.data
+        self.requests.append((req.full_url, req.get_method(), dict(req.header_items()), body))
         if self.error:
             raise self.error
         return io.BytesIO(b'{"id": "x"}')
