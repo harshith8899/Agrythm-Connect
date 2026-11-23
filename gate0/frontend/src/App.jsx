@@ -231,13 +231,15 @@ function App() {
     const startedAt = Date.now();
     const tick = setInterval(() => setInfo((prev) => ({ ...prev, seconds: Math.round((Date.now() - startedAt) / 1000) })), 1000);
     (async () => {
-      for (;;) {
+      for (let miss = 0; ; miss += 1) {
         const answer = await pingServer();
         if (stopped) return;
         if (answer.ok) break;
         const unconfigured = answer.status === 503 && /not configured/i.test(answer.message);
         setInfo((prev) => ({ ...prev, phase: unconfigured ? 'unconfigured' : 'waking', last: { status: answer.status, message: answer.message } }));
-        await wait(unconfigured ? 10000 : 3000);
+        // back off while the server starts: 3 s, then longer, and at least 10 s after "too many requests" (HTTP 429), so the retries do not make it worse
+        const pause = unconfigured ? 10000 : Math.max(answer.status === 429 ? 10000 : 0, Math.min(3000 + miss * 2000, 15000));
+        await wait(pause);
         if (stopped) return;
       }
       setInfo((prev) => ({ ...prev, phase: 'signing' }));
