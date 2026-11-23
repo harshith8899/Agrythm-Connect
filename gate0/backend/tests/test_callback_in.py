@@ -200,7 +200,8 @@ def test_a_farmer_who_rings_again_after_completing_keeps_their_result(tmp_path):
     d.inbound_out = {"understood_weather": "no", "stop_calls_requested": "no", "call_summary": "s", "callback_time": ""}
     rings(d, attempt_id="IN2")
     assert s.sync_inbound(T0 + timedelta(minutes=15)) == 1
-    assert s.calls()[0]["status"] == "Completed" and d.pushed("F1")["state"] == "completed"
+    assert next(c for c in s.calls() if c["call_id"].startswith("F1-"))["status"] == "Completed" and d.pushed("F1")["state"] == "completed"
+    assert any(c["call_id"] == "IN-IN2" and c["direction"] == "incoming" for c in s.calls())      # and the call itself is listed
 
 
 def test_a_farmer_who_rings_before_the_daily_call_is_served_and_not_called_again_today(tmp_path):

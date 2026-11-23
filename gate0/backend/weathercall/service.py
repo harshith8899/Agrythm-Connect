@@ -1540,7 +1540,9 @@ class DashboardService:
                     try:
                         if self._apply_inbound_call(ports, who[0][0], who[0][1], day, res, ended):
                             brought += 1
-                        self._log_incoming(res, day, ended, last4, who[0][0], "answered", "Answered by the agent")
+                        self._log_incoming(res, day, ended, last4, who[0][0], "answered",
+                                           "Answered by the agent; today's weather was already given, so the day's result is unchanged"
+                                           if who[0][1] == "completed" else "Answered by the agent")
                     except Exception:                       # one farmer's problem never blocks the others
                         continue
                 else:
@@ -1576,13 +1578,13 @@ class DashboardService:
             pass
 
     def _incoming_rows(self) -> list[dict]:
-        """Calls to the inbound line that are not a farmer's result (an unknown number, an inactive farmer, a shared number),
-        shaped like the other call rows so the call log can list them with the incoming mark."""
+        """Calls to the inbound line that are not a farmer's result (an unknown number, an inactive farmer, a shared number, a
+        farmer whose day was already completed), shaped like the other call rows so the call log lists every incoming call with
+        the incoming mark. A call that became the farmer's result is that farmer's row instead (the NOT IN below)."""
         with self.lock:
             rows = self.db.execute("SELECT i.attempt_id, i.call_date, i.at, i.last4, i.farmer_id, i.duration_s, i.outcome, i.note, "
                                    "f.name, f.village, f.district FROM dash_incoming i LEFT JOIN dash_farmers f "
-                                   "ON f.farmer_id=i.farmer_id WHERE i.outcome<>'answered' "
-                                   "AND i.attempt_id NOT IN (SELECT attempt_id FROM dash_results WHERE attempt_id IS NOT NULL AND attempt_id <> '') "
+                                   "ON f.farmer_id=i.farmer_id WHERE i.attempt_id NOT IN (SELECT attempt_id FROM dash_results WHERE attempt_id IS NOT NULL AND attempt_id <> '') "
                                    "AND i.attempt_id NOT IN (SELECT attempt_id FROM dash_tests WHERE attempt_id IS NOT NULL AND attempt_id <> '') "
                                    "ORDER BY i.at DESC LIMIT 200").fetchall()
         out = []
@@ -1590,6 +1592,8 @@ class DashboardService:
             title = {"not_registered": "Incoming call: not a registered farmer (inactive or no consent)",
                      "shared_number": "Incoming call: number shared by two farmers",
                      "unknown_number": "Incoming call: unknown number"}.get(outcome, "Incoming call")
+            if outcome == "answered" and "already given" in (note or ""):
+                title = "Incoming call: weather already given today"
             out.append({
                 "call_id": f"IN-{attempt_id}", "direction": "incoming", "farmer_id": fid or "", "farmer_name": name or "Unknown number",
                 "phone_number": "******" + last4, "location": ", ".join(x for x in (village, district) if x), "village": village or "",
