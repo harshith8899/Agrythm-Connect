@@ -9,6 +9,7 @@ import {
   isCallOnDate,
   getCallDate,
   getCallTime,
+  callDirections,
   normalizeLanguage,
   extractWeatherFromMessage,
   maskPhoneNumber
@@ -206,11 +207,8 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
       // Advisory summary
       const advisorySummary = call.advisory_summary || weatherFallback.advisory_summary;
 
-      const isInbound =
-        ['inbound', 'incoming'].includes(String(call.direction || '').toLowerCase()) ||
-        String(call.call_id || '').startsWith('IN-') ||
-        Boolean(call.has_inbound_callback) ||
-        (Array.isArray(call.attempts_log) && call.attempts_log.some((a) => ['inbound', 'incoming'].includes(String(a.direction || '').toLowerCase()) || a.incoming));
+      const dirs = callDirections(call);
+      const isInbound = dirs.incoming && !dirs.outgoing;
 
       return {
         ...call,
@@ -230,7 +228,8 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
         
         // Direction: Inbound vs Outbound
         direction: isInbound ? 'inbound' : 'outbound',
-        has_inbound_callback: Boolean(call.has_inbound_callback || isInbound),
+        has_inbound_callback: dirs.incoming,
+        has_outgoing_call: dirs.outgoing,
 
         // 4 Meteorological parameters
         weather_temp: call.weather_temp,
