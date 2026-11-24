@@ -312,7 +312,7 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
         <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <CallDirectionBadge direction={call.direction} callId={call.call_id} />
+              <CallDirectionBadge call={call} />
               <span className="font-mono font-bold text-sm text-slate-900">
                 {call.call_id}
               </span>

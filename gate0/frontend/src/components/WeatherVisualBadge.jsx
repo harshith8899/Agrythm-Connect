@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Sparkles,
 } from 'lucide-react';
+import { callDirections } from '../utils/callDirection';
 
 function getWeatherVisualMeta(rain, wind, humidity) {
   if (rain >= 50) {
@@ -305,8 +306,8 @@ export const WeatherVisualBadge = ({ call, compact = false }) => {
 export const DashboardWeatherPulse = ({ callLogs = [] }) => {
   const pulse = useMemo(() => {
     const withWeather = callLogs.filter((c) => c.weather_rainfall != null || c.weather_temp != null);
-    const inboundCount = callLogs.filter((c) => c.direction === 'inbound').length;
-    const outboundCount = callLogs.filter((c) => c.direction !== 'inbound').length;
+    const inboundCount = callLogs.filter((c) => callDirections(c).incoming).length;
+    const outboundCount = callLogs.filter((c) => callDirections(c).outgoing).length;
 
     if (withWeather.length === 0) {
       return { hasWeather: false, inboundCount, outboundCount };
