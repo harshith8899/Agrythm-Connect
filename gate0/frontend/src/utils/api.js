@@ -82,6 +82,16 @@ export const pingServer = async (timeoutMs = 100000) => {
   }
 };
 
+/**
+ * Wakes the server from this browser's own connection. /api/wake?open=1 answers with a redirect to the server's own health
+ * address, and the browser follows it, so the request reaches the host directly and not from the Cloudflare Worker (whose
+ * requests do not always wake a sleeping server). The answer cannot be read (no-cors) and is not needed: pingServer tells us
+ * when the server is up. Never throws.
+ */
+export const wakeDirect = () => {
+  fetch(`${API_BASE}/api/wake?open=1`, { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+};
+
 /** An error that means "the server is not ready yet", not "wrong password": the caller may simply try again. */
 const notReady = () => Object.assign(new Error('The server is still waking up. Trying again...'), { transient: true });
 

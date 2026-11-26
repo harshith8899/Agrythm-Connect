@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ExternalLink, Loader2, Power } from 'lucide-react';
 import { API_BASE } from '../utils/constants';
+import { wakeDirect } from '../utils/api';
 
 const WAKE_TIMEOUT_MS = 90000;
 
@@ -10,6 +11,7 @@ export const WakeServerControls = ({ buttonClass = '', linkClass = '' }) => {
   const [wake, setWake] = useState({ busy: false, text: '' });
   const run = async () => {
     setWake({ busy: true, text: 'Asking the server to wake up (this can take up to a minute)...' });
+    wakeDirect();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), WAKE_TIMEOUT_MS);
     try {
