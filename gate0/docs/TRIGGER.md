@@ -1,14 +1,14 @@
 # The wake-up timer (free Render plan)
 
 A free Render service sleeps after about 15 minutes without a visit, and the daily send, retries and callbacks run inside it.
-So a small timer in Supabase wakes it about 3 minutes before anything is due. Nothing in the calling logic changes: the backend
+So a small timer in Supabase wakes it about 13 minutes before anything is due. Nothing in the calling logic changes: the backend
 still decides, as always, what is due and places a call only at its time.
 
 ```
 Supabase (every minute)                              Render (free, sleeps when idle)
   cron job agrythm-wake-backend                        POST /api/tick  ->  one pass of "what is due"
     -> agrythm.backend_needed()  "is something due       (retries, callbacks, the 9:00 send), at most
-       within 3 minutes?"                                one pass at a time
+       within 13 minutes?"                               one pass at a time
     -> yes: pg_net calls POST /api/tick  ------------->  and the 30-second loop keeps running while awake
     -> no:  does nothing
 ```
@@ -16,8 +16,8 @@ Supabase (every minute)                              Render (free, sleeps when i
 ## When the timer wakes the backend (`gate0/supabase/wake_rules.sql`)
 | Reason in the log | Condition |
 |---|---|
-| `retry due` | a retry is pending and due within 3 minutes (or already due) |
-| `callback due` | a callback the farmer asked for is pending and due within 3 minutes (or already due) |
+| `retry due` | a retry is pending and due within 13 minutes (or already due) |
+| `callback due` | a callback the farmer asked for is pending and due within 13 minutes (or already due) |
 | `daily send due` | auto-send is on, it is between 08:47 and 22:00, and today's send has not started |
 | `daily send running` | the send started in the last 2 hours and an active, consenting farmer still has no result today |
 
@@ -50,7 +50,7 @@ select jobname, schedule, active from cron.job where jobname = 'agrythm-wake-bac
 select status, start_time, return_message from cron.job_run_details order by start_time desc limit 5;
 ```
 A good first test: add a callback or retry due in about 5 minutes (or ask a test farmer to be called in 5 minutes), then watch
-`wake_log` get a `callback due` row 3 minutes before, and `_http_response` show `202`.
+`wake_log` get a `callback due` row 13 minutes before (for a call due sooner, at the next minute), and `_http_response` show `202`.
 
 ## Switching it off or changing it
 - Pause: `select cron.alter_job((select jobid from cron.job where jobname = 'agrythm-wake-backend'), active := false);`

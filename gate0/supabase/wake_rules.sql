@@ -1,7 +1,7 @@
 -- When must the backend be awake? (Supabase, Postgres)
 --
 -- A free Render service sleeps after about 15 minutes without a visit. This function reads the same tables the backend
--- writes and answers with the reason the backend is needed within the next 3 minutes, or NULL when it is not. A timer
+-- writes and answers with the reason the backend is needed within the next 13 minutes, or NULL when it is not. A timer
 -- (wake_cron.sql) asks it every minute and, when it answers, calls the backend. The backend then decides what to do
 -- exactly as it always does: a call is only placed when it is really due, so waking it early or twice changes nothing.
 --
@@ -27,7 +27,7 @@ as $fn$
 declare
   ist     timestamp := at at time zone 'Asia/Kolkata';
   today   text      := to_char(ist, 'YYYY-MM-DD');
-  lead    interval  := interval '3 minutes';      -- wake this long before the due time (a cold start takes about a minute)
+  lead    interval  := interval '13 minutes';     -- wake this long before the due time, so the server is ready (as for the 08:47 daily wake)
   enabled boolean   := coalesce((select value from dash_settings where key = 'auto_dispatch'), 'off') = 'on';
   last_day text     := coalesce((select value from dash_settings where key = 'last_auto_run_date'), '');
   last_run text     := (select value from dash_settings where key = 'last_auto_run');
