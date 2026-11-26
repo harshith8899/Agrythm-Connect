@@ -10,6 +10,16 @@ import urllib.request
 
 LANGUAGE_CODES = {"hi": "hi-IN", "kn": "kn-IN", "te": "te-IN", "hindi": "hi-IN", "kannada": "kn-IN", "telugu": "te-IN"}
 MAX_CHARS = 900                                    # the API takes about 1000 characters at a time
+_SCRIPTS = (("hi-IN", 0x0900, 0x097F), ("te-IN", 0x0C00, 0x0C7F), ("kn-IN", 0x0C80, 0x0CFF))
+
+
+def script_language(text: str) -> str:
+    """The language a turn is written in, from its script (a caller may switch language mid-call, so the call's own
+    language cannot be trusted for each turn): the Indian script with the most letters, or "" when there is none."""
+    counts = {code: sum(1 for ch in text or "" if low <= ord(ch) <= high and ch not in "।॥")
+              for code, low, high in _SCRIPTS}
+    best = max(counts, key=counts.get)
+    return best if counts[best] else ""
 
 
 class TranslateError(RuntimeError):
@@ -32,9 +42,10 @@ class SarvamTranslator:
         return (language or "").strip().lower() in LANGUAGE_CODES
 
     def translate(self, text: str, language: str) -> str:
-        """The English for one turn. English text is returned as it is."""
-        code = LANGUAGE_CODES.get((language or "").strip().lower())
-        if not code or not text.strip():
+        """The English for one turn, from the script it is written in (language, the call's own, does not decide).
+        Text with no Indian script is returned as it is."""
+        code = script_language(text)
+        if not code:
             return text
         out = []
         for i in range(0, len(text), MAX_CHARS):
