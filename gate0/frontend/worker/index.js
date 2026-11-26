@@ -45,13 +45,4 @@ export default {
       return Response.json({ error: 'Backend not reachable' }, { status: 502 });
     }
   },
-
-  // Keeps the Render service awake during the day: Cloudflare runs this on the schedule in wrangler.jsonc (triggers, crons) and it asks
-  // the backend's health address, which needs no token. Render's free plan sleeps after 15 minutes without a visit and then takes a minute
-  // or more to start, which is why the first sign-in of the day often failed. Outside the scheduled hours the service may still sleep.
-  async scheduled(event, env, ctx) {
-    const backend = String(env.BACKEND_URL || '').replace(/\/+$/, '');
-    if (!backend) return;
-    ctx.waitUntil(fetch(backend + '/api/health', { headers: { 'User-Agent': 'agrythm-keep-awake' } }).catch(() => null));
-  },
 };

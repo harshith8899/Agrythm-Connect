@@ -919,7 +919,7 @@ export const CostAnalyticsView = ({ isBackendOnline = true, callLogs = [] }) => 
 
   useEffect(() => {
     load(false);
-    const timer = setInterval(() => load(false), 60000);
+    const timer = setInterval(() => { if (!document.hidden) load(false); }, 60000);
     return () => clearInterval(timer);
   }, [load]);
 

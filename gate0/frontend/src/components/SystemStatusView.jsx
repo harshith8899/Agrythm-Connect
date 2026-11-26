@@ -162,7 +162,7 @@ export const SystemStatusView = ({ isBackendOnline = true }) => {
 
   useEffect(() => {
     loadSystem(false);
-    const timer = setInterval(() => loadSystem(false), 60000);
+    const timer = setInterval(() => { if (!document.hidden) loadSystem(false); }, 60000);
     return () => clearInterval(timer);
   }, [loadSystem]);
 
