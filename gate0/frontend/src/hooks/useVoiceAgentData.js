@@ -144,8 +144,9 @@ export const useVoiceAgentData = ({ enabled = true } = {}) => {
 
     // 2 s while a send runs, 5 s while the server is not answering (so the page fills in soon after it wakes), else 15 s
     const every = sending ? 2 : !isBackendOnline ? 5 : autoPollInterval;
+    // a tab nobody is looking at asks nothing, so it does not keep the free-plan server awake
     const timer = setInterval(() => {
-      fetchAllData(true);
+      if (!document.hidden) fetchAllData(true);
     }, every * 1000);
 
     return () => clearInterval(timer);

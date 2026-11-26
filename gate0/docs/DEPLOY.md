@@ -41,7 +41,7 @@ who finds the address could read farmer data and press "Send now" (real calls co
    fetched only when a call is made, once per place and day, and the System Status tab never asks the weather service.
    Call-back line: set `SARVAM_INBOUND_DEPLOYMENT_ID` (Sarvam, Deploy, Inbound deployments) so a farmer we could not reach is told to it; the deployment and the calls use the same agent version.
    English transcripts: add `SARVAM_API_KEY` (a Sarvam API key from the Sarvam dashboard, not the agent key) so 'Show English' in the call details can translate; without it the button says translation is not set up.
-   Keeping the backend awake: the Worker's cron (`wrangler.jsonc`) pings `/api/health` every 10 minutes from 05:30 to 23:29 India time; it needs `BACKEND_URL` on the Worker, as for the proxy.
+   Sleeping and waking: the backend is left to sleep after 15 idle minutes (the free plan has limited hours). It is woken by the dashboard's sign-in page and by the Supabase timer for due calls (`TRIGGER.md`); there is no keep-awake schedule, and a hidden dashboard tab stops asking.
    Email on Render's free plan: SMTP (Gmail) does not work there, because the free plan blocks the SMTP ports (the 'Emails after calls'
    table then shows failed with an OSError). Use an HTTPS mail API instead: make a free Resend account, create an API key and put it in
    `GATE0_RESEND_API_KEY`; set `GATE0_MAIL_LOGO_URL` to the logo's public address (the dashboard's `/agrythm-logo.png`). With no `GATE0_MAIL_FROM`
