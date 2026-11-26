@@ -135,14 +135,40 @@ def test_the_transcript_comes_back_with_english_under_each_turn_and_each_turn_is
     assert len(tr.calls) == 2                                                  # the second time came from what was kept
 
 
-def test_an_english_call_needs_no_translation_and_no_key_says_so(tmp_path):
+def test_english_turns_need_no_translation_and_no_key_says_so(tmp_path):
     s, tr, cid = _with_transcript(tmp_path, language="en")
-    assert [t["english"] for t in s.transcript_english(cid)["turns"]] == ["नमस्ते रमेश जी", "हाँ"] and tr.calls == []
+    s._save("F1", D, status="answered", language="en", transcript=json.dumps(
+        [{"speaker": "Agent", "text": "Am I speaking with Ramesh?"}, {"speaker": "Farmer", "text": "Okay, speak in Hindi."}]))
+    assert [t["english"] for t in s.transcript_english(cid)["turns"]] == ["Am I speaking with Ramesh?", "Okay, speak in Hindi."]
+    assert tr.calls == []
     (tmp_path / "n").mkdir()
     s2, _, cid2 = _with_transcript(tmp_path / "n", translator=None)
     s2.translator = None
     r = s2.transcript_english(cid2)
     assert r["available"] is False and "SARVAM_API_KEY" in r["error"] and r["turns"][0]["text"]
+
+
+def test_a_call_that_switches_language_is_translated_turn_by_turn_whatever_the_calls_language(tmp_path):
+    s, tr, cid = _with_transcript(tmp_path, language="en")          # the call started in English, then moved
+    texts = ["Hello", "అర్థమైంది", "ಸರಿ Jubilee Hills", "ठीक है"]
+    s._save("F1", D, status="answered", language="en",
+            transcript=json.dumps([{"speaker": "Agent", "text": x} for x in texts]))
+    got = [t["english"] for t in s.transcript_english(cid)["turns"]]
+    assert got == ["Hello"] + [f"EN({x})" for x in texts[1:]] and tr.calls == texts[1:]
+
+
+@pytest.mark.parametrize("text,code", [
+    ("कैसे हो", "hi-IN"), ("ಹಲೋ", "kn-IN"), ("హలో", "te-IN"),
+    ("Jubilee Hills ಲ್ಲಿ", "kn-IN"), ("Okay, speak in Hindi.", None), ("21 - 31", None)])
+def test_each_turn_is_translated_from_the_script_it_is_written_in(text, code):
+    seen = []
+
+    def ok(req, timeout=0):
+        seen.append(json.loads(req.data))
+        return io.BytesIO(json.dumps({"translated_text": "x"}).encode())
+
+    out = SarvamTranslator("k", opener=ok).translate(text, "Hindi")        # the call's own language does not decide
+    assert (seen[0]["source_language_code"] if seen else None) == code and out == ("x" if code else text)
 
 
 def test_a_translation_failure_keeps_what_was_done_and_says_which_error(tmp_path):

@@ -13,11 +13,10 @@ import {
   Info
 } from 'lucide-react';
 
-import { maskPhoneNumber, getCallTranslation, formatTranscriptText, hasIndicScript, isTodayDateStr, isCallToday } from '../utils';
+import { maskPhoneNumber, getCallTranslation, hasIndicScript, isTodayDateStr, isCallToday } from '../utils';
 import { CallDirectionBadge } from './CallDirectionBadge';
 import { WeatherVisualBadge } from './WeatherVisualBadge';
 
-const LANG_CODES = { Hindi: 'hi', Kannada: 'kn', Telugu: 'te', English: 'en' };
 const INDIC_FONTS = "'Noto Sans Kannada', 'Noto Sans Telugu', 'Noto Sans Devanagari', 'Nirmala UI', 'Mangal', Inter, system-ui, sans-serif";
 
 const AttemptRowWithHover = ({ attempt, isCurrent, onSelect }) => {
@@ -131,55 +130,22 @@ const AttemptRowWithHover = ({ attempt, isCurrent, onSelect }) => {
 const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onSelectCall }) => {
   const [callingBack, setCallingBack] = useState(false);
   const [callNote, setCallNote] = useState(null);
-  const [english, setEnglish] = useState({ show: false, loading: false, turns: null, error: '' });   // the English under each turn
-  const [transcriptMode, setTranscriptMode] = useState('romanized');
+  const [transcriptMode, setTranscriptMode] = useState('original');       // 'original' or 'translated'
+  const [translation, setTranslation] = useState({ key: '', turns: null, error: '' });   // the English of one call's turns
 
-  const toggleEnglish = async () => {
-    if (english.show) {
-      setEnglish((e) => ({ ...e, show: false }));
-      return;
-    }
-    if (english.turns) {
-      setEnglish((e) => ({ ...e, show: true }));
-      return;
-    }
-    setEnglish({ show: true, loading: true, turns: null, error: '' });
-    try {
-      const r = await getCallTranslation(call.call_id);
-      setEnglish({ show: true, loading: false, turns: r.turns || [], error: r.error || '' });
-    } catch (err) {
-      setEnglish({ show: true, loading: false, turns: null, error: err.message || 'Could not translate' });
-    }
-  };
-
-  // Reset English state when selected call changes
+  // The English is asked from the server when "Translate to English" is chosen. The key names the call and its length, so
+  // another call, or new turns on this one, is never shown with an old answer.
+  const translationKey = `${call?.call_id || ''}:${call?.transcript?.length || 0}`;
   React.useEffect(() => {
-    setEnglish({ show: false, loading: false, turns: null, error: '' });
-  }, [call?.call_id]);
-
-  // Automatically fetch neural translation from backend when user selects "Translate to English"
-  React.useEffect(() => {
-    if (transcriptMode === 'translated' && !english.turns && !english.loading && call?.call_id) {
-      setEnglish((e) => ({ ...e, loading: true, error: '' }));
-      getCallTranslation(call.call_id)
-        .then((r) => {
-          setEnglish((e) => ({
-            ...e,
-            loading: false,
-            turns: r?.turns || [],
-            error: r?.error || ''
-          }));
-        })
-        .catch((err) => {
-          setEnglish((e) => ({
-            ...e,
-            loading: false,
-            turns: null,
-            error: err.message || 'Could not translate'
-          }));
-        });
-    }
-  }, [transcriptMode, call?.call_id]);
+    if (transcriptMode !== 'translated' || !call?.call_id) return undefined;
+    let stopped = false;
+    getCallTranslation(call.call_id)
+      .then((r) => { if (!stopped) setTranslation({ key: translationKey, turns: r?.turns || [], error: r?.error || '' }); })
+      .catch((err) => { if (!stopped) setTranslation({ key: translationKey, turns: null, error: err.message || 'Could not translate' }); });
+    return () => { stopped = true; };
+  }, [transcriptMode, call?.call_id, translationKey]);
+  const translated = translation.key === translationKey ? translation : null;
+  const translating = transcriptMode === 'translated' && !translated;
 
 
   const rawTranscript = call.transcript_preview || call.transcript || '';
@@ -528,42 +494,9 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
                     {call.language || call.primary_language}
                   </span>
                 )}
-                {transcriptItems.length > 0 && (
-                  <button
-                    onClick={toggleEnglish}
-                    disabled={english.loading}
-                    className="h-7 px-2.5 rounded-lg inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    <Languages className="w-3 h-3 text-trust-green" />
-                    {english.loading ? 'Translating...' : english.show ? 'Hide English' : 'Show English'}
-                  </button>
-                )}
               </div>
 
               <div className="inline-flex items-center p-0.5 rounded-lg bg-slate-100 border border-slate-200/60 text-[11px] self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setTranscriptMode('romanized')}
-                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
-                    transcriptMode === 'romanized'
-                      ? 'bg-white text-trust-navy shadow-xs font-bold'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  English Script
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTranscriptMode('translated')}
-                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                    transcriptMode === 'translated'
-                      ? 'bg-white text-trust-navy shadow-xs font-bold'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  <Languages className={`w-3 h-3 text-trust-green ${english.loading && transcriptMode === 'translated' ? 'animate-spin' : ''}`} />
-                  {english.loading && transcriptMode === 'translated' ? 'Translating...' : 'Translate to English'}
-                </button>
                 <button
                   type="button"
                   onClick={() => setTranscriptMode('original')}
@@ -575,13 +508,25 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
                 >
                   Original
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setTranscriptMode('translated')}
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                    transcriptMode === 'translated'
+                      ? 'bg-white text-trust-navy shadow-xs font-bold'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Languages className={`w-3 h-3 text-trust-green ${translating ? 'animate-spin' : ''}`} />
+                  {translating ? 'Translating...' : 'Translate to English'}
+                </button>
               </div>
             </div>
 
-            {transcriptMode === 'translated' && english.error && (
+            {transcriptMode === 'translated' && translated?.error && (
               <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
                 <Info className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>{english.error} Displaying high-fidelity instant client translation.</span>
+                <span>{translated.error} Lines without English are shown as spoken.</span>
               </div>
             )}
 
@@ -598,14 +543,13 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
                   if (isSystem) {
                     return (
                       <div key={idx} className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
-                        <strong>Note:</strong> {formatTranscriptText(text, transcriptMode)}
+                        <strong>Note:</strong> {text}
                       </div>
                     );
                   }
 
-                  const isTranslatedMode = transcriptMode === 'translated';
-                  const backendEnglish = isTranslatedMode && english.turns && english.turns[idx] && english.turns[idx].english;
-                  const renderedText = backendEnglish || formatTranscriptText(text, transcriptMode);
+                  const english = transcriptMode === 'translated' ? translated?.turns?.[idx]?.english : '';
+                  const renderedText = english || text;                    // never a guess: the server's English, or as spoken
 
                   return (
                     <div key={idx} className={`flex gap-2.5 ${isAgent ? 'items-start' : 'items-start flex-row-reverse'}`}>
@@ -623,24 +567,19 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
                           <span className="font-bold text-[10px] uppercase tracking-wider text-slate-400">
                             {isAgent ? 'Agent' : (call.farmer_name || 'Farmer')}
                           </span>
-                          {transcriptMode !== 'original' && hasIndicScript(text) && (
+                          {english && english !== text && hasIndicScript(text) && (
                             <span className="text-[9px] font-medium px-1.5 py-0.2 rounded bg-white text-slate-500 border border-slate-200 shadow-2xs">
-                              {transcriptMode === 'romanized' ? 'English script' : 'English translation'}
+                              English translation
                             </span>
                           )}
                         </div>
                         <p
-                          lang={transcriptMode === 'original' ? (LANG_CODES[call.language || call.primary_language] || undefined) : undefined}
+                          lang={english ? 'en' : undefined}
                           className="whitespace-pre-line text-[14px] leading-7 break-words"
-                          style={{ fontFamily: transcriptMode === 'original' ? INDIC_FONTS : undefined }}
+                          style={{ fontFamily: INDIC_FONTS }}
                         >
                           {renderedText}
                         </p>
-                        {english.show && !isTranslatedMode && english.turns && (english.turns[idx]?.english || '') !== '' && (
-                          <p className="mt-1.5 pt-1.5 border-t border-slate-200/70 text-[12px] leading-relaxed text-slate-500 italic whitespace-pre-line break-words">
-                            {english.turns[idx].english}
-                          </p>
-                        )}
                       </div>
                     </div>
                   );
@@ -649,11 +588,11 @@ const CallDetailDrawerContent = ({ call, onClose, onCallBack, allCalls = [], onS
             ) : rawTranscript ? (
               <div 
                 className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-800 leading-7 whitespace-pre-line" 
-                style={{ fontFamily: transcriptMode === 'original' ? INDIC_FONTS : undefined }}
+                style={{ fontFamily: INDIC_FONTS }}
               >
-                {transcriptMode === 'translated' && english.turns && english.turns[0]?.english
-                  ? english.turns.map(t => `${t.speaker ? t.speaker + ': ' : ''}${t.english}`).join('\n')
-                  : formatTranscriptText(rawTranscript, transcriptMode)}
+                {transcriptMode === 'translated' && translated?.turns?.[0]?.english
+                  ? translated.turns.map(t => `${t.speaker ? t.speaker + ': ' : ''}${t.english || t.text}`).join('\n')
+                  : String(rawTranscript)}
               </div>
             ) : (
               <div className="p-6 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 text-slate-400 text-xs">

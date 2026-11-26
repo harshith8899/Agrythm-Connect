@@ -27,7 +27,7 @@ from typing import Callable
 from .adapters.dialers import OUTPUT_VARS, make_dialler
 from .adapters.local import SQLiteLedger
 from .adapters.mailer import MailNotConfigured, make_mailer
-from .adapters.translate import TranslateError, make_translator
+from .adapters.translate import TranslateError, make_translator, script_language
 from .adapters.mock import MockVoice, MockWeather
 from .adapters.weatherapi import geocode, make_weather
 from .adapters.sarvam_agent import _LANG_NAMES, to_e164
@@ -1811,11 +1811,13 @@ class DashboardService:
         language = call.get("language") or ""
         if self.translator is None:
             return {"available": False, "turns": turns, "error": "Translation is not set up: add SARVAM_API_KEY in Render."}
-        if not self.translator.needs_translation(language):
-            return {"available": True, "turns": [{**t, "english": t["text"]} for t in turns], "error": ""}
         out, error = [], ""
         for t in turns:
-            h = hashlib.sha1(f"{language}|{t['text']}".encode()).hexdigest()
+            source = script_language(t["text"])             # turn by turn: the call may switch language
+            if not source:
+                out.append({**t, "english": t["text"]})
+                continue
+            h = hashlib.sha1(f"{source}|{t['text']}".encode()).hexdigest()
             with self.lock:
                 row = self.db.execute("SELECT english FROM dash_translations WHERE h=?", (h,)).fetchone()
             english = row[0] if row else None
