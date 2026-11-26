@@ -44,11 +44,11 @@ def test_nothing_to_do_means_no_wake_up(world):
     assert needed(at(9, 0)) is None and needed(at(3, 0)) is None
 
 
-def test_a_retry_wakes_the_backend_three_minutes_early_and_not_before(world):
+def test_a_retry_wakes_the_backend_thirteen_minutes_early_and_not_before(world):
     _, needed, run = world
     run("insert into dash_retries values('F1','2026-11-10',2,%s,'pending','')", (at(9, 31, 51),))
-    assert needed(at(9, 28, 0)) is None                     # 3 min 51 s early: too soon
-    assert needed(at(9, 29, 0)) == "retry due"              # 2 min 51 s early: wake now (a cold start takes about a minute)
+    assert needed(at(9, 18, 0)) is None                     # 13 min 51 s early: too soon
+    assert needed(at(9, 19, 0)) == "retry due"              # 12 min 51 s early: wake now, so the server is ready in good time
     assert needed(at(9, 31, 51)) == "retry due" and needed(at(9, 40)) == "retry due"    # still wanted until it is dealt with
     for finished in ("done", "dropped", "missed", "superseded"):
         run("update dash_retries set status=%s", (finished,))
@@ -59,7 +59,7 @@ def test_a_callback_the_farmer_asked_for_wakes_the_backend(world):
     _, needed, run = world
     run("insert into dash_callbacks(farmer_id, due_at, source_date, status, note, attempt_id, call_summary, understood_weather, "
         "requested_text, updated_at, reschedules) values('F1',%s,'2026-11-10','pending','','','','','16:30','',0)", (at(16, 30),))
-    assert needed(at(16, 20)) is None and needed(at(16, 27, 30)) == "callback due" and needed(at(16, 31)) == "callback due"
+    assert needed(at(16, 15)) is None and needed(at(16, 17, 30)) == "callback due" and needed(at(16, 31)) == "callback due"
     for finished in ("answered", "skipped", "missed"):
         run("update dash_callbacks set status=%s", (finished,))
         assert needed(at(16, 31)) is None
@@ -104,7 +104,7 @@ def test_farmers_who_are_never_called_do_not_keep_the_backend_awake(world):
 
 
 def test_the_lead_time_fits_the_backends_grace_window(world):
-    """A wake-up 3 minutes early (the rule) or a few minutes late (a cold start) is far inside what the backend allows."""
+    """A wake-up 13 minutes early (the rule) or a few minutes late (a cold start) is far inside what the backend allows."""
     from weathercall import service as module
     assert module.GRACE_MINUTES >= 10
 
